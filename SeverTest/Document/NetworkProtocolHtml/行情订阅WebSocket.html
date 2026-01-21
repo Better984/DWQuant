@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行情订阅 WebSocket 文档</title>
+</head>
+<body>
+    <h1>行情订阅 WebSocket 文档</h1>
+
+    <h2>1. 订阅行情</h2>
+    <pre>
+WS 消息类型：market.subscribe
+
+请求：
+{
+  "type": "market.subscribe",
+  "reqId": "req-1",
+  "ts": 1700000000000,
+  "payload": {
+    "symbols": ["BTC/USDT", "ETH/USDT"]
+  },
+  "err": null
+}
+
+响应：
+{
+  "type": "market.subscribe.ack",
+  "reqId": "req-1",
+  "ts": 1700000000000,
+  "payload": {
+    "success": true,
+    "symbols": ["BTC/USDT", "ETH/USDT"]
+  },
+  "err": null
+}
+    </pre>
+
+    <h2>2. 取消订阅行情</h2>
+    <pre>
+WS 消息类型：market.unsubscribe
+
+请求：
+{
+  "type": "market.unsubscribe",
+  "reqId": "req-2",
+  "ts": 1700000000000,
+  "payload": {
+    "symbols": ["ETH/USDT"]
+  },
+  "err": null
+}
+
+响应：
+{
+  "type": "market.unsubscribe.ack",
+  "reqId": "req-2",
+  "ts": 1700000000000,
+  "payload": {
+    "success": true,
+    "symbols": ["ETH/USDT"]
+  },
+  "err": null
+}
+    </pre>
+
+    <h2>3. 行情推送</h2>
+    <pre>
+WS 消息类型：mkt.tick
+
+说明：
+- 每 0.5 秒推送一次（仅价格变化时发送）
+- payload 为数组，格式：[symbol, price, ts]
+
+推送示例：
+{
+  "type": "mkt.tick",
+  "reqId": null,
+  "ts": 1700000000000,
+  "payload": [
+    ["BTC/USDT", 62845.6, 1700000000000],
+    ["ETH/USDT", 3280.22, 1700000000000]
+  ],
+  "err": null
+}
+    </pre>
+</body>
+</html>

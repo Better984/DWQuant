@@ -1,0 +1,265 @@
+{
+    "id": 12345,
+    "uidCode": "min4sf73v7zz8ol79i",
+    "name": "我的交易策略",
+    "description": "",
+    "state": "Running",
+    "creatorUserId": 10004,
+    "version": 1,
+  
+    "visibility": {
+      "isPublic": false,
+      "priceUsdt": 0,
+      "shareCode": null
+    },
+  
+    "source": {
+      "type": "custom",
+      "sourceId": null,
+      "sourceCreatorUserId": null,
+      "note": null
+    },
+  
+    "preposeUidCodes": [],
+    "tags": [],
+  
+    "strategyConfig": {
+      "trade": {
+        "exchange": "Bitget",
+        "symbol": "BTC/USDT",
+        "timeframeSec": 60,
+  
+        "positionMode": "LongShort",
+        "openConflictPolicy": "GiveUp",
+  
+        "sizing": {
+          "orderQty": 0.001,
+          "maxPositionQty": 10,
+          "leverage": 100
+        },
+  
+        "risk": {
+          "takeProfitPct": 100,
+          "stopLossPct": 50,
+          "trailing": {
+            "enabled": true,
+            "activationProfitPct": 50,
+            "closeOnDrawdownPct": 10
+          }
+        }
+      },
+  
+      "logic": {
+        "entry": {
+          "long": {
+            "containers": [
+              {
+                "checks": {
+                  "enabled": true,
+                  "minPassGroups": 1,
+                  "groups": [
+                    {
+                      "enabled": true,
+                      "minPassConditions": 1,
+                      "conditions": [
+                        {
+                          "enabled": true,
+                          "required": false,
+                          "method": "GreaterThanOrEqual",
+                          "args": [
+                            {
+                              "refType": "Field",
+                              "timeframe": "m1",
+                              "input": "Close",
+                              "params": [],
+                              "output": "Value",
+                              "offsetRange": [1, 1],
+                              "calcMode": "OnBarClose"
+                            },
+                            {
+                              "refType": "Indicator",
+                              "indicator": "MA",
+                              "timeframe": "m1",
+                              "input": "HL2",
+                              "params": [20],
+                              "output": "Value",
+                              "offsetRange": [1, 1],
+                              "calcMode": "OnBarClose"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "enabled": true,
+            "minPassConditionContainer": 1,
+            "onPass": {
+              "enabled": true,
+              "minPassConditions": 1,
+              "conditions": [
+                {
+                  "enabled": true,
+                  "required": false,
+                  "method": "MakeTrade",
+                  "args": ["Long"]
+                }
+              ]
+            }
+          },
+          "short": {
+            "containers": [
+              {
+                "checks": {
+                  "enabled": true,
+                  "minPassGroups": 1,
+                  "groups": []
+                }
+              }
+            ],
+            "enabled": true,
+            "minPassConditionContainer": 1,
+            "onPass": {
+              "enabled": true,
+              "minPassConditions": 1,
+              "conditions": [
+                {
+                  "enabled": true,
+                  "required": false,
+                  "method": "MakeTrade",
+                  "args": ["Short"]
+                }
+              ]
+            }
+          }
+        },
+        "exit": {
+          "long": {
+            "containers": [
+              {
+                "checks": {
+                  "enabled": true,
+                  "minPassGroups": 1,
+                  "groups": [
+                    {
+                      "enabled": true,
+                      "minPassConditions": 1,
+                      "conditions": [
+                        {
+                          "enabled": true,
+                          "required": false,
+                          "method": "GreaterThanOrEqual",
+                          "args": [
+                            {
+                              "refType": "Indicator",
+                              "indicator": "MA",
+                              "timeframe": "m1",
+                              "input": "HL2",
+                              "params": [50],
+                              "output": "Value",
+                              "offsetRange": [0, 0],
+                              "calcMode": "OnBarUpdate"
+                            },
+                            {
+                              "refType": "Field",
+                              "timeframe": "m1",
+                              "input": "Close",
+                              "params": [],
+                              "output": "Value",
+                              "offsetRange": [0, 0],
+                              "calcMode": "OnBarUpdate"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "enabled": true,
+            "minPassConditionContainer": 1,
+            "onPass": {
+              "enabled": true,
+              "minPassConditions": 1,
+              "conditions": [
+                {
+                  "enabled": true,
+                  "required": false,
+                  "method": "MakeTrade",
+                  "args": ["CloseLong"]
+                }
+              ]
+            }
+          },
+          "short": {
+            "containers": [
+              {
+                "checks": {
+                  "enabled": true,
+                  "minPassGroups": 1,
+                  "groups": [
+                    {
+                      "enabled": true,
+                      "minPassConditions": 1,
+                      "conditions": [
+                        {
+                          "enabled": true,
+                          "required": false,
+                          "method": "LessThanOrEqual",
+                          "args": [
+                            {
+                              "refType": "Indicator",
+                              "indicator": "MA",
+                              "timeframe": "m1",
+                              "input": "HL2",
+                              "params": [50],
+                              "output": "Value",
+                              "offsetRange": [1, 1],
+                              "calcMode": "OnBarClose"
+                            },
+                            {
+                              "refType": "Field",
+                              "timeframe": "m1",
+                              "input": "Close",
+                              "params": [],
+                              "output": "Value",
+                              "offsetRange": [1, 1],
+                              "calcMode": "OnBarClose"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "enabled": true,
+            "minPassConditionContainer": 1,
+            "onPass": {
+              "enabled": true,
+              "minPassConditions": 1,
+              "conditions": [
+                {
+                  "enabled": true,
+                  "required": false,
+                  "method": "MakeTrade",
+                  "args": ["CloseShort"]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+  
+    "timestamps": {
+      "createdAt": "2026-01-11T00:00:00Z",
+      "updatedAt": "2026-01-11T00:00:00Z",
+      "deletedAt": null
+    }
+  }
+  

@@ -1,0 +1,592 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\UGit\\DWQuant\\SeverTest\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\binancehistoricaldatadownloader.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\binancehistoricaldatadownloader.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\monitoring\\startupmonitorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:monitoring\\startupmonitorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\models\\market\\marketdataconfig.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:models\\market\\marketdataconfig.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\historicalmarketdatacache.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\historicalmarketdatacache.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\options\\historicalmarketdataoptions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:options\\historicalmarketdataoptions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\controllers\\marketdatacontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:controllers\\marketdatacontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\historicalmarketdatasyncservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\historicalmarketdatasyncservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\historicalmarketdatasynchostedservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\historicalmarketdatasynchostedservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\exchangepriceservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\exchangepriceservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\monitoring\\startupmonitorhost.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:monitoring\\startupmonitorhost.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\strategyjsonloader.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\strategyjsonloader.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\controllers\\authcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:controllers\\authcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\systemstartupmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\systemstartupmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\strategyruntimehostedservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\strategyruntimehostedservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\conditionusagetracker.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\conditionusagetracker.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\document\\strategyruntime_readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:document\\strategyruntime_readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\models\\strategy\\strategymodels.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:models\\strategy\\strategymodels.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\models\\market\\marketdataengine.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:models\\market\\marketdataengine.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\websockets\\redisconnectionmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:websockets\\redisconnectionmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\strategy\\conditionmethodregistry.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:strategy\\conditionmethodregistry.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\talibindicatorcalculator.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\talibindicatorcalculator.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\indicatorengine.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\indicatorengine.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\indicatorhandle.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\indicatorhandle.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\strategy\\strategyruntime.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:strategy\\strategyruntime.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\strategy\\actionmethodregistry.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:strategy\\actionmethodregistry.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\models\\indicator\\indicatorkey.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:models\\indicator\\indicatorkey.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\models\\indicator\\indicatorkeyfactory.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:models\\indicator\\indicatorkeyfactory.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\jwtservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\jwtservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\ohlcvcachetest.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\ohlcvcachetest.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\databaseservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\databaseservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\talibindicatortest.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\talibindicatortest.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\30558\\.nuget\\packages\\jetbrains.annotations\\2024.3.0\\readme.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\tickersubscriptiontest.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\tickersubscriptiontest.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\30558\\.nuget\\packages\\talib.netcore\\0.5.0\\README.md||{EFC0BB08-EA7D-40C6-A696-C870411A895B}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 4,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 18,
+              "Title": "MarketDataEngine.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Market\\MarketDataEngine.cs",
+              "RelativeDocumentMoniker": "Models\\Market\\MarketDataEngine.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Market\\MarketDataEngine.cs",
+              "RelativeToolTip": "Models\\Market\\MarketDataEngine.cs",
+              "ViewState": "AgIAAEcAAAAAAAAAAAAcwFAAAAAaAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T08:59:36.968Z",
+              "IsPinned": true
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "Program.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Program.cs",
+              "RelativeDocumentMoniker": "Program.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Program.cs",
+              "RelativeToolTip": "Program.cs",
+              "ViewState": "AgIAAEYAAAAAAAAAAAAUwEwAAABsAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T06:47:45.234Z",
+              "IsPinned": true,
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "BinanceHistoricalDataDownloader.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\BinanceHistoricalDataDownloader.cs",
+              "RelativeDocumentMoniker": "Services\\BinanceHistoricalDataDownloader.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\BinanceHistoricalDataDownloader.cs",
+              "RelativeToolTip": "Services\\BinanceHistoricalDataDownloader.cs",
+              "ViewState": "AgIAAG8AAAAAAAAAAAAqwH0AAAA5AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-21T07:37:56.329Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "StartupMonitorForm.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Monitoring\\StartupMonitorForm.cs",
+              "RelativeDocumentMoniker": "Monitoring\\StartupMonitorForm.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Monitoring\\StartupMonitorForm.cs",
+              "RelativeToolTip": "Monitoring\\StartupMonitorForm.cs",
+              "ViewState": "AgIAACMCAAAAAAAAAAAiwDACAABMAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-21T07:24:21.325Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "HistoricalMarketDataCache.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataCache.cs",
+              "RelativeDocumentMoniker": "Services\\HistoricalMarketDataCache.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataCache.cs",
+              "RelativeToolTip": "Services\\HistoricalMarketDataCache.cs",
+              "ViewState": "AgIAANMAAAAAAAAAAAAUwN4AAAANAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-20T09:02:18.869Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "HistoricalMarketDataSyncHostedService.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataSyncHostedService.cs",
+              "RelativeDocumentMoniker": "Services\\HistoricalMarketDataSyncHostedService.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataSyncHostedService.cs",
+              "RelativeToolTip": "Services\\HistoricalMarketDataSyncHostedService.cs",
+              "ViewState": "AgIAABEAAAAAAAAAAAAAwBsAAAAIAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-20T08:43:20.56Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 19,
+              "Title": "RedisConnectionManager.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\WebSockets\\RedisConnectionManager.cs",
+              "RelativeDocumentMoniker": "WebSockets\\RedisConnectionManager.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\WebSockets\\RedisConnectionManager.cs",
+              "RelativeToolTip": "WebSockets\\RedisConnectionManager.cs",
+              "ViewState": "AgIAABwAAAAAAAAAAAAAwC4AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-12T15:05:43.788Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "MarketDataConfig.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Market\\MarketDataConfig.cs",
+              "RelativeDocumentMoniker": "Models\\Market\\MarketDataConfig.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Market\\MarketDataConfig.cs",
+              "RelativeToolTip": "Models\\Market\\MarketDataConfig.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAAUAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T09:09:46.434Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "HistoricalMarketDataOptions.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Options\\HistoricalMarketDataOptions.cs",
+              "RelativeDocumentMoniker": "Options\\HistoricalMarketDataOptions.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Options\\HistoricalMarketDataOptions.cs",
+              "RelativeToolTip": "Options\\HistoricalMarketDataOptions.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAABEAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-20T09:20:37.016Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "MarketDataController.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Controllers\\MarketDataController.cs",
+              "RelativeDocumentMoniker": "Controllers\\MarketDataController.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Controllers\\MarketDataController.cs",
+              "RelativeToolTip": "Controllers\\MarketDataController.cs",
+              "ViewState": "AgIAAD0AAAAAAAAAAAAmwEgAAAAcAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T09:02:08.135Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "HistoricalMarketDataSyncService.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataSyncService.cs",
+              "RelativeDocumentMoniker": "Services\\HistoricalMarketDataSyncService.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataSyncService.cs",
+              "RelativeToolTip": "Services\\HistoricalMarketDataSyncService.cs",
+              "ViewState": "AgIAAE0AAAAAAAAAAADwv1EAAAAbAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-20T08:49:32.392Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "StrategyJsonLoader.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\StrategyJsonLoader.cs",
+              "RelativeDocumentMoniker": "Services\\StrategyJsonLoader.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\StrategyJsonLoader.cs",
+              "RelativeToolTip": "Services\\StrategyJsonLoader.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAA0AAAAwAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-19T10:13:14.721Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "StartupMonitorHost.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Monitoring\\StartupMonitorHost.cs",
+              "RelativeDocumentMoniker": "Monitoring\\StartupMonitorHost.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Monitoring\\StartupMonitorHost.cs",
+              "RelativeToolTip": "Monitoring\\StartupMonitorHost.cs",
+              "ViewState": "AgIAAB8AAAAAAAAAAAAIwDYAAAAOAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-18T05:14:13.764Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "ExchangePriceService.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\ExchangePriceService.cs",
+              "RelativeDocumentMoniker": "Services\\ExchangePriceService.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\ExchangePriceService.cs",
+              "RelativeToolTip": "Services\\ExchangePriceService.cs",
+              "ViewState": "AgIAAEEAAAAAAAAAAADwv00AAAAaAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T07:40:55.489Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 14,
+              "Title": "StrategyRuntimeHostedService.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\StrategyRuntimeHostedService.cs",
+              "RelativeDocumentMoniker": "Services\\StrategyRuntimeHostedService.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\StrategyRuntimeHostedService.cs",
+              "RelativeToolTip": "Services\\StrategyRuntimeHostedService.cs",
+              "ViewState": "AgIAABsAAAAAAAAAAAAmwCYAAAAfAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-14T02:31:07.477Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 15,
+              "Title": "ConditionUsageTracker.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\ConditionUsageTracker.cs",
+              "RelativeDocumentMoniker": "Services\\ConditionUsageTracker.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\ConditionUsageTracker.cs",
+              "RelativeToolTip": "Services\\ConditionUsageTracker.cs",
+              "ViewState": "AgIAAGMAAAAAAAAAAAAiwG0AAABHAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-18T02:37:58.598Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "AuthController.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Controllers\\AuthController.cs",
+              "RelativeDocumentMoniker": "Controllers\\AuthController.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Controllers\\AuthController.cs",
+              "RelativeToolTip": "Controllers\\AuthController.cs",
+              "ViewState": "AgIAAKQAAAAAAAAAAAAiwLUAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-14T02:23:14.137Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 13,
+              "Title": "SystemStartupManager.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\SystemStartupManager.cs",
+              "RelativeDocumentMoniker": "Services\\SystemStartupManager.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\SystemStartupManager.cs",
+              "RelativeToolTip": "Services\\SystemStartupManager.cs",
+              "ViewState": "AgIAAEkAAAAAAAAAAAAvwE0AAAAyAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-18T05:26:38.032Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 20,
+              "Title": "ConditionMethodRegistry.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Strategy\\ConditionMethodRegistry.cs",
+              "RelativeDocumentMoniker": "Strategy\\ConditionMethodRegistry.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Strategy\\ConditionMethodRegistry.cs",
+              "RelativeToolTip": "Strategy\\ConditionMethodRegistry.cs",
+              "ViewState": "AgIAABEAAAAAAAAAAAAswB8AAAAqAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T08:09:58.453Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 16,
+              "Title": "StrategyRuntime_README.md",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Document\\StrategyRuntime_README.md",
+              "RelativeDocumentMoniker": "Document\\StrategyRuntime_README.md",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Document\\StrategyRuntime_README.md",
+              "RelativeToolTip": "Document\\StrategyRuntime_README.md",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAADQAAAAPAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-01-14T02:30:54.962Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 21,
+              "Title": "TalibIndicatorCalculator.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\TalibIndicatorCalculator.cs",
+              "RelativeDocumentMoniker": "Services\\TalibIndicatorCalculator.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\TalibIndicatorCalculator.cs",
+              "RelativeToolTip": "Services\\TalibIndicatorCalculator.cs",
+              "ViewState": "AgIAADkAAAAAAAAAAAAmwEEAAAAMAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T17:22:52.064Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 17,
+              "Title": "StrategyModels.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Strategy\\StrategyModels.cs",
+              "RelativeDocumentMoniker": "Models\\Strategy\\StrategyModels.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Strategy\\StrategyModels.cs",
+              "RelativeToolTip": "Models\\Strategy\\StrategyModels.cs",
+              "ViewState": "AgIAAGcAAAAAAAAAAAAiwHAAAAAgAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T07:43:11.201Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 23,
+              "Title": "IndicatorHandle.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\IndicatorHandle.cs",
+              "RelativeDocumentMoniker": "Services\\IndicatorHandle.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\IndicatorHandle.cs",
+              "RelativeToolTip": "Services\\IndicatorHandle.cs",
+              "ViewState": "AgIAAG4AAAAAAAAAAAAmwIoAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T17:19:09.859Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 22,
+              "Title": "IndicatorEngine.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\IndicatorEngine.cs",
+              "RelativeDocumentMoniker": "Services\\IndicatorEngine.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\IndicatorEngine.cs",
+              "RelativeToolTip": "Services\\IndicatorEngine.cs",
+              "ViewState": "AgIAAFsAAAAAAAAAAAAmwGIAAAAiAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T17:04:47.724Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 24,
+              "Title": "StrategyRuntime.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Strategy\\StrategyRuntime.cs",
+              "RelativeDocumentMoniker": "Strategy\\StrategyRuntime.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Strategy\\StrategyRuntime.cs",
+              "RelativeToolTip": "Strategy\\StrategyRuntime.cs",
+              "ViewState": "AgIAAAUAAAAAAAAAAAAiwA8AAAAFAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T08:04:27.277Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 25,
+              "Title": "ActionMethodRegistry.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Strategy\\ActionMethodRegistry.cs",
+              "RelativeDocumentMoniker": "Strategy\\ActionMethodRegistry.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Strategy\\ActionMethodRegistry.cs",
+              "RelativeToolTip": "Strategy\\ActionMethodRegistry.cs",
+              "ViewState": "AgIAAA4AAAAAAAAAAAAAwBwAAAANAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T08:00:37.144Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 26,
+              "Title": "IndicatorKey.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Indicator\\IndicatorKey.cs",
+              "RelativeDocumentMoniker": "Models\\Indicator\\IndicatorKey.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Indicator\\IndicatorKey.cs",
+              "RelativeToolTip": "Models\\Indicator\\IndicatorKey.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-12T04:09:50.122Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 27,
+              "Title": "IndicatorKeyFactory.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Indicator\\IndicatorKeyFactory.cs",
+              "RelativeDocumentMoniker": "Models\\Indicator\\IndicatorKeyFactory.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Indicator\\IndicatorKeyFactory.cs",
+              "RelativeToolTip": "Models\\Indicator\\IndicatorKeyFactory.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-12T04:09:50.855Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 29,
+              "Title": "OhlcvCacheTest.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\OhlcvCacheTest.cs",
+              "RelativeDocumentMoniker": "Services\\OhlcvCacheTest.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\OhlcvCacheTest.cs",
+              "RelativeToolTip": "Services\\OhlcvCacheTest.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T07:43:08.049Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 28,
+              "Title": "JwtService.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\JwtService.cs",
+              "RelativeDocumentMoniker": "Services\\JwtService.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\JwtService.cs",
+              "RelativeToolTip": "Services\\JwtService.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T07:43:08.708Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 30,
+              "Title": "DatabaseService.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\DatabaseService.cs",
+              "RelativeDocumentMoniker": "Services\\DatabaseService.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\DatabaseService.cs",
+              "RelativeToolTip": "Services\\DatabaseService.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-11T07:43:06.11Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 31,
+              "Title": "TALibIndicatorTest.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\TALibIndicatorTest.cs",
+              "RelativeDocumentMoniker": "Services\\TALibIndicatorTest.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\TALibIndicatorTest.cs",
+              "RelativeToolTip": "Services\\TALibIndicatorTest.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAswAoAAAAcAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T14:00:19.851Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 32,
+              "Title": "readme.md",
+              "DocumentMoniker": "C:\\Users\\30558\\.nuget\\packages\\jetbrains.annotations\\2024.3.0\\readme.md",
+              "ToolTip": "C:\\Users\\30558\\.nuget\\packages\\jetbrains.annotations\\2024.3.0\\readme.md [\u53EA\u8BFB]",
+              "ViewState": "AgIAAAAAAAAAAAAAAADwvwYAAAA5AAAAAQAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-01-10T13:46:07.88Z",
+              "EditorCaption": " [\u53EA\u8BFB]"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 34,
+              "Title": "README.md",
+              "DocumentMoniker": "C:\\Users\\30558\\.nuget\\packages\\talib.netcore\\0.5.0\\README.md",
+              "ToolTip": "C:\\Users\\30558\\.nuget\\packages\\talib.netcore\\0.5.0\\README.md [\u53EA\u8BFB]",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001818|",
+              "WhenOpened": "2026-01-10T13:45:53.006Z",
+              "EditorCaption": " [\u53EA\u8BFB]"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 33,
+              "Title": "TickerSubscriptionTest.cs",
+              "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\TickerSubscriptionTest.cs",
+              "RelativeDocumentMoniker": "Services\\TickerSubscriptionTest.cs",
+              "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\TickerSubscriptionTest.cs",
+              "RelativeToolTip": "Services\\TickerSubscriptionTest.cs",
+              "ViewState": "AgIAAO4AAAAAAAAAAAAewAsBAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-10T06:47:49.689Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
