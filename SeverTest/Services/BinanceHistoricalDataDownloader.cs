@@ -91,7 +91,60 @@ namespace ServerTest.Services
             var end = DateTime.UtcNow.Date;
             var firstDataFound = false;
 
-            for (var day = start; day <= end; day = day.AddDays(1))
+            var currentMonthStart = new DateTime(end.Year, end.Month, 1);
+            var monthCursor = new DateTime(start.Year, start.Month, 1);
+
+            while (monthCursor < currentMonthStart)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var monthDays = DateTime.DaysInMonth(monthCursor.Year, monthCursor.Month);
+                var monthStart = monthCursor;
+                var monthEnd = monthCursor.AddDays(monthDays - 1);
+                var rangeStart = monthStart < start ? start : monthStart;
+                var rangeEnd = monthEnd;
+
+                if (rangeStart <= rangeEnd)
+                {
+                    summary.DaysProcessed += (rangeEnd - rangeStart).Days + 1;
+                }
+
+                var monthText = monthCursor.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+                var monthUrl = $"https://data.binance.vision/data/futures/um/monthly/klines/{symbolNoSlash}/{timeframeStr}/{symbolNoSlash}-{timeframeStr}-{monthText}.zip";
+
+                var monthResult = await TryDownloadMonthAsync(monthUrl, monthCursor, tableName, log, ct).ConfigureAwait(false);
+                if (monthResult.Downloaded)
+                {
+                    firstDataFound = true;
+                    if (rangeStart <= rangeEnd)
+                    {
+                        summary.DaysDownloaded += (rangeEnd - rangeStart).Days + 1;
+                    }
+                    summary.RowsInserted += monthResult.RowsInserted;
+                }
+                else if (!monthResult.NotFound)
+                {
+                    log?.Invoke(new DownloadLogEntry
+                    {
+                        Level = DownloadLogLevel.Warning,
+                        Message = $"Month download failed: {symbolNoSlash} {timeframeStr} {monthText}"
+                    });
+                }
+                else if (firstDataFound)
+                {
+                    log?.Invoke(new DownloadLogEntry
+                    {
+                        Level = DownloadLogLevel.Warning,
+                        Message = $"Missing month after start: {symbolNoSlash} {timeframeStr} {monthText}"
+                    });
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+                monthCursor = monthCursor.AddMonths(1);
+            }
+
+            var dailyStart = start > currentMonthStart ? start : currentMonthStart;
+            for (var day = dailyStart; day <= end; day = day.AddDays(1))
             {
                 ct.ThrowIfCancellationRequested();
                 summary.DaysProcessed++;
@@ -123,7 +176,7 @@ namespace ServerTest.Services
                     });
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(0.5), ct).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
             }
 
             return summary;
@@ -183,6 +236,11 @@ namespace ServerTest.Services
             Action<DownloadLogEntry>? log,
             CancellationToken ct)
         {
+            log?.Invoke(new DownloadLogEntry
+            {
+                Level = DownloadLogLevel.Info,
+                Message = $"Downloading {url}"
+            });
             using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
@@ -235,6 +293,85 @@ namespace ServerTest.Services
                 {
                     Level = DownloadLogLevel.Info,
                     Message = $"Imported {rowsInserted} rows for {day:yyyy-MM-dd}"
+                });
+
+                return new DownloadDayResult
+                {
+                    Downloaded = true,
+                    RowsInserted = rowsInserted
+                };
+            }
+            finally
+            {
+                TryDeleteFile(csvPath);
+                TryDeleteFile(zipPath);
+            }
+        }
+
+        private async Task<DownloadDayResult> TryDownloadMonthAsync(
+            string url,
+            DateTime monthStart,
+            string tableName,
+            Action<DownloadLogEntry>? log,
+            CancellationToken ct)
+        {
+            log?.Invoke(new DownloadLogEntry
+            {
+                Level = DownloadLogLevel.Info,
+                Message = $"Downloading {url}"
+            });
+            using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new DownloadDayResult { NotFound = true };
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                log?.Invoke(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Warning,
+                    Message = $"HTTP {(int)response.StatusCode} for {url}"
+                });
+                return new DownloadDayResult();
+            }
+
+            var tempDir = Path.Combine(Path.GetTempPath(), "dwquant_klines");
+            Directory.CreateDirectory(tempDir);
+
+            var monthText = monthStart.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            var zipPath = Path.Combine(tempDir, $"binance_{tableName}_{monthText}.zip");
+            var csvPath = string.Empty;
+
+            try
+            {
+                await using (var fs = File.Create(zipPath))
+                {
+                    await response.Content.CopyToAsync(fs, ct).ConfigureAwait(false);
+                }
+
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    var entry = archive.Entries.FirstOrDefault();
+                    if (entry == null)
+                    {
+                        log?.Invoke(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Warning,
+                            Message = $"Zip is empty: {zipPath}"
+                        });
+                        return new DownloadDayResult();
+                    }
+
+                    csvPath = Path.Combine(tempDir, entry.Name);
+                    entry.ExtractToFile(csvPath, true);
+                }
+
+                var rowsInserted = await LoadCsvAsync(tableName, csvPath, log, ct).ConfigureAwait(false);
+                log?.Invoke(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Info,
+                    Message = $"Imported {rowsInserted} rows for {monthText}"
                 });
 
                 return new DownloadDayResult

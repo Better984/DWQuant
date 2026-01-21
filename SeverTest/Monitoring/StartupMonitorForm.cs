@@ -49,6 +49,7 @@ namespace ServerTest.Monitoring
         private Label _downloadStatusLabel = null!;
         private CancellationTokenSource? _downloadCts;
         private bool _downloadRunning;
+        private ContextMenuStrip _downloadLogMenu = null!;
 
         private readonly Dictionary<SystemModule, ListViewItem> _statusItems = new();
         private readonly List<StartupMonitorLogEntry> _logEntries = new();
@@ -615,8 +616,24 @@ namespace ServerTest.Monitoring
             {
                 Location = new Point(8, 160),
                 Width = 920,
-                Height = 420
+                Height = 420,
+                HorizontalScrollbar = true,
+                SelectionMode = SelectionMode.MultiExtended
             };
+            _downloadLogList.KeyDown += (_, e) =>
+            {
+                if (e.Control && e.KeyCode == Keys.C)
+                {
+                    CopySelectedDownloadLogsToClipboard();
+                    e.Handled = true;
+                }
+            };
+
+            _downloadLogMenu = new ContextMenuStrip();
+            var copyMenuItem = new ToolStripMenuItem("Copy");
+            copyMenuItem.Click += (_, __) => CopySelectedDownloadLogsToClipboard();
+            _downloadLogMenu.Items.Add(copyMenuItem);
+            _downloadLogList.ContextMenuStrip = _downloadLogMenu;
 
             panel.Controls.Add(title);
             panel.Controls.Add(info);
@@ -1119,6 +1136,21 @@ namespace ServerTest.Monitoring
             }
 
             _downloadLogList.TopIndex = Math.Max(0, _downloadLogList.Items.Count - 1);
+        }
+
+        private void CopySelectedDownloadLogsToClipboard()
+        {
+            if (_downloadLogList.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            var lines = _downloadLogList.SelectedItems
+                .Cast<object>()
+                .Select(item => item?.ToString() ?? string.Empty)
+                .ToList();
+
+            Clipboard.SetText(string.Join(Environment.NewLine, lines));
         }
 
         private void UpdateSummaryCounts()

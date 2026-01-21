@@ -11,16 +11,16 @@
       "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:monitoring\\startupmonitorform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
+      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\models\\market\\marketdataconfig.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:models\\market\\marketdataconfig.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\services\\historicalmarketdatacache.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:services\\historicalmarketdatacache.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{80B738E1-E5E5-4F14-4A81-56EF582EAD02}|ServerTest.csproj|d:\\ugit\\dwquant\\severtest\\options\\historicalmarketdataoptions.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -148,7 +148,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 4,
+          "SelectedChildIndex": 3,
           "Children": [
             {
               "$type": "Document",
@@ -165,21 +165,17 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 2,
               "Title": "Program.cs",
               "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Program.cs",
               "RelativeDocumentMoniker": "Program.cs",
               "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Program.cs",
               "RelativeToolTip": "Program.cs",
-              "ViewState": "AgIAAEYAAAAAAAAAAAAUwEwAAABsAAAAAAAAAA==",
+              "ViewState": "AgIAAEcAAAAAAAAAAAAUwFcAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-01-10T06:47:45.234Z",
               "IsPinned": true,
               "EditorCaption": ""
-            },
-            {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
             },
             {
               "$type": "Bookmark",
@@ -193,7 +189,7 @@
               "RelativeDocumentMoniker": "Services\\BinanceHistoricalDataDownloader.cs",
               "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Services\\BinanceHistoricalDataDownloader.cs",
               "RelativeToolTip": "Services\\BinanceHistoricalDataDownloader.cs",
-              "ViewState": "AgIAAG8AAAAAAAAAAAAqwH0AAAA5AAAAAAAAAA==",
+              "ViewState": "AgIAAGMAAAAAAAAAAAAiwHAAAABUAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-01-21T07:37:56.329Z",
               "EditorCaption": ""
@@ -206,14 +202,14 @@
               "RelativeDocumentMoniker": "Monitoring\\StartupMonitorForm.cs",
               "ToolTip": "D:\\UGit\\DWQuant\\SeverTest\\Monitoring\\StartupMonitorForm.cs",
               "RelativeToolTip": "Monitoring\\StartupMonitorForm.cs",
-              "ViewState": "AgIAACMCAAAAAAAAAAAiwDACAABMAAAAAAAAAA==",
+              "ViewState": "AgIAAFsDAAAAAAAAAAA4wGkDAAAgAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-01-21T07:24:21.325Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 4,
               "Title": "HistoricalMarketDataCache.cs",
               "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Services\\HistoricalMarketDataCache.cs",
               "RelativeDocumentMoniker": "Services\\HistoricalMarketDataCache.cs",
@@ -221,8 +217,7 @@
               "RelativeToolTip": "Services\\HistoricalMarketDataCache.cs",
               "ViewState": "AgIAANMAAAAAAAAAAAAUwN4AAAANAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-01-20T09:02:18.869Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-01-20T09:02:18.869Z"
             },
             {
               "$type": "Document",
@@ -250,7 +245,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 3,
               "Title": "MarketDataConfig.cs",
               "DocumentMoniker": "D:\\UGit\\DWQuant\\SeverTest\\Models\\Market\\MarketDataConfig.cs",
               "RelativeDocumentMoniker": "Models\\Market\\MarketDataConfig.cs",
@@ -258,8 +253,7 @@
               "RelativeToolTip": "Models\\Market\\MarketDataConfig.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAAUAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-01-10T09:09:46.434Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-01-10T09:09:46.434Z"
             },
             {
               "$type": "Document",
