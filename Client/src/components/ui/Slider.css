@@ -1,0 +1,93 @@
+/* SnowUI Slider Component - 基于 Figma 设计稿 */
+
+.snowui-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+}
+
+.snowui-slider__track {
+  position: relative;
+  flex: 1;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+
+.snowui-slider__fill {
+  position: relative;
+  height: 100%;
+  background: #000000;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  padding: 8px 4px 8px 8px;
+  min-width: 8px;
+  transition: width 0.1s ease;
+}
+
+.snowui-slider__label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.3333333333333333em;
+  color: #FFFFFF;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.snowui-slider__active-line {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 8px;
+  background: #000000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.snowui-slider--active .snowui-slider__active-line {
+  opacity: 1;
+}
+
+.snowui-slider__value {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.3333333333333333em;
+  color: rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  min-width: fit-content;
+  padding-right: 8px;
+  transition: color 0.2s ease;
+}
+
+.snowui-slider--active .snowui-slider__value {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+/* 当进度为 100% 时，值的颜色变为白色 */
+.snowui-slider__value--full {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.snowui-slider--active .snowui-slider__value--full {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.snowui-slider--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.snowui-slider--disabled .snowui-slider__track {
+  cursor: not-allowed;
+}

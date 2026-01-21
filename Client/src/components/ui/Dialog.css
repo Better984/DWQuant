@@ -1,0 +1,223 @@
+/* SnowUI Dialog Component - 基于 Figma 设计稿 */
+
+.snowui-dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: snowui-dialog-overlay-fade-in 0.2s ease;
+}
+
+@keyframes snowui-dialog-overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.snowui-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 600px;
+  max-width: 90vw;
+  max-height: 90vh;
+  padding: 40px;
+  background: #FFFFFF;
+  border-radius: 28px;
+  box-shadow: 0px 8px 40px 0px rgba(0, 0, 0, 0.1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  animation: snowui-dialog-slide-in 0.3s ease;
+  overflow-y: auto;
+}
+
+@keyframes snowui-dialog-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 标题区域 */
+.snowui-dialog__header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  align-self: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.snowui-dialog__title {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  font-size: 18px;
+  line-height: 1.5555555555555556em;
+  color: #000000;
+  text-align: left;
+  flex: 1;
+}
+
+.snowui-dialog__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #000000;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+}
+
+.snowui-dialog__close:hover {
+  opacity: 0.7;
+}
+
+.snowui-dialog__close:active {
+  opacity: 0.5;
+}
+
+/* 分隔线 */
+.snowui-dialog__divider {
+  align-self: stretch;
+  padding: 8px 0px;
+  display: flex;
+  align-items: center;
+}
+
+.snowui-dialog__divider-line {
+  width: 100%;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* 内容区域 */
+.snowui-dialog__content {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: 24px;
+  color: #000000;
+}
+
+.snowui-dialog__content p {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.4285714285714286em;
+  color: #000000;
+  text-align: left;
+}
+
+/* 按钮区域 */
+.snowui-dialog__footer {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  align-self: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0px;
+}
+
+.snowui-dialog__button {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  min-height: 40px;
+  border-radius: 80px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.5em;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  white-space: nowrap;
+}
+
+/* Cancel 按钮 (Outline) */
+.snowui-dialog__button--cancel {
+  background: transparent;
+  color: #000000;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.snowui-dialog__button--cancel:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.snowui-dialog__button--cancel:active:not(:disabled) {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.snowui-dialog__button--cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Confirm 按钮 (Filled) */
+.snowui-dialog__button--confirm {
+  background: #000000;
+  color: #FFFFFF;
+}
+
+.snowui-dialog__button--confirm:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.snowui-dialog__button--confirm:active:not(:disabled) {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.snowui-dialog__button--confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .snowui-dialog {
+    width: 90vw;
+    padding: 24px;
+    gap: 16px;
+  }
+
+  .snowui-dialog__title {
+    font-size: 16px;
+  }
+
+  .snowui-dialog__footer {
+    flex-direction: column;
+  }
+
+  .snowui-dialog__button {
+    width: 100%;
+  }
+}

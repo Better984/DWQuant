@@ -1,0 +1,40 @@
+/* SnowUI Notification Toast */
+.snowui-notification-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 40px);
+  opacity: 0;
+  z-index: 9999;
+  pointer-events: none;
+  animation-name: snowui-notification-toast-float;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: forwards;
+}
+
+@keyframes snowui-notification-toast-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 40px);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -8px);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-50%, -8px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 40px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snowui-notification-toast {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, -8px);
+  }
+}

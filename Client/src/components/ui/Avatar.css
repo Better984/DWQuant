@@ -1,0 +1,78 @@
+/* SnowUI Avatar Component - 基于 Figma 设计稿 */
+
+.snowui-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 80px;
+  background: rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.snowui-avatar--clickable {
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.snowui-avatar--clickable:hover {
+  opacity: 0.9;
+  transform: scale(1.05);
+}
+
+.snowui-avatar--clickable:active {
+  transform: scale(0.95);
+}
+
+/* Size Variants */
+.snowui-avatar--small {
+  width: 24px;
+  height: 24px;
+}
+
+.snowui-avatar--medium {
+  width: 64px;
+  height: 64px;
+}
+
+.snowui-avatar--large {
+  width: 96px;
+  height: 96px;
+}
+
+/* Image */
+.snowui-avatar__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 80px;
+}
+
+/* Placeholder */
+.snowui-avatar__placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  color: #000000;
+  border-radius: 80px;
+}
+
+.snowui-avatar--small .snowui-avatar__placeholder {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.snowui-avatar--medium .snowui-avatar__placeholder {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.snowui-avatar--large .snowui-avatar__placeholder {
+  font-size: 32px;
+  line-height: 1.2;
+}

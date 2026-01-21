@@ -1,0 +1,266 @@
+.whats-on-road-panel {
+  display: flex; /* 暂时隐藏组件 */
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-secondary);
+  border-radius: 20px;
+  padding: 16px;
+  box-sizing: border-box;
+  position: relative;
+  transition: background-color 0.3s ease;
+  width: 100%;
+  min-width: 180px;
+}
+
+.dark-theme .whats-on-road-panel {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.whats-on-road-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.whats-on-road-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--text-primary);
+  margin: 0;
+  transition: color 0.3s ease;
+}
+
+.whats-on-road-day-list {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: repeat(var(--visible-day-count, 7), 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  overflow: hidden;
+  padding-bottom: 2px;
+}
+
+.whats-on-road-day-list::-webkit-scrollbar {
+  display: none;
+}
+
+.whats-on-road-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  min-width: 40px;
+}
+
+.whats-on-road-day-date {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--text-primary);
+  transition: color 0.2s ease;
+}
+
+.whats-on-road-day-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  opacity: 0.7;
+}
+
+.whats-on-road-day.is-active {
+  background: var(--bg-hover);
+}
+
+.whats-on-road-day.is-active .whats-on-road-day-date {
+  color: var(--text-primary);
+}
+
+.whats-on-road-list-wrapper {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding-right: 6px;
+}
+
+.whats-on-road-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 6px;
+  scrollbar-width: none;
+}
+
+.whats-on-road-list::-webkit-scrollbar {
+  display: none;
+}
+
+.whats-on-road-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  transition: background-color 0.2s ease;
+}
+
+.whats-on-road-item:hover {
+  background: var(--bg-hover);
+}
+
+.whats-on-road-item-flag {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.dark-theme .whats-on-road-item-flag {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.whats-on-road-item-flag img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.whats-on-road-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.whats-on-road-item-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-primary);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.whats-on-road-item-time {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.whats-on-road-empty {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  padding: 8px 6px;
+}
+
+.whats-on-road-scrollbar {
+  position: absolute;
+  top: 8px;
+  right: 2px;
+  bottom: 12px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.whats-on-road-scrollbar-thumb {
+  width: 100%;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  transition: background-color 0.3s ease;
+}
+
+.whats-on-road-resize-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  right: 6px;
+  bottom: 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0));
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.whats-on-road-resize-handle.is-height-only {
+  width: 32px;
+  height: 8px;
+  right: auto;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+
+.whats-on-road-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(0, 0, 0, 0.2);
+  border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+  border-radius: 1px;
+}
+
+.whats-on-road-resize-handle.is-height-only::after {
+  right: 50%;
+  bottom: 2px;
+  width: 12px;
+  height: 4px;
+  border-right: 0;
+  border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+  border-left: 2px solid rgba(0, 0, 0, 0.2);
+  border-top: 0;
+  transform: translateX(50%);
+}
+
+.dark-theme .whats-on-road-resize-handle {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0));
+}
+
+.dark-theme .whats-on-road-resize-handle::after {
+  border-right-color: rgba(255, 255, 255, 0.35);
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
+
+.dark-theme .whats-on-road-resize-handle.is-height-only::after {
+  border-left-color: rgba(255, 255, 255, 0.35);
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}

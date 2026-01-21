@@ -1,0 +1,163 @@
+/* SnowUI TextInput Component - 基于 Figma 设计稿 */
+
+.snowui-text-input {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 0.5px solid rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.snowui-text-input__field {
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.4285714285714286em;
+  color: #000000;
+  font-family: inherit;
+  font-weight: inherit;
+  padding: 0;
+  resize: none;
+}
+
+.snowui-text-input__field::placeholder {
+  color: rgba(0, 0, 0, 0.2);
+  opacity: 1;
+}
+
+.snowui-text-input__label-text {
+  font-size: 12px;
+  line-height: 1.3333333333333333em;
+  color: rgba(0, 0, 0, 0.4);
+  font-weight: 400;
+  display: block;
+}
+
+/* ========== Type Variants ========== */
+
+/* Single Row Type */
+.snowui-text-input--single {
+  padding: 12px 16px;
+  width: 120px;
+  min-height: 44px;
+  justify-content: center;
+}
+
+.snowui-text-input--single .snowui-text-input__field {
+  min-height: 20px;
+}
+
+/* Textarea Type */
+.snowui-text-input--textarea {
+  padding: 12px 16px 24px;
+  width: 120px;
+  min-height: 80px;
+}
+
+.snowui-text-input--textarea .snowui-text-input__field {
+  min-height: 44px;
+  line-height: 1.4285714285714286em;
+}
+
+.snowui-text-input__counter {
+  position: absolute;
+  bottom: 8px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
+.snowui-text-input__counter-text {
+  font-size: 12px;
+  line-height: 1.3333333333333333em;
+  color: rgba(0, 0, 0, 0.2);
+}
+
+.snowui-text-input__counter-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* With Label Horizontal Type (2 row horizontal) */
+.snowui-text-input--with-label-horizontal {
+  padding: 12px 16px;
+  width: 120px;
+  gap: 8px;
+}
+
+.snowui-text-input__label-horizontal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.snowui-text-input--with-label-horizontal .snowui-text-input__field {
+  min-height: 20px;
+}
+
+/* With Label Vertical Type (2 row vertical) */
+.snowui-text-input--with-label-vertical {
+  padding: 12px 16px;
+  width: 120px;
+  gap: 4px;
+}
+
+.snowui-text-input__label-vertical {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.snowui-text-input__label-vertical .snowui-text-input__label-text {
+  flex-shrink: 0;
+}
+
+.snowui-text-input__label-vertical .snowui-text-input__field {
+  flex: 1;
+  min-height: 20px;
+}
+
+/* ========== State Variants ========== */
+
+/* Default State */
+.snowui-text-input--default {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+/* Static State (Disabled) */
+.snowui-text-input--static {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.snowui-text-input--static .snowui-text-input__field {
+  cursor: not-allowed;
+}
+
+/* Hover State */
+.snowui-text-input--hover {
+  border-color: rgba(0, 0, 0, 0.4);
+}
+
+/* Focus State */
+.snowui-text-input--focus {
+  border-color: rgba(0, 0, 0, 0.4);
+  box-shadow: 0px 0px 0px 4px rgba(0, 0, 0, 0.04);
+}
