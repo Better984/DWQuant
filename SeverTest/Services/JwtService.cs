@@ -1,9 +1,9 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.IdentityModel.Tokens;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 
 namespace ServerTest.Services
 {
@@ -18,7 +18,7 @@ namespace ServerTest.Services
             : base(logger)
         {
             var jwtSettings = configuration.GetSection("JwtSettings");
-            _secretKey = jwtSettings["SecretKey"] 
+            _secretKey = jwtSettings["SecretKey"]
                 ?? throw new InvalidOperationException("JWT密钥未配置");
             _issuer = jwtSettings["Issuer"] ?? "ServerTest";
             _audience = jwtSettings["Audience"] ?? "ServerTest";

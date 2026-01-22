@@ -1,6 +1,6 @@
-using MySqlConnector;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using MySqlConnector;
 
 namespace ServerTest.Services
 {
@@ -11,7 +11,7 @@ namespace ServerTest.Services
         public DatabaseService(ILogger<DatabaseService> logger, IConfiguration configuration)
             : base(logger)
         {
-            _connectionString = configuration.GetConnectionString("DefaultConnection") 
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("数据库连接字符串未配置");
         }
 

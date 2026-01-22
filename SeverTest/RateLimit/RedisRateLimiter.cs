@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Options;
-using StackExchange.Redis;
 using ServerTest.Options;
+using StackExchange.Redis;
 
 namespace ServerTest.RateLimit
 {

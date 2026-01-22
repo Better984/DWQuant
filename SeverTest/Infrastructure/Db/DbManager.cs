@@ -1,13 +1,9 @@
-using System;
-using System.Collections.Generic;
-using System.Data.Common;
-using System.Diagnostics;
-using System.Threading;
-using System.Threading.Tasks;
 using Dapper;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MySqlConnector;
+using System.Data.Common;
+using System.Diagnostics;
 
 namespace ServerTest.Infrastructure.Db
 {

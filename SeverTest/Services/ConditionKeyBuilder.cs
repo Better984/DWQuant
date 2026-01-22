@@ -1,10 +1,8 @@
-using System;
-using System.Globalization;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using ServerTest.Models;
 using ServerTest.Models.Strategy;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ServerTest.Services
 {

@@ -1,4 +1,3 @@
-using System;
 using ServerTest.Models.Strategy;
 using ServerTest.Strategy;
 

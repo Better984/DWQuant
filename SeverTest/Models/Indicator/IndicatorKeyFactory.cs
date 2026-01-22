@@ -1,8 +1,5 @@
-using System;
-using System.Globalization;
-using System.Linq;
-using ServerTest.Models;
 using ServerTest.Models.Strategy;
+using System.Globalization;
 
 namespace ServerTest.Models.Indicator
 {

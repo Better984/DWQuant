@@ -1,6 +1,3 @@
-using System.Collections.Generic;
-using ServerTest.Models;
-
 namespace ServerTest.Models.Indicator
 {
     public sealed class IndicatorTask

@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using ccxt;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -33,7 +30,7 @@ namespace ServerTest.Controllers
             ILogger<MarketDataController> logger,
             MarketDataEngine marketDataEngine,
             HistoricalMarketDataCache historicalCache,
-            IOptions<HistoricalMarketDataOptions> historyOptions) 
+            IOptions<HistoricalMarketDataOptions> historyOptions)
             : base(logger)
         {
             _marketDataEngine = marketDataEngine;
@@ -56,7 +53,7 @@ namespace ServerTest.Controllers
             try
             {
                 var kline = _marketDataEngine.GetLatestKline(exchange, timeframe, symbol);
-                
+
                 if (!kline.HasValue)
                 {
                     return NotFound(ApiResponse<object>.Error("未找到K线数据"));

@@ -1,5 +1,3 @@
-using System;
-
 namespace ServerTest.Infrastructure.Db
 {
     public sealed class SqlExecutorMetrics

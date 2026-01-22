@@ -1,7 +1,5 @@
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Channels;
 using ServerTest.Models.Strategy;
+using System.Threading.Channels;
 
 namespace ServerTest.Services
 {

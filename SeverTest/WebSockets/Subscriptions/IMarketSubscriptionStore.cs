@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace ServerTest.WebSockets.Subscriptions
 {
     public interface IMarketSubscriptionStore

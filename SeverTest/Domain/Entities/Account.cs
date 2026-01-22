@@ -1,5 +1,3 @@
-using System;
-
 namespace ServerTest.Domain.Entities
 {
     public sealed class Account

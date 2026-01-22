@@ -32,7 +32,7 @@ namespace ServerTest.Services
                 var targetBars = 1000;
 
                 var candles = await FetchOhlcvWithLimit(exchange, symbol, timeframe, targetBars);
-                
+
                 if (candles.Count == 0)
                 {
                     Console.WriteLine("❌ 未能获取到K线数据");
@@ -61,7 +61,7 @@ namespace ServerTest.Services
                     20,
                     Core.MAType.Sma
                 );
-                
+
                 double[] ma20Full = new double[closePrices.Length];
                 int ma20BegIdx = 0, ma20NbElement = 0;
                 if (ma20RetCode == Core.RetCode.Success)
@@ -91,7 +91,7 @@ namespace ServerTest.Services
                     26,
                     9
                 );
-                
+
                 double[] macdFull = new double[closePrices.Length];
                 double[] macdSignalFull = new double[closePrices.Length];
                 double[] macdHistFull = new double[closePrices.Length];
@@ -126,7 +126,7 @@ namespace ServerTest.Services
                     2.0,
                     Core.MAType.Sma
                 );
-                
+
                 double[] bbUpperFull = new double[closePrices.Length];
                 double[] bbMiddleFull = new double[closePrices.Length];
                 double[] bbLowerFull = new double[closePrices.Length];
@@ -158,7 +158,7 @@ namespace ServerTest.Services
                     14,
                     3
                 );
-                
+
                 double[] stochRsiKFull = new double[closePrices.Length];
                 double[] stochRsiDFull = new double[closePrices.Length];
                 int stochRsiBegIdx = 0, stochRsiNbElement = 0;
@@ -242,18 +242,18 @@ namespace ServerTest.Services
             // 填充 NaN 到有效数据开始之前
             int startIndex = outRange.Start.Value;
             int validLength = outRange.End.Value - outRange.Start.Value;
-            
+
             for (int i = 0; i < startIndex; i++)
             {
                 fullArray[i] = double.NaN;
             }
-            
+
             // 复制有效数据
             for (int i = 0; i < validLength && i < outputArray.Length; i++)
             {
                 fullArray[startIndex + i] = outputArray[i];
             }
-            
+
             // 填充剩余位置为 NaN（如果有）
             for (int i = startIndex + validLength; i < fullArray.Length; i++)
             {

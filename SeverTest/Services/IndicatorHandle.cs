@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
 using ServerTest.Models.Indicator;

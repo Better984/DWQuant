@@ -1,16 +1,9 @@
-using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms;
 using Microsoft.Extensions.DependencyInjection;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Models;
 using ServerTest.Services;
 using ServerTest.WebSockets;
+using System.Text;
 
 namespace ServerTest.Monitoring
 {
@@ -1495,7 +1488,7 @@ LIMIT 20;";
                         Level = DownloadLogLevel.Info,
                         Message = "数据完整性检查通过，未发现缺失"
                     });
-                    
+
                     // 没有缺失，禁用补齐按钮
                     if (InvokeRequired)
                     {
@@ -1532,7 +1525,7 @@ LIMIT 20;";
 
                     // 保存缺失信息供补齐功能使用（只保存1m周期的缺失）
                     _detectedGaps = gapList.ToList();
-                    
+
                     // 启用补齐按钮（只对1m周期启用）
                     if (InvokeRequired)
                     {

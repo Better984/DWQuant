@@ -1,24 +1,23 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ServerTest.Application.Services;
+using ServerTest.Infrastructure.Db;
+using ServerTest.Infrastructure.Repositories;
 using ServerTest.Middleware;
 using ServerTest.Models;
+using ServerTest.Monitoring;
 using ServerTest.Options;
 using ServerTest.RateLimit;
-using ServerTest.Application.Services;
 using ServerTest.Services;
 using ServerTest.Strategy;
 using ServerTest.WebSockets;
-using ServerTest.Monitoring;
-using ServerTest.Infrastructure.Db;
-using ServerTest.Infrastructure.Repositories;
 using StackExchange.Redis;
+using System.Text.Json;
 using AspNetWebSocketOptions = Microsoft.AspNetCore.Builder.WebSocketOptions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -154,7 +153,7 @@ try
     // 步骤 1：启动基础设施
     // ========================================================================
     startupManager.MarkStarting(SystemModule.Infrastructure, "Redis、数据库等基础设施");
-    
+
     // 测试 Redis 连接
     var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
     var db = redis.GetDatabase();
@@ -181,13 +180,13 @@ try
     // 步骤 2：启动行情数据引擎
     // ========================================================================
     startupManager.MarkStarting(SystemModule.MarketDataEngine, "行情数据引擎（WebSocket 订阅）");
-    
+
     var marketDataEngine = app.Services.GetRequiredService<MarketDataEngine>();
-    
+
     // 等待行情引擎初始化完成（带超时）
     var marketDataTimeout = TimeSpan.FromMinutes(2);
     logger.LogInformation("等待行情引擎初始化（超时时间: {Timeout}秒）...", marketDataTimeout.TotalSeconds);
-    
+
     try
     {
         await marketDataEngine.WaitForInitializationAsync();
@@ -204,7 +203,7 @@ try
     // 步骤 3：启动指标引擎
     // ========================================================================
     startupManager.MarkStarting(SystemModule.IndicatorEngine, "指标计算引擎");
-    
+
     var indicatorEngine = app.Services.GetRequiredService<IndicatorEngine>();
     // 指标引擎在 StrategyRuntimeHostedService 中启动，这里只标记
     startupManager.MarkReady(SystemModule.IndicatorEngine, "指标引擎已注册");
@@ -213,7 +212,7 @@ try
     // 步骤 4：启动策略引擎
     // ========================================================================
     startupManager.MarkStarting(SystemModule.StrategyEngine, "实时策略执行引擎");
-    
+
     var strategyEngine = app.Services.GetRequiredService<RealTimeStrategyEngine>();
     // 策略引擎在 StrategyRuntimeHostedService 中启动，这里只标记
     startupManager.MarkReady(SystemModule.StrategyEngine, "策略引擎已注册");
@@ -222,18 +221,18 @@ try
     // 步骤 5：启动实盘交易系统（整体）
     // ========================================================================
     startupManager.MarkStarting(SystemModule.TradingSystem, "实盘交易系统（行情+指标+策略）");
-    
+
     // 等待策略运行时服务启动（通过检查策略引擎是否有策略注册来判断）
     logger.LogInformation("等待策略运行时服务启动...");
     await Task.Delay(2000); // 给 StrategyRuntimeHostedService 一些启动时间
-    
+
     startupManager.MarkReady(SystemModule.TradingSystem, "实盘交易系统已就绪");
 
     // ========================================================================
     // 步骤 6：启动网络层
     // ========================================================================
     startupManager.MarkStarting(SystemModule.Network, "网络层（HTTP API + WebSocket）");
-    
+
     // HTTP 管道配置
     if (app.Environment.IsDevelopment())
     {
@@ -242,29 +241,29 @@ try
     }
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
-    
+
     // ⚠️ 重要：系统就绪检查中间件必须在其他中间件之前
     app.UseMiddleware<SystemReadinessMiddleware>();
-    
+
     // Dev: keep HTTP only to avoid preflight redirect.
     app.UseCors();
     app.UseAuthentication();
     app.UseAuthorization();
     app.UseMiddleware<HttpRateLimitMiddleware>();
-    
+
     // WebSocket 配置
     app.UseWebSockets(new AspNetWebSocketOptions
     {
         KeepAliveInterval = TimeSpan.FromSeconds(wsConfig.KeepAliveSeconds)
     });
-    
+
     startupManager.MarkReady(SystemModule.Network, "网络层已就绪");
 
     // ========================================================================
     // 启动完成，打印状态摘要
     // ========================================================================
     startupManager.PrintStatusSummary();
-    
+
     logger.LogInformation("╔═══════════════════════════════════════════════════════════╗");
     logger.LogInformation("║          ✅ 系统启动完成，开始监听请求                    ║");
     logger.LogInformation("╚═══════════════════════════════════════════════════════════╝");

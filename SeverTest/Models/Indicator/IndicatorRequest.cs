@@ -1,5 +1,3 @@
-using System;
-
 namespace ServerTest.Models.Indicator
 {
     public sealed class IndicatorRequest

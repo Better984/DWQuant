@@ -1,8 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
 using ServerTest.Models;
 using ServerTest.Models.Strategy;
+using System.Text;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 
 namespace ServerTest.Strategy

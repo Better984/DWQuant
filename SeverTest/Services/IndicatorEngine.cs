@@ -1,13 +1,8 @@
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Threading;
-using System.Threading.Channels;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
 using ServerTest.Models.Indicator;
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 
 namespace ServerTest.Services
 {
