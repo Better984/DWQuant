@@ -513,7 +513,7 @@ namespace ServerTest.Monitoring
                 Location = new Point(8, 60),
                 AutoSize = true,
                 ColumnCount = 6,
-                RowCount = 3
+                RowCount = 4
             };
             formPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
             formPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
@@ -599,13 +599,21 @@ namespace ServerTest.Monitoring
             };
             sortButton.Click += async (_, __) => await SortDataByTimeAsync();
 
-            var checkIntegrityButton = new Button
+            var checkBaseIntegrityButton = new Button
             {
-                Text = "检查完整性",
-                Width = 100,
+                Text = "验证基础数据完整性",
+                Width = 140,
                 Height = 28
             };
-            checkIntegrityButton.Click += async (_, __) => await CheckDataIntegrityAsync();
+            checkBaseIntegrityButton.Click += async (_, __) => await CheckBaseDataIntegrityAsync();
+
+            var checkAllTimeframesButton = new Button
+            {
+                Text = "验证所有周期完整性",
+                Width = 140,
+                Height = 28
+            };
+            checkAllTimeframesButton.Click += async (_, __) => await CheckAllTimeframesIntegrityAsync();
 
             var aggregateButton = new Button
             {
@@ -634,9 +642,10 @@ namespace ServerTest.Monitoring
             formPanel.Controls.Add(_downloadCancelButton, 2, 1);
             formPanel.Controls.Add(_forceDailyOnlyCheckBox, 3, 1);
             formPanel.Controls.Add(sortButton, 0, 2);
-            formPanel.Controls.Add(checkIntegrityButton, 1, 2);
-            formPanel.Controls.Add(aggregateButton, 2, 2);
-            formPanel.Controls.Add(_fillGapsButton, 3, 2);
+            formPanel.Controls.Add(checkBaseIntegrityButton, 1, 2);
+            formPanel.Controls.Add(checkAllTimeframesButton, 2, 2);
+            formPanel.Controls.Add(aggregateButton, 0, 3);
+            formPanel.Controls.Add(_fillGapsButton, 1, 3);
 
             _downloadStatusLabel = new Label
             {
@@ -1268,15 +1277,14 @@ SELECT * FROM `{tableName}` ORDER BY open_time ASC;";
             }
         }
 
-        private async Task CheckDataIntegrityAsync()
+        private async Task CheckBaseDataIntegrityAsync()
         {
-            if (_downloadSymbol.SelectedItem is not MarketDataConfig.SymbolEnum symbolEnum ||
-                _downloadTimeframe.SelectedItem is not MarketDataConfig.TimeframeEnum timeframeEnum)
+            if (_downloadSymbol.SelectedItem is not MarketDataConfig.SymbolEnum symbolEnum)
             {
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Warning,
-                    Message = "请先选择币种和周期"
+                    Message = "请先选择币种"
                 });
                 return;
             }
@@ -1286,13 +1294,13 @@ SELECT * FROM `{tableName}` ORDER BY open_time ASC;";
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Info,
-                    Message = "开始检查数据完整性..."
+                    Message = "开始检查基础数据完整性（1分钟周期）..."
                 });
 
                 var dbManager = _serviceProvider.GetRequiredService<IDbManager>();
                 var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
                 var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
-                var timeframeStr = MarketDataConfig.TimeframeToString(timeframeEnum);
+                var timeframeStr = "1m"; // 固定为1分钟
                 var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
                 var timeframeMs = MarketDataConfig.TimeframeToMs(timeframeStr);
 
@@ -1365,17 +1373,17 @@ LIMIT 20;";
                         });
                     }
 
-                    // 显示尝试补齐按钮提示
+                    // 显示尝试补齐按钮提示（只对1m周期显示）
                     AppendDownloadLog(new DownloadLogEntry
                     {
                         Level = DownloadLogLevel.Info,
-                        Message = ">>> 点击下方'尝试补齐数据'按钮，将自动下载缺失时间段前后一天的数据尝试补齐 <<<"
+                        Message = ">>> 点击下方'尝试补齐数据'按钮，将自动下载缺失时间段前后一天的数据尝试补齐（仅处理1分钟周期） <<<"
                     });
 
-                    // 保存缺失信息供补齐功能使用
+                    // 保存缺失信息供补齐功能使用（只保存1m周期的缺失）
                     _detectedGaps = gapList.ToList();
                     
-                    // 启用补齐按钮
+                    // 启用补齐按钮（只对1m周期启用）
                     if (InvokeRequired)
                     {
                         BeginInvoke(() => _fillGapsButton.Enabled = true);
@@ -1409,7 +1417,7 @@ FROM `{tableName}`;";
             }
         }
 
-        private async Task AggregateTimeframesAsync()
+        private async Task CheckAllTimeframesIntegrityAsync()
         {
             if (_downloadSymbol.SelectedItem is not MarketDataConfig.SymbolEnum symbolEnum)
             {
@@ -1426,129 +1434,163 @@ FROM `{tableName}`;";
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Info,
-                    Message = "开始同步聚合其他周期..."
+                    Message = "开始检查所有周期数据完整性..."
                 });
 
                 var dbManager = _serviceProvider.GetRequiredService<IDbManager>();
                 var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
                 var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
-                var tableName1m = BuildTableName(exchangeId, symbolStr, "1m");
 
-                // 检查1m表是否存在
-                var checkTableSql = @"SELECT 1 FROM information_schema.tables
-WHERE table_schema = DATABASE() AND table_name = @Table
-LIMIT 1;";
-                var exists = await dbManager.QuerySingleOrDefaultAsync<int?>(checkTableSql, new { Table = tableName1m }, null, default);
-                if (!exists.HasValue)
+                // 获取所有周期（从枚举）
+                var allTimeframes = Enum.GetValues<MarketDataConfig.TimeframeEnum>()
+                    .Select(tf => MarketDataConfig.TimeframeToString(tf))
+                    .ToList();
+
+                AppendDownloadLog(new DownloadLogEntry
                 {
-                    AppendDownloadLog(new DownloadLogEntry
-                    {
-                        Level = DownloadLogLevel.Warning,
-                        Message = $"1m表 {tableName1m} 不存在，无法聚合"
-                    });
-                    return;
-                }
+                    Level = DownloadLogLevel.Info,
+                    Message = $"将检查以下周期: {string.Join(", ", allTimeframes)}"
+                });
 
-                // 支持的周期（除了1m）
-                var timeframes = new[] { "3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w" };
+                int totalGaps = 0;
+                int totalDuplicates = 0;
+                int checkedCount = 0;
 
-                foreach (var tf in timeframes)
+                foreach (var tf in allTimeframes)
                 {
                     try
                     {
-                        var targetTableName = BuildTableName(exchangeId, symbolStr, tf);
-                        var tfMs = MarketDataConfig.TimeframeToMs(tf);
+                        var tableName = BuildTableName(exchangeId, symbolStr, tf);
+                        var timeframeMs = MarketDataConfig.TimeframeToMs(tf);
 
-                        // 确保目标表存在
-                        var createTableSql = $@"CREATE TABLE IF NOT EXISTS `{targetTableName}` LIKE `{tableName1m}`;";
-                        await dbManager.ExecuteAsync(createTableSql, null, null, default);
+                        // 检查表是否存在
+                        var checkTableSql = @"SELECT 1 FROM information_schema.tables
+WHERE table_schema = DATABASE() AND table_name = @Table
+LIMIT 1;";
+                        var exists = await dbManager.QuerySingleOrDefaultAsync<int?>(checkTableSql, new { Table = tableName }, null, default);
+                        if (!exists.HasValue)
+                        {
+                            AppendDownloadLog(new DownloadLogEntry
+                            {
+                                Level = DownloadLogLevel.Warning,
+                                Message = $"[{tf}] 表 {tableName} 不存在，跳过"
+                            });
+                            continue;
+                        }
 
-                        // 聚合1m数据到目标周期
-                        // 使用子查询获取每个bucket的第一条open和最后一条close
-                        var aggregateSql = $@"INSERT IGNORE INTO `{targetTableName}` 
-(open_time, open, high, low, close, volume, close_time, quote_volume, count, taker_buy_volume, taker_buy_quote_volume, ignore_col)
-SELECT 
-    bucket_time as open_time,
-    (SELECT open FROM `{tableName1m}` WHERE FLOOR(open_time / @TfMs) * @TfMs = bucket_time ORDER BY open_time ASC LIMIT 1) as open,
-    MAX(high) as high,
-    MIN(low) as low,
-    (SELECT close FROM `{tableName1m}` WHERE FLOOR(open_time / @TfMs) * @TfMs = bucket_time ORDER BY open_time DESC LIMIT 1) as close,
-    SUM(volume) as volume,
-    MAX(close_time) as close_time,
-    SUM(quote_volume) as quote_volume,
-    SUM(count) as count,
-    SUM(taker_buy_volume) as taker_buy_volume,
-    SUM(taker_buy_quote_volume) as taker_buy_quote_volume,
-    MAX(ignore_col) as ignore_col
+                        checkedCount++;
+
+                        // 检查数据完整性
+                        var gapSql = $@"SELECT 
+    FROM_UNIXTIME(open_time/1000) as gap_start_time,
+    FROM_UNIXTIME(next_time/1000) as gap_end_time,
+    (next_time - open_time) / 60000 as gap_minutes
 FROM (
     SELECT 
-        FLOOR(open_time / @TfMs) * @TfMs as bucket_time,
-        high,
-        low,
-        volume,
-        close_time,
-        quote_volume,
-        count,
-        taker_buy_volume,
-        taker_buy_quote_volume,
-        ignore_col
-    FROM `{tableName1m}`
-) grouped
-GROUP BY bucket_time
-ORDER BY bucket_time ASC;";
+        open_time,
+        LEAD(open_time) OVER (ORDER BY open_time) as next_time
+    FROM `{tableName}`
+) t
+WHERE next_time IS NOT NULL 
+  AND (next_time - open_time) > @ExpectedGap
+ORDER BY gap_minutes DESC
+LIMIT 20;";
 
-                        var rowsAffected = await dbManager.ExecuteAsync(aggregateSql, new { TfMs = tfMs }, null, default);
-                        AppendDownloadLog(new DownloadLogEntry
+                        var gaps = await dbManager.QueryAsync<dynamic>(gapSql, new { ExpectedGap = timeframeMs }, null, default);
+                        var gapList = gaps.ToList();
+
+                        if (gapList.Count > 0)
                         {
-                            Level = DownloadLogLevel.Info,
-                            Message = $"{tf} 周期聚合完成，共 {rowsAffected} 条记录"
-                        });
+                            totalGaps += gapList.Count;
+                            AppendDownloadLog(new DownloadLogEntry
+                            {
+                                Level = DownloadLogLevel.Warning,
+                                Message = $"[{tf}] 发现 {gapList.Count} 处数据缺失："
+                            });
+                            foreach (var gap in gapList.Take(5)) // 只显示前5个
+                            {
+                                AppendDownloadLog(new DownloadLogEntry
+                                {
+                                    Level = DownloadLogLevel.Warning,
+                                    Message = $"[{tf}] 缺失: {gap.gap_start_time} -> {gap.gap_end_time} (约 {gap.gap_minutes:F1} 分钟)"
+                                });
+                            }
+                            if (gapList.Count > 5)
+                            {
+                                AppendDownloadLog(new DownloadLogEntry
+                                {
+                                    Level = DownloadLogLevel.Warning,
+                                    Message = $"[{tf}] ... 还有 {gapList.Count - 5} 处缺失未显示"
+                                });
+                            }
+                        }
+
+                        // 检查重复
+                        var duplicateSql = $@"SELECT COUNT(*) - COUNT(DISTINCT open_time) as duplicate_count
+FROM `{tableName}`;";
+                        var duplicateCount = await dbManager.QuerySingleOrDefaultAsync<long>(duplicateSql, null, null, default);
+                        if (duplicateCount > 0)
+                        {
+                            totalDuplicates += (int)duplicateCount;
+                            AppendDownloadLog(new DownloadLogEntry
+                            {
+                                Level = DownloadLogLevel.Warning,
+                                Message = $"[{tf}] 发现 {duplicateCount} 条重复记录"
+                            });
+                        }
+                        else
+                        {
+                            AppendDownloadLog(new DownloadLogEntry
+                            {
+                                Level = DownloadLogLevel.Info,
+                                Message = $"[{tf}] ✓ 数据完整，无缺失无重复"
+                            });
+                        }
                     }
                     catch (Exception ex)
                     {
                         AppendDownloadLog(new DownloadLogEntry
                         {
-                            Level = DownloadLogLevel.Warning,
-                            Message = $"{tf} 周期聚合失败: {ex.Message}"
+                            Level = DownloadLogLevel.Error,
+                            Message = $"[{tf}] 检查失败: {ex.Message}"
                         });
                     }
                 }
 
+                // 总结
                 AppendDownloadLog(new DownloadLogEntry
                 {
-                    Level = DownloadLogLevel.Info,
-                    Message = "所有周期聚合完成"
+                    Level = totalGaps == 0 && totalDuplicates == 0 ? DownloadLogLevel.Info : DownloadLogLevel.Warning,
+                    Message = $"所有周期检查完成: 检查了 {checkedCount} 个周期，共发现 {totalGaps} 处缺失，{totalDuplicates} 条重复记录"
                 });
+
+                if (totalGaps > 0 || totalDuplicates > 0)
+                {
+                    AppendDownloadLog(new DownloadLogEntry
+                    {
+                        Level = DownloadLogLevel.Info,
+                        Message = "提示: 如果1分钟周期数据完整，可以使用'同步聚合其他周期'功能重新生成其他周期数据"
+                    });
+                }
             }
             catch (Exception ex)
             {
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Error,
-                    Message = $"聚合失败: {ex.Message}"
+                    Message = $"检查失败: {ex.Message}"
                 });
             }
         }
 
-        private async Task TryFillGapsAsync()
+        private async Task AggregateTimeframesAsync()
         {
-            if (_downloadSymbol.SelectedItem is not MarketDataConfig.SymbolEnum symbolEnum ||
-                _downloadTimeframe.SelectedItem is not MarketDataConfig.TimeframeEnum timeframeEnum)
+            if (_downloadSymbol.SelectedItem is not MarketDataConfig.SymbolEnum symbolEnum)
             {
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Warning,
-                    Message = "请先选择币种和周期"
-                });
-                return;
-            }
-
-            if (_detectedGaps.Count == 0)
-            {
-                AppendDownloadLog(new DownloadLogEntry
-                {
-                    Level = DownloadLogLevel.Warning,
-                    Message = "没有检测到数据缺失，请先运行'检查完整性'"
+                    Message = "Please select symbol first."
                 });
                 return;
             }
@@ -1558,13 +1600,289 @@ ORDER BY bucket_time ASC;";
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Info,
-                    Message = $"开始尝试补齐 {_detectedGaps.Count} 处数据缺失..."
+                    Message = "Start aggregating other timeframes..."
                 });
 
                 var dbManager = _serviceProvider.GetRequiredService<IDbManager>();
                 var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
                 var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
-                var timeframeStr = MarketDataConfig.TimeframeToString(timeframeEnum);
+                var tableName1m = BuildTableName(exchangeId, symbolStr, "1m");
+
+                var checkTableSql = @"SELECT 1 FROM information_schema.tables
+WHERE table_schema = DATABASE() AND table_name = @Table
+LIMIT 1;";
+                var exists = await dbManager.QuerySingleOrDefaultAsync<int?>(checkTableSql, new { Table = tableName1m }, null, default);
+                if (!exists.HasValue)
+                {
+                    AppendDownloadLog(new DownloadLogEntry
+                    {
+                        Level = DownloadLogLevel.Warning,
+                        Message = $"1m table {tableName1m} not found."
+                    });
+                    return;
+                }
+
+                var countSql = $@"SELECT COUNT(*) as count FROM `{tableName1m}`;";
+                var totalCount = await dbManager.QuerySingleOrDefaultAsync<long>(countSql, null, null, default);
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Info,
+                    Message = $"1m table {tableName1m} rows: {totalCount}."
+                });
+
+                if (totalCount == 0)
+                {
+                    AppendDownloadLog(new DownloadLogEntry
+                    {
+                        Level = DownloadLogLevel.Warning,
+                        Message = "1m table has no rows, skip aggregation."
+                    });
+                    return;
+                }
+
+                var rangeSql = $@"SELECT MIN(open_time) AS Min, MAX(open_time) AS Max FROM `{tableName1m}`;";
+                var timeRange = await dbManager.QuerySingleOrDefaultAsync<OpenTimeRange>(rangeSql, null, null, default);
+                if (timeRange == null || timeRange.Max <= 0)
+                {
+                    AppendDownloadLog(new DownloadLogEntry
+                    {
+                        Level = DownloadLogLevel.Warning,
+                        Message = "Failed to read time range from 1m table."
+                    });
+                    return;
+                }
+
+                var allTimeframes = Enum.GetValues<MarketDataConfig.TimeframeEnum>()
+                    .Where(tf => tf != MarketDataConfig.TimeframeEnum.m1)
+                    .Select(tf => MarketDataConfig.TimeframeToString(tf))
+                    .ToList();
+
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Info,
+                    Message = $"Aggregate timeframes: {string.Join(", ", allTimeframes)}"
+                });
+
+                foreach (var tf in allTimeframes)
+                {
+                    try
+                    {
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Info,
+                            Message = $"Start aggregating {tf}..."
+                        });
+
+                        var targetTableName = BuildTableName(exchangeId, symbolStr, tf);
+                        var tfMs = MarketDataConfig.TimeframeToMs(tf);
+                        var expectedRows = totalCount > 0 ? (long)(totalCount * 60 * 1000 / tfMs) : 0;
+
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Info,
+                            Message = $"Target table: {targetTableName}, tfMs: {tfMs}, expected: {expectedRows} rows"
+                        });
+
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Info,
+                            Message = $"Create/check table: {targetTableName}"
+                        });
+                        var createTableSql = $@"CREATE TABLE IF NOT EXISTS `{targetTableName}` LIKE `{tableName1m}`;";
+                        await dbManager.ExecuteAsync(createTableSql, null, null, default);
+
+                        var existingCountSql = $@"SELECT COUNT(*) as count FROM `{targetTableName}`;";
+                        var existingCount = await dbManager.QuerySingleOrDefaultAsync<long>(existingCountSql, null, null, default);
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Info,
+                            Message = $"Target table {targetTableName} has {existingCount} rows."
+                        });
+
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Info,
+                            Message = $"Run aggregation SQL from {tableName1m} to {targetTableName}..."
+                        });
+
+                        var startTime = DateTime.UtcNow;
+
+                        var aggregateSql = $@"INSERT IGNORE INTO `{targetTableName}`
+(open_time, open, high, low, close, volume, close_time, quote_volume, count, taker_buy_volume, taker_buy_quote_volume, ignore_col)
+SELECT
+    agg.bucket_time as open_time,
+    first_row.open as open,
+    agg.max_high as high,
+    agg.min_low as low,
+    last_row.close as close,
+    agg.sum_volume as volume,
+    agg.max_close_time as close_time,
+    agg.sum_quote_volume as quote_volume,
+    agg.sum_count as count,
+    agg.sum_taker_buy_volume as taker_buy_volume,
+    agg.sum_taker_buy_quote_volume as taker_buy_quote_volume,
+    agg.max_ignore_col as ignore_col
+FROM (
+    SELECT
+        FLOOR(open_time / @TfMs) * @TfMs as bucket_time,
+        MAX(high) as max_high,
+        MIN(low) as min_low,
+        SUM(volume) as sum_volume,
+        MAX(close_time) as max_close_time,
+        SUM(quote_volume) as sum_quote_volume,
+        SUM(count) as sum_count,
+        SUM(taker_buy_volume) as sum_taker_buy_volume,
+        SUM(taker_buy_quote_volume) as sum_taker_buy_quote_volume,
+        MAX(ignore_col) as max_ignore_col,
+        MIN(open_time) as min_open_time,
+        MAX(open_time) as max_open_time
+    FROM `{tableName1m}`
+    WHERE open_time >= @Start AND open_time < @End
+    GROUP BY bucket_time
+) agg
+INNER JOIN `{tableName1m}` first_row ON first_row.open_time = agg.min_open_time AND FLOOR(first_row.open_time / @TfMs) * @TfMs = agg.bucket_time
+INNER JOIN `{tableName1m}` last_row ON last_row.open_time = agg.max_open_time AND FLOOR(last_row.open_time / @TfMs) * @TfMs = agg.bucket_time
+;";
+
+                        var rangeStart = AlignDown(timeRange.Min, tfMs);
+                        var rangeEndExclusive = AlignUp(timeRange.Max + 1, tfMs);
+                        var batchMs = Math.Max((long)TimeSpan.FromDays(7).TotalMilliseconds, tfMs);
+                        batchMs = AlignDown(batchMs, tfMs);
+                        if (batchMs <= 0)
+                        {
+                            batchMs = tfMs;
+                        }
+
+                        var totalInserted = 0;
+                        for (var start = rangeStart; start < rangeEndExclusive; start += batchMs)
+                        {
+                            var end = Math.Min(start + batchMs, rangeEndExclusive);
+                            AppendDownloadLog(new DownloadLogEntry
+                            {
+                                Level = DownloadLogLevel.Info,
+                                Message = $"Aggregating {tf} batch: {start} ~ {end}"
+                            });
+
+                            var batchInserted = await dbManager.ExecuteAsync(
+                                aggregateSql,
+                                new { TfMs = tfMs, Start = start, End = end },
+                                null,
+                                default);
+                            totalInserted += batchInserted;
+                        }
+
+                        var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Info,
+                            Message = $"OK {tf} aggregation done. Inserted {totalInserted} rows in {elapsed:F2}s."
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        var errorDetails = ex is TimeoutException
+                            ? "Timeout. Possible causes: huge data, complex SQL, low timeout. Consider smaller batch or higher timeout."
+                            : $"ErrorType: {ex.GetType().Name}";
+
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Error,
+                            Message = $"FAIL {tf} aggregation: {ex.Message}"
+                        });
+                        AppendDownloadLog(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Warning,
+                            Message = $"    {errorDetails}"
+                        });
+                        if (ex.InnerException != null)
+                        {
+                            AppendDownloadLog(new DownloadLogEntry
+                            {
+                                Level = DownloadLogLevel.Warning,
+                                Message = $"    Inner: {ex.InnerException.Message}"
+                            });
+                        }
+                    }
+                }
+
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Info,
+                    Message = "All timeframes aggregation done."
+                });
+            }
+            catch (Exception ex)
+            {
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Error,
+                    Message = $"Aggregation failed: {ex.Message}"
+                });
+            }
+        }
+
+        private static long AlignDown(long value, long step)
+        {
+            if (step <= 0)
+            {
+                return value;
+            }
+
+            return (value / step) * step;
+        }
+
+        private static long AlignUp(long value, long step)
+        {
+            if (step <= 0)
+            {
+                return value;
+            }
+
+            return ((value + step - 1) / step) * step;
+        }
+
+        private sealed class OpenTimeRange
+        {
+            public long Min { get; set; }
+            public long Max { get; set; }
+        }
+
+        private async Task TryFillGapsAsync()
+        {
+            if (_downloadSymbol.SelectedItem is not MarketDataConfig.SymbolEnum symbolEnum)
+            {
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Warning,
+                    Message = "请先选择币种"
+                });
+                return;
+            }
+
+            if (_detectedGaps.Count == 0)
+            {
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Warning,
+                    Message = "没有检测到数据缺失，请先运行'验证基础数据完整性'"
+                });
+                return;
+            }
+
+            try
+            {
+                AppendDownloadLog(new DownloadLogEntry
+                {
+                    Level = DownloadLogLevel.Info,
+                    Message = $"开始尝试补齐 {_detectedGaps.Count} 处数据缺失（仅处理1分钟周期）..."
+                });
+
+                var dbManager = _serviceProvider.GetRequiredService<IDbManager>();
+                var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
+                var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
+                var timeframeStr = "1m"; // 固定为1分钟周期
+                var timeframeEnum = MarketDataConfig.TimeframeEnum.m1; // 固定为1分钟周期
                 var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
                 var timeframeMs = MarketDataConfig.TimeframeToMs(timeframeStr);
 
@@ -1656,13 +1974,13 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
                     Message = $"补齐完成: 成功 {successCount} 处，失败 {failCount} 处"
                 });
 
-                // 重新检查完整性
+                // 重新检查基础数据完整性
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Info,
-                    Message = "重新检查数据完整性..."
+                    Message = "重新检查基础数据完整性..."
                 });
-                await CheckDataIntegrityAsync();
+                await CheckBaseDataIntegrityAsync();
             }
             catch (Exception ex)
             {
