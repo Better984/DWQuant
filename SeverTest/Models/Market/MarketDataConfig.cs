@@ -41,9 +41,15 @@ namespace ServerTest.Models
             m15,  // 15m
             m30,  // 30m
             h1,   // 1h
+            h2,   // 2h
             h4,   // 4h
+            h6,   // 6h
+            h8,   // 8h
+            h12,  // 12h
             d1,   // 1d
-            w1    // 1w
+            d3,   // 3d
+            w1,   // 1w
+            mo1   // 1mo
         }
 
         /// <summary>
@@ -97,10 +103,16 @@ namespace ServerTest.Models
                 TimeframeEnum.m15 => "15m",
                 TimeframeEnum.m30 => "30m",
                 TimeframeEnum.h1 => "1h",
+                TimeframeEnum.h2 => "2h",
                 TimeframeEnum.h4 => "4h",
+                TimeframeEnum.h6 => "6h",
+                TimeframeEnum.h8 => "8h",
+                TimeframeEnum.h12 => "12h",
                 TimeframeEnum.d1 => "1d",
+                TimeframeEnum.d3 => "3d",
                 TimeframeEnum.w1 => "1w",
-                _ => throw new ArgumentException($"不支持的周期: {timeframe}")
+                TimeframeEnum.mo1 => "1mo",
+                _ => throw new ArgumentException($"??????????????????: {timeframe}")
             };
         }
 
@@ -117,10 +129,16 @@ namespace ServerTest.Models
                 "15m" => 15L * 60 * 1000,
                 "30m" => 30L * 60 * 1000,
                 "1h" => 60L * 60 * 1000,
+                "2h" => 2L * 60 * 60 * 1000,
                 "4h" => 4L * 60 * 60 * 1000,
+                "6h" => 6L * 60 * 60 * 1000,
+                "8h" => 8L * 60 * 60 * 1000,
+                "12h" => 12L * 60 * 60 * 1000,
                 "1d" => 24L * 60 * 60 * 1000,
+                "3d" => 3L * 24 * 60 * 60 * 1000,
                 "1w" => 7L * 24 * 60 * 60 * 1000,
-                _ => throw new ArgumentException($"不支持的周期: {timeframe}")
+                "1mo" => 30L * 24 * 60 * 60 * 1000,
+                _ => throw new ArgumentException($"??????????????????: {timeframe}")
             };
         }
 

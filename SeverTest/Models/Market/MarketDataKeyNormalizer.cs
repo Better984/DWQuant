@@ -50,6 +50,16 @@ namespace ServerTest.Models
             tf = tf.Replace(" ", string.Empty, StringComparison.Ordinal);
             tf = tf.ToLowerInvariant();
 
+            if (Regex.IsMatch(tf, @"^\d+mo$"))
+            {
+                return tf;
+            }
+
+            if (Regex.IsMatch(tf, @"^mo\d+$"))
+            {
+                return tf[2..] + "mo";
+            }
+
             if (Regex.IsMatch(tf, @"^\d+[mhdw]$"))
             {
                 return tf;
@@ -58,6 +68,11 @@ namespace ServerTest.Models
             if (Regex.IsMatch(tf, @"^[mhdw]\d+$"))
             {
                 return tf[1..] + tf[0];
+            }
+
+            if (tf.StartsWith("mo", StringComparison.Ordinal))
+            {
+                return tf.Length > 2 ? tf[2..] + "mo" : "mo";
             }
 
             if (tf.StartsWith("h", StringComparison.Ordinal))
@@ -93,9 +108,15 @@ namespace ServerTest.Models
                 900 => "15m",
                 1800 => "30m",
                 3600 => "1h",
+                7200 => "2h",
                 14400 => "4h",
+                21600 => "6h",
+                28800 => "8h",
+                43200 => "12h",
                 86400 => "1d",
+                259200 => "3d",
                 604800 => "1w",
+                2592000 => "1mo",
                 _ => string.Empty
             };
         }
