@@ -1,11 +1,8 @@
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using ccxt;
 using ccxt.pro;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
+using System.Collections.Concurrent;
 
 namespace ServerTest.Services
 {
@@ -103,7 +100,7 @@ namespace ServerTest.Services
                 dynamic dynamicExchange = exchange;
                 var markets = dynamicExchange.markets as Dictionary<string, object>;
                 var baseAsset = baseSymbol.Split('/')[0];
-                
+
                 if (markets == null)
                 {
                     Logger.LogWarning($"[{exchange.id}] markets 为空，使用默认符号");
@@ -127,7 +124,7 @@ namespace ServerTest.Services
                         bool isSwap = market.swap == true;
                         bool isFuture = market.future == true;
                         bool isContract = market.contract == true;
-                        
+
                         if (isSwap || isFuture || isContract)
                         {
                             return symbol;
@@ -145,7 +142,7 @@ namespace ServerTest.Services
                     bool isContract = market.contract == true;
                     string? quote = market.quote;
                     string? quoteId = market.quoteId;
-                    
+
                     if (baseId == baseAsset && (isSwap || isFuture || isContract))
                     {
                         if (quote == "USDT" || quoteId == "USDT")
@@ -385,7 +382,7 @@ namespace ServerTest.Services
         public void Dispose()
         {
             _cancellationTokenSource.Cancel();
-            
+
             foreach (var exchange in _exchanges.Values)
             {
                 try

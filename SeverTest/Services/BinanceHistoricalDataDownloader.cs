@@ -1,17 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.IO.Compression;
-using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Models;
+using System.Globalization;
+using System.IO.Compression;
+using System.Net;
+using System.Text.RegularExpressions;
 
 namespace ServerTest.Services
 {
@@ -100,52 +93,52 @@ namespace ServerTest.Services
             if (!forceDailyOnly)
             {
                 while (monthCursor < currentMonthStart)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var monthDays = DateTime.DaysInMonth(monthCursor.Year, monthCursor.Month);
-                var monthStart = monthCursor;
-                var monthEnd = monthCursor.AddDays(monthDays - 1);
-                var rangeStart = monthStart < start ? start : monthStart;
-                var rangeEnd = monthEnd;
-
-                if (rangeStart <= rangeEnd)
                 {
-                    summary.DaysProcessed += (rangeEnd - rangeStart).Days + 1;
-                }
+                    ct.ThrowIfCancellationRequested();
 
-                var monthText = monthCursor.ToString("yyyy-MM", CultureInfo.InvariantCulture);
-                var monthUrl = $"https://data.binance.vision/data/futures/um/monthly/klines/{symbolNoSlash}/{timeframeStr}/{symbolNoSlash}-{timeframeStr}-{monthText}.zip";
+                    var monthDays = DateTime.DaysInMonth(monthCursor.Year, monthCursor.Month);
+                    var monthStart = monthCursor;
+                    var monthEnd = monthCursor.AddDays(monthDays - 1);
+                    var rangeStart = monthStart < start ? start : monthStart;
+                    var rangeEnd = monthEnd;
 
-                var monthResult = await TryDownloadMonthAsync(monthUrl, monthCursor, tableName, log, ct).ConfigureAwait(false);
-                if (monthResult.Downloaded)
-                {
-                    firstDataFound = true;
                     if (rangeStart <= rangeEnd)
                     {
-                        summary.DaysDownloaded += (rangeEnd - rangeStart).Days + 1;
+                        summary.DaysProcessed += (rangeEnd - rangeStart).Days + 1;
                     }
-                    summary.RowsInserted += monthResult.RowsInserted;
-                }
-                else if (!monthResult.NotFound)
-                {
-                    log?.Invoke(new DownloadLogEntry
-                    {
-                        Level = DownloadLogLevel.Warning,
-                        Message = $"Month download failed: {symbolNoSlash} {timeframeStr} {monthText}"
-                    });
-                }
-                else if (firstDataFound)
-                {
-                    log?.Invoke(new DownloadLogEntry
-                    {
-                        Level = DownloadLogLevel.Warning,
-                        Message = $"Missing month after start: {symbolNoSlash} {timeframeStr} {monthText}"
-                    });
-                }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
-                monthCursor = monthCursor.AddMonths(1);
+                    var monthText = monthCursor.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+                    var monthUrl = $"https://data.binance.vision/data/futures/um/monthly/klines/{symbolNoSlash}/{timeframeStr}/{symbolNoSlash}-{timeframeStr}-{monthText}.zip";
+
+                    var monthResult = await TryDownloadMonthAsync(monthUrl, monthCursor, tableName, log, ct).ConfigureAwait(false);
+                    if (monthResult.Downloaded)
+                    {
+                        firstDataFound = true;
+                        if (rangeStart <= rangeEnd)
+                        {
+                            summary.DaysDownloaded += (rangeEnd - rangeStart).Days + 1;
+                        }
+                        summary.RowsInserted += monthResult.RowsInserted;
+                    }
+                    else if (!monthResult.NotFound)
+                    {
+                        log?.Invoke(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Warning,
+                            Message = $"Month download failed: {symbolNoSlash} {timeframeStr} {monthText}"
+                        });
+                    }
+                    else if (firstDataFound)
+                    {
+                        log?.Invoke(new DownloadLogEntry
+                        {
+                            Level = DownloadLogLevel.Warning,
+                            Message = $"Missing month after start: {symbolNoSlash} {timeframeStr} {monthText}"
+                        });
+                    }
+
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+                    monthCursor = monthCursor.AddMonths(1);
                 }
             }
 

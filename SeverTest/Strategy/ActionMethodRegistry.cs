@@ -1,7 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
 using ServerTest.Models.Strategy;
+using System.Text;
 
 namespace ServerTest.Strategy
 {

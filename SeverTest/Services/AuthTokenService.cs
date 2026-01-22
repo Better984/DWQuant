@@ -1,6 +1,5 @@
-﻿using System.Security.Claims;
-using Microsoft.Extensions.Caching.Distributed;
-using ServerTest.Services;
+﻿using Microsoft.Extensions.Caching.Distributed;
+using System.Security.Claims;
 
 namespace ServerTest.Services
 {

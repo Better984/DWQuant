@@ -1,11 +1,9 @@
-﻿using BCrypt.Net;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using MySqlConnector;
 using Microsoft.Extensions.Logging;
+using MySqlConnector;
 using ServerTest.Models.Auth;
 using ServerTest.Services;
-using System.Linq;
 
 namespace ServerTest.Controllers
 {
@@ -99,7 +97,7 @@ VALUES (@email, @password_hash, @nickname, @avatar_url, @signature, 0, 0, CURREN
                 insertCmd.Parameters.AddWithValue("@nickname", nickname);
                 insertCmd.Parameters.AddWithValue("@avatar_url", (object?)request.AvatarUrl ?? DBNull.Value);
                 insertCmd.Parameters.AddWithValue("@signature", defaultSignature);
-                
+
                 var rowsAffected = await insertCmd.ExecuteNonQueryAsync();
                 _logger.LogInformation("插入用户完成，影响行数：{RowsAffected}", rowsAffected);
 
@@ -121,7 +119,7 @@ VALUES (@email, @password_hash, @nickname, @avatar_url, @signature, 0, 0, CURREN
 
                 _logger.LogInformation("生成验证码：{Email}", request.Email);
                 var code = await _verificationCodeService.CreateAndStoreAsync(request.Email, TimeSpan.FromMinutes(10));
-                
+
                 _logger.LogInformation("发送验证码邮件：{Email}", request.Email);
                 await _emailSender.SendAsync(request.Email, "注册验证码", $"您的验证码是: {code}");
 
@@ -130,13 +128,13 @@ VALUES (@email, @password_hash, @nickname, @avatar_url, @signature, 0, 0, CURREN
             }
             catch (MySqlConnector.MySqlException mysqlEx)
             {
-                _logger.LogError(mysqlEx, "注册过程中发生 MySQL 错误：邮箱 = {Email}, 错误代码 = {ErrorCode}, 错误消息 = {Message}", 
+                _logger.LogError(mysqlEx, "注册过程中发生 MySQL 错误：邮箱 = {Email}, 错误代码 = {ErrorCode}, 错误消息 = {Message}",
                     request?.Email ?? "unknown", mysqlEx.ErrorCode, mysqlEx.Message);
                 return StatusCode(500, new { status = "error", message = $"注册失败：{mysqlEx.Message}" });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "注册过程中发生未知错误：邮箱 = {Email}, 错误类型 = {ExceptionType}, 错误消息 = {Message}", 
+                _logger.LogError(ex, "注册过程中发生未知错误：邮箱 = {Email}, 错误类型 = {ExceptionType}, 错误消息 = {Message}",
                     request?.Email ?? "unknown", ex.GetType().Name, ex.Message);
                 return StatusCode(500, new { status = "error", message = "注册失败，请稍后重试" });
             }
@@ -175,7 +173,7 @@ LIMIT 1
 
                 // 修复：使用 GetInt32 而不是 GetUInt64（因为数据库是 int 类型）
                 var uid = reader.GetInt32("uid");
-                
+
                 // 添加密码哈希空值检查
                 var passwordHashValue = reader["password_hash"];
                 if (passwordHashValue == DBNull.Value || passwordHashValue == null)
@@ -183,14 +181,14 @@ LIMIT 1
                     _logger.LogWarning("登录失败：用户 {Email} 的密码哈希为 NULL", request.Email);
                     return Unauthorized(new { status = "error", message = "账户状态异常，请联系管理员" });
                 }
-                
+
                 var passwordHash = reader.GetString("password_hash");
                 if (string.IsNullOrWhiteSpace(passwordHash))
                 {
                     _logger.LogWarning("登录失败：用户 {Email} 的密码哈希为空字符串", request.Email);
                     return Unauthorized(new { status = "error", message = "账户状态异常，请联系管理员" });
                 }
-                
+
                 var status = reader.GetByte("status");
                 if (status == 2)
                 {
@@ -260,7 +258,7 @@ LIMIT 1
 
                 // 修复：使用 GetInt32 而不是 GetUInt64
                 var uid = reader.GetInt32("uid");
-                
+
                 // 添加密码哈希空值检查
                 var passwordHashValue = reader["password_hash"];
                 if (passwordHashValue == DBNull.Value || passwordHashValue == null)
@@ -268,7 +266,7 @@ LIMIT 1
                     _logger.LogWarning("用户 {Email} 的密码哈希为空", request.Email);
                     return Unauthorized(new { status = "error", message = "账户状态异常，请联系管理员" });
                 }
-                
+
                 var passwordHash = reader.GetString("password_hash");
                 if (string.IsNullOrWhiteSpace(passwordHash))
                 {
@@ -337,7 +335,7 @@ LIMIT 1
 
                 // 修复：使用 GetInt32 而不是 GetUInt64
                 var uid = reader.GetInt32("uid");
-                
+
                 // 添加密码哈希空值检查
                 var passwordHashValue = reader["password_hash"];
                 if (passwordHashValue == DBNull.Value || passwordHashValue == null)
@@ -345,7 +343,7 @@ LIMIT 1
                     _logger.LogWarning("用户 {Email} 的密码哈希为空", request.Email);
                     return Unauthorized(new { status = "error", message = "账户状态异常，请联系管理员" });
                 }
-                
+
                 var passwordHash = reader.GetString("password_hash");
                 if (string.IsNullOrWhiteSpace(passwordHash))
                 {

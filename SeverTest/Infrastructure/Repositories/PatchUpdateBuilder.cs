@@ -1,8 +1,6 @@
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Reflection;
 using Dapper;
+using System.Collections.Concurrent;
+using System.Reflection;
 
 namespace ServerTest.Infrastructure.Repositories
 {

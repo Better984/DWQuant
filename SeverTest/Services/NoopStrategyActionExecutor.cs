@@ -1,6 +1,6 @@
-using System.Text;
 using ServerTest.Models.Strategy;
 using ServerTest.Strategy;
+using System.Text;
 
 namespace ServerTest.Services
 {

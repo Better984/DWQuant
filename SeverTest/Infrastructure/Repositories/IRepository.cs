@@ -1,6 +1,3 @@
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using ServerTest.Infrastructure.Db;
 
 namespace ServerTest.Infrastructure.Repositories

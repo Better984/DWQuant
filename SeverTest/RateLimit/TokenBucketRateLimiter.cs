@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using ServerTest.Options;
+using System.Collections.Concurrent;
 
 namespace ServerTest.RateLimit
 {

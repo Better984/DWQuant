@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using ServerTest.Models.Strategy;
 using ServerTest.Strategy;
+using System.Collections.Concurrent;
 
 namespace ServerTest.Services
 {

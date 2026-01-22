@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Concurrent;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace ServerTest.Services
 {
@@ -55,7 +52,7 @@ namespace ServerTest.Services
         public SystemStartupManager(ILogger<SystemStartupManager> logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            
+
             // 初始化所有模块状态为未启动
             foreach (SystemModule module in Enum.GetValues<SystemModule>())
             {
@@ -219,7 +216,7 @@ namespace ServerTest.Services
             _logger.LogInformation("═══════════════════════════════════════════════════════════");
             _logger.LogInformation("📊 系统启动状态摘要");
             _logger.LogInformation("═══════════════════════════════════════════════════════════");
-            
+
             foreach (SystemModule module in Enum.GetValues<SystemModule>())
             {
                 var status = GetStatus(module);
@@ -230,7 +227,7 @@ namespace ServerTest.Services
                     SystemStatus.Failed => "❌",
                     _ => "⚪"
                 };
-                
+
                 var statusText = status switch
                 {
                     SystemStatus.Ready => "就绪",
@@ -249,7 +246,7 @@ namespace ServerTest.Services
                     _logger.LogInformation("{Icon} [{Module}] {Status}", statusIcon, module, statusText);
                 }
             }
-            
+
             _logger.LogInformation("═══════════════════════════════════════════════════════════");
             _logger.LogInformation("");
         }

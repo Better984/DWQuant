@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using ccxt;
+﻿using ccxt;
 using ServerTest.Models.Indicator;
 using TALib;
 
@@ -83,7 +80,7 @@ namespace ServerTest.Services
 
             if (retCode != Core.RetCode.Success)
             {
-                Console.WriteLine("更新指标出错："+retCode);
+                Console.WriteLine("更新指标出错：" + retCode);
                 return false;
             }
 

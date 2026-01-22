@@ -1,11 +1,9 @@
-using System;
-using System.Net;
-using System.Text.Json;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
 using ServerTest.Services;
+using System.Net;
+using System.Text.Json;
 
 namespace ServerTest.Middleware
 {

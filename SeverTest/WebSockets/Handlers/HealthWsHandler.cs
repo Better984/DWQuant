@@ -1,7 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace ServerTest.WebSockets.Handlers
 {
     public sealed class HealthWsHandler : IWsMessageHandler

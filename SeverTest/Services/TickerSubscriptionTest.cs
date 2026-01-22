@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using ccxt;
 using ccxt.pro;
 
@@ -116,7 +112,7 @@ namespace ServerTest.Services
                 // 使用动态类型访问 markets
                 dynamic dynamicExchange = exchange;
                 var markets = dynamicExchange.markets as Dictionary<string, object>;
-                
+
                 if (markets == null)
                 {
                     Console.WriteLine($"[{exchange.id}] markets 为空，使用默认符号");
@@ -140,7 +136,7 @@ namespace ServerTest.Services
                         bool isSwap = market.swap == true;
                         bool isFuture = market.future == true;
                         bool isContract = market.contract == true;
-                        
+
                         if (isSwap || isFuture || isContract)
                         {
                             return symbol;
@@ -158,7 +154,7 @@ namespace ServerTest.Services
                     bool isContract = market.contract == true;
                     string? quote = market.quote;
                     string? quoteId = market.quoteId;
-                    
+
                     if (baseId == "BTC" && (isSwap || isFuture || isContract))
                     {
                         if (quote == "USDT" || quoteId == "USDT")
@@ -225,7 +221,7 @@ namespace ServerTest.Services
                 try
                 {
                     var ticker = await exchange.WatchTicker(symbol);
-                    
+
                     var timestamp = ticker.timestamp != null
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)ticker.timestamp).LocalDateTime
                         : DateTime.Now;

@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using ServerTest.Models.Strategy;
+using System.Collections.Concurrent;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 
 namespace ServerTest.Services

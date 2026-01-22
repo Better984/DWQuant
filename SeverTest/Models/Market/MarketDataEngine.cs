@@ -1,9 +1,8 @@
-using System.Collections.Concurrent;
-using System.Threading.Channels;
 using ccxt;
-using ccxt.pro;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 
 namespace ServerTest.Services
 {
@@ -14,7 +13,7 @@ namespace ServerTest.Services
     {
         public readonly object Lock = new object();
         public readonly Dictionary<string, List<OHLCV>> Timeframes = new();
-        
+
         // 用于增量聚合：记录每个周期当前正在构建的 K 线
         public readonly Dictionary<string, OHLCV?> CurrentBuckets = new();
     }
@@ -26,13 +25,13 @@ namespace ServerTest.Services
     {
         // 缓存结构：Exchange -> Symbol -> SymbolCache（包含独立锁和所有周期数据）
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SymbolCache>> _cache = new();
-        
+
         // 交易所实例：ExchangeId -> Exchange
         private readonly Dictionary<string, Exchange> _exchanges = new();
-        
+
         // WebSocket 交易所实例：ExchangeId -> Exchange (ccxt.pro)
         private readonly Dictionary<string, Exchange> _wsExchanges = new();
-        
+
         // WebSocket 监听任务管理（跟踪所有后台任务）
         private readonly CancellationTokenSource _cancellationTokenSource = new();
         private readonly ConcurrentDictionary<string, Task> _watchTasks = new();
@@ -45,7 +44,7 @@ namespace ServerTest.Services
                 SingleWriter = false,
                 AllowSynchronousContinuations = false
             });
-        
+
         // 限流信号量：限制并发请求数，避免触发交易所API限流
         private readonly SemaphoreSlim _rateLimiter = new SemaphoreSlim(5, 5); // 最多5个并发请求
 
@@ -65,7 +64,7 @@ namespace ServerTest.Services
                 .Where(tf => tf != MarketDataConfig.TimeframeEnum.m1)
                 .Select(tf => MarketDataConfig.TimeframeToString(tf))
                 .ToArray();
-            
+
             // 启动异步初始化，但不等待
             _initializationTask = InitializeExchangesAsync();
         }
@@ -175,19 +174,19 @@ namespace ServerTest.Services
             foreach (var exchangeId in _exchanges.Keys)
             {
                 _cache[exchangeId] = new ConcurrentDictionary<string, SymbolCache>();
-                
+
                 foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
                 {
                     var symbol = MarketDataConfig.SymbolToString(symbolEnum);
                     var symbolCache = new SymbolCache();
-                    
+
                     foreach (var timeframeEnum in Enum.GetValues<MarketDataConfig.TimeframeEnum>())
                     {
                         var timeframe = MarketDataConfig.TimeframeToString(timeframeEnum);
                         symbolCache.Timeframes[timeframe] = new List<OHLCV>();
                         symbolCache.CurrentBuckets[timeframe] = null;
                     }
-                    
+
                     _cache[exchangeId][symbol] = symbolCache;
                 }
             }
@@ -211,7 +210,7 @@ namespace ServerTest.Services
                 foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
                 {
                     var symbol = MarketDataConfig.SymbolToString(symbolEnum);
-                    
+
                     // 检查交易对是否存在
                     if (!IsSymbolAvailable(restExchange, symbol))
                     {
@@ -248,20 +247,20 @@ namespace ServerTest.Services
         private string FindFuturesSymbol(Exchange exchange, string baseSymbol)
         {
             var cacheKey = $"{exchange.id}_{baseSymbol}";
-            
+
             // 先查缓存
             if (_futuresSymbolCache.TryGetValue(cacheKey, out var cached))
             {
                 return cached;
             }
-            
+
             string result;
             try
             {
                 // 使用动态类型访问 markets
                 dynamic dynamicExchange = exchange;
                 var markets = dynamicExchange.markets as Dictionary<string, object>;
-                
+
                 if (markets == null)
                 {
                     Logger.LogWarning($"[{exchange.id}] markets 为空，使用默认符号");
@@ -288,7 +287,7 @@ namespace ServerTest.Services
                             var isSwap = marketDict.ContainsKey("swap") && marketDict["swap"] is bool swap && swap;
                             var isFuture = marketDict.ContainsKey("future") && marketDict["future"] is bool future && future;
                             var isContract = marketDict.ContainsKey("contract") && marketDict["contract"] is bool contract && contract;
-                            
+
                             if (isSwap || isFuture || isContract)
                             {
                                 // 缓存结果
@@ -313,7 +312,7 @@ namespace ServerTest.Services
                         var quote = marketDict.ContainsKey("quote") ? marketDict["quote"]?.ToString() : null;
                         var quoteId = marketDict.ContainsKey("quoteId") ? marketDict["quoteId"]?.ToString() : null;
                         var marketSymbol = marketDict.ContainsKey("symbol") ? marketDict["symbol"]?.ToString() : null;
-                        
+
                         if (baseId == baseCoin && (isSwap || isFuture || isContract))
                         {
                             if (quote == "USDT" || quoteId == "USDT")
@@ -326,7 +325,7 @@ namespace ServerTest.Services
                         }
                     }
                 }
-                
+
                 // 如果都没找到，使用默认值
                 result = baseSymbol + ":USDT";
             }
@@ -350,7 +349,7 @@ namespace ServerTest.Services
             {
                 // 先尝试查找合约符号
                 var futuresSymbol = FindFuturesSymbol(exchange, symbol);
-                
+
                 // 如果找到的符号和原始符号不同，或者能找到，说明可用
                 if (futuresSymbol != symbol + ":USDT" || futuresSymbol.Contains(":"))
                 {
@@ -360,7 +359,7 @@ namespace ServerTest.Services
                 // 尝试访问 markets
                 dynamic dynamicExchange = exchange;
                 var markets = dynamicExchange.markets as Dictionary<string, object>;
-                
+
                 if (markets == null)
                     return false;
 
@@ -425,19 +424,19 @@ namespace ServerTest.Services
                     lock (symbolCache.Lock)
                     {
                         var cache1m = symbolCache.Timeframes["1m"];
-                        
+
                         // 检查是否是新K线（收线）
-                        var lastTimestamp = cache1m.Count > 0 && cache1m[^1].timestamp != null 
-                            ? (long?)cache1m[^1].timestamp 
+                        var lastTimestamp = cache1m.Count > 0 && cache1m[^1].timestamp != null
+                            ? (long?)cache1m[^1].timestamp
                             : null;
-                        bool isNewCandle = cache1m.Count == 0 || 
+                        bool isNewCandle = cache1m.Count == 0 ||
                                           (lastTimestamp.HasValue && lastTimestamp.Value < timestamp);
 
                         if (isNewCandle)
                         {
                             // 新K线，添加到缓存
                             cache1m.Add(latest);
-                            
+
                             // 保持缓存长度
                             if (cache1m.Count > MarketDataConfig.CacheHistoryLength)
                             {
@@ -465,7 +464,7 @@ namespace ServerTest.Services
                             if (cache1m.Count > 0)
                             {
                                 cache1m[^1] = latest;
-                                
+
                                 // 同时更新其他周期的当前 bucket
                                 UpdateOtherTimeframesCurrentBucket(exchangeId, symbol, latest, symbolCache);
                             }
@@ -494,7 +493,7 @@ namespace ServerTest.Services
             foreach (var timeframe in timeframes)
             {
                 try
-                    {
+                {
                     var tfMs = MarketDataConfig.TimeframeToMs(timeframe);
                     var cacheTf = symbolCache.Timeframes[timeframe];
                     var currentBucket = symbolCache.CurrentBuckets[timeframe];
@@ -519,7 +518,7 @@ namespace ServerTest.Services
                     else
                     {
                         var currentTfStart = currentBucket.Value.timestamp != null ? (long)currentBucket.Value.timestamp : 0;
-                        
+
                         if (tfStart == currentTfStart)
                         {
                             // 同一周期，更新当前 bucket
@@ -537,7 +536,7 @@ namespace ServerTest.Services
                             var finalizedBucket = currentBucket.Value;
                             if (finalizedBucket.low == double.MaxValue) finalizedBucket.low = 0;
                             cacheTf.Add(finalizedBucket);
-                            
+
                             // 保持缓存长度
                             if (cacheTf.Count > MarketDataConfig.CacheHistoryLength)
                             {
@@ -596,7 +595,7 @@ namespace ServerTest.Services
                     if (currentBucket != null)
                     {
                         var currentTfStart = currentBucket.Value.timestamp != null ? (long)currentBucket.Value.timestamp : 0;
-                        
+
                         if (tfStart == currentTfStart)
                         {
                             // 更新当前 bucket（未收线时，只更新 high/low/close，不累加 volume）
@@ -640,7 +639,7 @@ namespace ServerTest.Services
                 foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
                 {
                     var symbol = MarketDataConfig.SymbolToString(symbolEnum);
-                    
+
                     // 检查交易对是否存在
                     if (!IsSymbolAvailable(exchange, symbol))
                     {
@@ -681,7 +680,7 @@ namespace ServerTest.Services
             {
                 // 在请求前延迟，真正限制请求频次
                 await Task.Delay(TimeSpan.FromMilliseconds(200));
-                
+
                 // 计算并输出拉取时间范围
                 var tfMs = MarketDataConfig.TimeframeToMs(timeframe);
                 var now = exchange.milliseconds();
@@ -689,7 +688,7 @@ namespace ServerTest.Services
                 var sinceDateTime = DateTimeOffset.FromUnixTimeMilliseconds(since).ToOffset(TimeSpan.FromHours(8));
                 var nowDateTime = DateTimeOffset.FromUnixTimeMilliseconds(now).ToOffset(TimeSpan.FromHours(8));
                 Logger.LogInformation($"开始拉取 [{exchangeId}] {symbol} {timeframe} 拉取时间范围: {sinceDateTime:yyyy-MM-dd HH:mm:ss} ~ {nowDateTime:yyyy-MM-dd HH:mm:ss}");
-                
+
                 var candles = await FetchOhlcvWithLimit(exchange, futuresSymbol, timeframe, MarketDataConfig.CacheHistoryLength);
 
                 if (!_cache.TryGetValue(exchangeId, out var symbolCacheDict))
@@ -707,7 +706,7 @@ namespace ServerTest.Services
                 lock (symbolCache.Lock)
                 {
                     symbolCache.Timeframes[timeframe] = candles;
-                    
+
                     // 如果是1m数据，初始化其他周期的当前 bucket
                     if (timeframe == "1m" && candles.Count > 0)
                     {
@@ -716,16 +715,16 @@ namespace ServerTest.Services
                 }
 
                 Logger.LogInformation($"[{exchangeId}] {symbol} {timeframe} 实际缓存数量: {candles.Count} 根");
-                
+
                 // 输出数据长度、第一天和最后一天的北京时间
                 if (candles.Count > 0)
                 {
                     var firstTimestamp = candles[0].timestamp ?? 0;
                     var lastTimestamp = candles[^1].timestamp ?? 0;
-                    
+
                     var firstDateTime = DateTimeOffset.FromUnixTimeMilliseconds(firstTimestamp).ToOffset(TimeSpan.FromHours(8));
                     var lastDateTime = DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).ToOffset(TimeSpan.FromHours(8));
-                    
+
                     Logger.LogInformation($"[{exchangeId}] {symbol} {timeframe} 数据长度: {candles.Count} 根, 第一天北京时间: {firstDateTime:yyyy-MM-dd HH:mm:ss}, 最后一天北京时间: {lastDateTime:yyyy-MM-dd HH:mm:ss}");
                 }
             }
@@ -802,7 +801,7 @@ namespace ServerTest.Services
             var tfMs = MarketDataConfig.TimeframeToMs(timeframe);
             var result = new List<OHLCV>();
             var now = exchange.milliseconds();
-            var since = long.Max( now - tfMs * targetBars, 1577808000);
+            var since = long.Max(now - tfMs * targetBars, 1577808000);
             const int maxLimitPerRequest = 1000;
 
             while (result.Count < targetBars)
@@ -961,7 +960,7 @@ namespace ServerTest.Services
             lock (symbolCache.Lock)
             {
                 var result = new List<OHLCV>(candles);
-                
+
                 // 如果是非1m周期，添加当前 bucket（如果存在）
                 if (timeframeStr != "1m")
                 {
@@ -979,10 +978,10 @@ namespace ServerTest.Services
                 if (endTime.HasValue)
                 {
                     var endTimestamp = ((DateTimeOffset)endTime.Value).ToUnixTimeMilliseconds();
-                    var filtered = result.Where(c => 
-                        c.timestamp != null && 
+                    var filtered = result.Where(c =>
+                        c.timestamp != null &&
                         (long)c.timestamp <= endTimestamp).ToList();
-                    
+
                     // 返回最新的 count 根
                     var startIndex = Math.Max(0, filtered.Count - count);
                     return filtered.Skip(startIndex).Take(count).ToList();
@@ -1053,7 +1052,7 @@ namespace ServerTest.Services
         public void Dispose()
         {
             Logger.LogInformation("开始释放 MarketDataEngine 资源...");
-            
+
             // 取消所有任务
             _cancellationTokenSource.Cancel();
 

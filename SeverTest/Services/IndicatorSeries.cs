@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace ServerTest.Services
 {
     internal readonly record struct IndicatorPoint(long Timestamp, double Value);

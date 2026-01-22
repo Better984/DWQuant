@@ -11,7 +11,7 @@ namespace ServerTest.Controllers
     {
         private readonly ExchangePriceService _priceService;
 
-        public PriceController(ILogger<PriceController> logger, ExchangePriceService priceService) 
+        public PriceController(ILogger<PriceController> logger, ExchangePriceService priceService)
             : base(logger)
         {
             _priceService = priceService;

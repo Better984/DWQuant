@@ -1,6 +1,3 @@
-using System;
-using ServerTest.Models;
-
 namespace ServerTest.Models.Indicator
 {
     public readonly record struct IndicatorKey(
