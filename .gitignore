@@ -1,2 +1,8 @@
 # ignore sql dumps
 *.sql
+
+# ignore Visual Studio files
+SeverTest/.vs/
+SeverTest/obj/Debug/
+SeverTest/obj/Debug/net8.0/
+SeverTest/bin/
