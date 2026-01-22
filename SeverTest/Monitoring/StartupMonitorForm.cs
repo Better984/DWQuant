@@ -25,6 +25,7 @@ namespace ServerTest.Monitoring
         private ListView _logList = null!;
         private ListView _statusList = null!;
         private CheckedListBox _sourceFilterList = null!;
+        private CheckedListBox _levelFilterList = null!;
         private Panel _outputPanel = null!;
         private Panel _historyPanel = null!;
         private Panel _networkPanel = null!;
@@ -56,7 +57,9 @@ namespace ServerTest.Monitoring
         private readonly Dictionary<SystemModule, ListViewItem> _statusItems = new();
         private readonly List<StartupMonitorLogEntry> _logEntries = new();
         private readonly HashSet<string> _selectedSources = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<Microsoft.Extensions.Logging.LogLevel> _selectedLevels = new();
         private bool _suppressSourceFilterEvents;
+        private bool _suppressLevelFilterEvents;
         private List<dynamic> _detectedGaps = new();
 
         public StartupMonitorForm(
@@ -169,6 +172,7 @@ namespace ServerTest.Monitoring
             }
 
             TrackSource(entry.Category);
+            TrackLevel(entry.Level);
             _logEntries.Add(entry);
 
             if (_logEntries.Count > MaxLogItems)
@@ -176,7 +180,7 @@ namespace ServerTest.Monitoring
                 _logEntries.RemoveAt(0);
             }
 
-            if (_selectedSources.Contains(entry.Category))
+            if (_selectedSources.Contains(entry.Category) && _selectedLevels.Contains(entry.Level))
             {
                 AppendLogItem(entry);
                 _logList.EnsureVisible(_logList.Items.Count - 1);
@@ -709,21 +713,37 @@ namespace ServerTest.Monitoring
                 Padding = new Padding(6, 34, 6, 6),
             };
 
-            var sourcePanel = new Panel
+            var filterPanel = new Panel
             {
                 Dock = DockStyle.Left,
                 Width = 200,
             };
 
-            var filterLabel = new Label
+            // 使用SplitContainer分隔Level和Source筛选
+            var splitContainer = new SplitContainer
             {
-                Text = "Sources",
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Horizontal,
+                SplitterDistance = 200,
+                SplitterWidth = 4,
+                FixedPanel = FixedPanel.None
+            };
+
+            // Level筛选区域（上方）
+            var levelPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+            };
+
+            var levelFilterLabel = new Label
+            {
+                Text = "Level",
                 Font = new Font("Segoe UI", 9, FontStyle.Regular),
                 Dock = DockStyle.Top,
                 Height = 22,
             };
 
-            var filterActions = new FlowLayoutPanel
+            var levelFilterActions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
                 Height = 32,
@@ -732,26 +752,109 @@ namespace ServerTest.Monitoring
                 WrapContents = false,
             };
 
-            var selectAllButton = new Button
+            var selectAllLevelButton = new Button
             {
                 Text = "All",
                 Width = 70,
                 Height = 24,
             };
-            selectAllButton.Click += (_, __) => SetSourceFilterSelection(true);
+            selectAllLevelButton.Click += (_, __) => SetLevelFilterSelection(true);
 
-            var selectNoneButton = new Button
+            var selectNoneLevelButton = new Button
             {
                 Text = "None",
                 Width = 70,
                 Height = 24,
             };
-            selectNoneButton.Click += (_, __) => SetSourceFilterSelection(false);
+            selectNoneLevelButton.Click += (_, __) => SetLevelFilterSelection(false);
 
-            filterActions.Controls.Add(selectAllButton);
-            filterActions.Controls.Add(selectNoneButton);
+            levelFilterActions.Controls.Add(selectAllLevelButton);
+            levelFilterActions.Controls.Add(selectNoneLevelButton);
 
-            var filterList = new CheckedListBox
+            var levelFilterList = new CheckedListBox
+            {
+                Name = "LevelFilterList",
+                CheckOnClick = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                IntegralHeight = false,
+                Dock = DockStyle.Fill,
+            };
+            levelFilterList.ItemCheck += (_, __) =>
+            {
+                if (_suppressLevelFilterEvents)
+                {
+                    return;
+                }
+
+                if (IsHandleCreated)
+                {
+                    BeginInvoke(new Action(ApplyFilters));
+                }
+                else
+                {
+                    ApplyFilters();
+                }
+            };
+
+            // 初始化Level列表
+            var allLevels = Enum.GetValues<Microsoft.Extensions.Logging.LogLevel>()
+                .OrderBy(l => l)
+                .ToList();
+            _suppressLevelFilterEvents = true;
+            foreach (var level in allLevels)
+            {
+                levelFilterList.Items.Add(level, true);
+            }
+            _suppressLevelFilterEvents = false;
+            _selectedLevels.UnionWith(allLevels);
+
+            levelPanel.Controls.Add(levelFilterList);
+            levelPanel.Controls.Add(levelFilterActions);
+            levelPanel.Controls.Add(levelFilterLabel);
+
+            // Source筛选区域（下方）
+            var sourcePanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+            };
+
+            var sourceFilterLabel = new Label
+            {
+                Text = "Sources",
+                Font = new Font("Segoe UI", 9, FontStyle.Regular),
+                Dock = DockStyle.Top,
+                Height = 22,
+            };
+
+            var sourceFilterActions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 32,
+                FlowDirection = FlowDirection.LeftToRight,
+                Padding = new Padding(0, 2, 0, 4),
+                WrapContents = false,
+            };
+
+            var selectAllSourceButton = new Button
+            {
+                Text = "All",
+                Width = 70,
+                Height = 24,
+            };
+            selectAllSourceButton.Click += (_, __) => SetSourceFilterSelection(true);
+
+            var selectNoneSourceButton = new Button
+            {
+                Text = "None",
+                Width = 70,
+                Height = 24,
+            };
+            selectNoneSourceButton.Click += (_, __) => SetSourceFilterSelection(false);
+
+            sourceFilterActions.Controls.Add(selectAllSourceButton);
+            sourceFilterActions.Controls.Add(selectNoneSourceButton);
+
+            var sourceFilterList = new CheckedListBox
             {
                 Name = "SourceFilterList",
                 CheckOnClick = true,
@@ -759,7 +862,7 @@ namespace ServerTest.Monitoring
                 IntegralHeight = false,
                 Dock = DockStyle.Fill,
             };
-            filterList.ItemCheck += (_, __) =>
+            sourceFilterList.ItemCheck += (_, __) =>
             {
                 if (_suppressSourceFilterEvents)
                 {
@@ -768,13 +871,25 @@ namespace ServerTest.Monitoring
 
                 if (IsHandleCreated)
                 {
-                    BeginInvoke(new Action(ApplySourceFilter));
+                    BeginInvoke(new Action(ApplyFilters));
                 }
                 else
                 {
-                    ApplySourceFilter();
+                    ApplyFilters();
                 }
             };
+
+            sourcePanel.Controls.Add(sourceFilterList);
+            sourcePanel.Controls.Add(sourceFilterActions);
+            sourcePanel.Controls.Add(sourceFilterLabel);
+
+            splitContainer.Panel1.Controls.Add(levelPanel);
+            splitContainer.Panel2.Controls.Add(sourcePanel);
+
+            filterPanel.Controls.Add(splitContainer);
+
+            _sourceFilterList = sourceFilterList;
+            _levelFilterList = levelFilterList;
 
             var list = new ListView
             {
@@ -804,16 +919,12 @@ namespace ServerTest.Monitoring
             logMenu.Items.Add(copyMenuItem);
             list.ContextMenuStrip = logMenu;
 
-            _sourceFilterList = filterList;
             _logList = list;
 
             panel.Controls.Add(title);
             panel.Controls.Add(contentPanel);
-            sourcePanel.Controls.Add(filterList);
-            sourcePanel.Controls.Add(filterActions);
-            sourcePanel.Controls.Add(filterLabel);
             contentPanel.Controls.Add(list);
-            contentPanel.Controls.Add(sourcePanel);
+            contentPanel.Controls.Add(filterPanel);
             list.Dock = DockStyle.Fill;
             return panel;
         }
@@ -901,6 +1012,11 @@ namespace ServerTest.Monitoring
             _selectedSources.Add(category);
         }
 
+        private void TrackLevel(Microsoft.Extensions.Logging.LogLevel level)
+        {
+            // Level已经在初始化时添加，这里不需要额外处理
+        }
+
         private void SetSourceFilterSelection(bool isChecked)
         {
             if (_sourceFilterList.Items.Count == 0)
@@ -918,8 +1034,26 @@ namespace ServerTest.Monitoring
             ApplySourceFilter();
         }
 
-        private void ApplySourceFilter()
+        private void SetLevelFilterSelection(bool isChecked)
         {
+            if (_levelFilterList.Items.Count == 0)
+            {
+                return;
+            }
+
+            _suppressLevelFilterEvents = true;
+            for (var i = 0; i < _levelFilterList.Items.Count; i++)
+            {
+                _levelFilterList.SetItemChecked(i, isChecked);
+            }
+            _suppressLevelFilterEvents = false;
+
+            ApplyFilters();
+        }
+
+        private void ApplyFilters()
+        {
+            // 更新选中的Sources
             _selectedSources.Clear();
             foreach (var item in _sourceFilterList.CheckedItems)
             {
@@ -929,16 +1063,32 @@ namespace ServerTest.Monitoring
                 }
             }
 
+            // 更新选中的Levels
+            _selectedLevels.Clear();
+            foreach (var item in _levelFilterList.CheckedItems)
+            {
+                if (item is Microsoft.Extensions.Logging.LogLevel level)
+                {
+                    _selectedLevels.Add(level);
+                }
+            }
+
+            // 应用筛选
             _logList.BeginUpdate();
             _logList.Items.Clear();
             foreach (var entry in _logEntries)
             {
-                if (_selectedSources.Contains(entry.Category))
+                if (_selectedSources.Contains(entry.Category) && _selectedLevels.Contains(entry.Level))
                 {
                     AppendLogItem(entry);
                 }
             }
             _logList.EndUpdate();
+        }
+
+        private void ApplySourceFilter()
+        {
+            ApplyFilters();
         }
 
         private void CopySelectedLogsToClipboard()
