@@ -51,7 +51,8 @@ namespace ServerTest.Monitoring
                 var form = new StartupMonitorForm(
                     () => historicalCache.GetCacheSnapshots(),
                     () => connectionManager.GetAllConnections(),
-                    downloader);
+                    downloader,
+                    _serviceProvider);
                 _form = form;
 
                 var initialStatuses = startupManager.GetAllStatuses();

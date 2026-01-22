@@ -75,7 +75,9 @@ namespace ServerTest.Services
             MarketDataConfig.TimeframeEnum timeframeEnum,
             DateTime startDate,
             Action<DownloadLogEntry>? log,
-            CancellationToken ct)
+            CancellationToken ct,
+            bool forceDailyOnly = false,
+            DateTime? endDate = null)
         {
             var summary = new DownloadSummary();
             var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
@@ -88,13 +90,16 @@ namespace ServerTest.Services
 
             var symbolNoSlash = symbolStr.Replace("/", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
             var start = startDate.Date;
-            var end = DateTime.UtcNow.Date;
+            var end = endDate?.Date ?? DateTime.UtcNow.Date;
             var firstDataFound = false;
 
             var currentMonthStart = new DateTime(end.Year, end.Month, 1);
             var monthCursor = new DateTime(start.Year, start.Month, 1);
 
-            while (monthCursor < currentMonthStart)
+            // 如果强制日线下载，跳过月下载
+            if (!forceDailyOnly)
+            {
+                while (monthCursor < currentMonthStart)
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -141,9 +146,10 @@ namespace ServerTest.Services
 
                 await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
                 monthCursor = monthCursor.AddMonths(1);
+                }
             }
 
-            var dailyStart = start > currentMonthStart ? start : currentMonthStart;
+            var dailyStart = forceDailyOnly ? start : (start > currentMonthStart ? start : currentMonthStart);
             for (var day = dailyStart; day <= end; day = day.AddDays(1))
             {
                 ct.ThrowIfCancellationRequested();
