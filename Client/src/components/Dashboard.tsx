@@ -22,6 +22,7 @@ import StrategyModule from './StrategyModule';
 import IndicatorModule from './IndicatorModule';
 import DiscoverModule from './DiscoverModule';
 import ChatModule from './ChatModule';
+import IndicatorGeneratorSelector from './IndicatorGeneratorSelector';
 import './Dashboard.css';
 import { getAuthProfile } from '../auth/profileStore';
 import { ensureWsConnected, getWsStatus, onWsStatusChange } from '../network';
@@ -47,6 +48,7 @@ const Dashboard: React.FC = () => {
   const wsNotifiedRef = useRef(false);
   const { success } = useNotification();
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
+  const [showIndicatorGenerator, setShowIndicatorGenerator] = useState(false);
   
   // 菜单项对应的面包屑文本映射
   const menuBreadcrumbMap: { [key: number]: { first: string; second: string } } = {
@@ -345,6 +347,19 @@ const Dashboard: React.FC = () => {
             </div>
             <span className="sidebar-menu-text">我的</span>
           </div>
+
+          <div className="sidebar-test-section">
+            <div className="sidebar-test-title">测试</div>
+            <div className="sidebar-test-actions">
+              <button
+                type="button"
+                className="sidebar-test-button"
+                onClick={() => setShowIndicatorGenerator(true)}
+              >
+                指标创建器
+              </button>
+            </div>
+          </div>
         </div>
         </div>
 
@@ -447,6 +462,11 @@ const Dashboard: React.FC = () => {
       {showUserSettings && (
         <UserSettings onClose={() => setShowUserSettings(false)} />
       )}
+
+      <IndicatorGeneratorSelector
+        open={showIndicatorGenerator}
+        onClose={() => setShowIndicatorGenerator(false)}
+      />
     </div>
   );
 };
