@@ -21,3 +21,7 @@ SeverTest/obj/Debug/net8.0-windows/ServerTest.sourcelink.json
 SeverTest/obj/Debug/net8.0-windows/apphost.exe
 SeverTest/obj/Debug/net8.0-windows/ref/ServerTest.dll
 SeverTest/obj/Debug/net8.0-windows/refint/ServerTest.dll
+SeverTest/obj/project.nuget.cache
+SeverTest/.vs/ServerTest/DesignTimeBuild/.dtbcache.v2
+SeverTest/obj/Debug/net8.0-windows/ServerTest.assets.cache
+SeverTest/obj/Debug/net8.0-windows/ServerTest.csproj.FileListAbsolute.txt

@@ -190,6 +190,14 @@ namespace ServerTest.Services
             return trimmed;
         }
 
+        /// <summary>
+        /// 立即推送行情数据（不受间隔限制，用于K线收线时强制推送）
+        /// </summary>
+        public async Task BroadcastImmediatelyAsync(CancellationToken ct = default)
+        {
+            await BroadcastAsync(ct).ConfigureAwait(false);
+        }
+
         private async Task SendAsync(WebSocketConnection connection, byte[] bytes, CancellationToken ct)
         {
             try

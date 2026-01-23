@@ -25,33 +25,78 @@ namespace ServerTest.Services
         {
             if (!_options.SyncEnabled)
             {
-                _logger.LogInformation("历史行情同步已禁用：配置项 HistoricalData:SyncEnabled=false");
+                _logger.LogInformation("Historical sync disabled: HistoricalData:SyncEnabled=false");
             }
 
             try
             {
                 if (_options.SyncEnabled)
                 {
-                    _logger.LogInformation("历史行情同步开始：检查表结构并执行增量补齐");
+                    _logger.LogInformation("Historical sync start: incremental backfill");
                     await _syncService.SyncIfNeededAsync(stoppingToken);
-                    _logger.LogInformation("历史行情同步完成：表结构检查与增量补齐结束");
+                    _logger.LogInformation("Historical sync done: incremental backfill complete");
                 }
 
                 if (_options.PreloadEnabled)
                 {
                     var preloadStart = ResolvePreloadStartDate();
                     _logger.LogInformation(
-                        "历史行情预热开始：起始时间={StartDate}，最大缓存条数={MaxCacheBars}",
+                        "Historical preload start: start={StartDate}, maxCacheBars={MaxCacheBars}",
                         preloadStart.ToString("yyyy-MM-dd"),
                         _options.MaxCacheBars);
                     await _syncService.PreloadCacheAsync(preloadStart, stoppingToken);
-                    _logger.LogInformation("历史行情预热完成：缓存已就绪");
+                    _logger.LogInformation("Historical preload done");
+                }
+
+                if (_options.SyncEnabled)
+                {
+                    await RunPeriodicSyncAsync(stoppingToken);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "历史行情启动任务失败（同步或预热执行异常）。");
+                _logger.LogWarning(ex, "Historical sync/preload failed during startup");
             }
+        }
+
+        private async Task RunPeriodicSyncAsync(CancellationToken stoppingToken)
+        {
+            var interval = ResolveSyncInterval();
+            _logger.LogInformation("Historical periodic sync enabled: interval={Minutes} minutes", interval.TotalMinutes);
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(interval, stoppingToken);
+                    if (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    _logger.LogInformation("Historical periodic sync start");
+                    await _syncService.SyncIfNeededAsync(stoppingToken);
+                    _logger.LogInformation("Historical periodic sync done");
+                }
+                catch (OperationCanceledException)
+                {
+                    // Shutdown.
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Historical periodic sync failed");
+                }
+            }
+        }
+
+        private TimeSpan ResolveSyncInterval()
+        {
+            if (_options.SyncIntervalMinutes <= 0)
+            {
+                return TimeSpan.FromMinutes(60);
+            }
+
+            return TimeSpan.FromMinutes(_options.SyncIntervalMinutes);
         }
 
         private DateTime ResolvePreloadStartDate()

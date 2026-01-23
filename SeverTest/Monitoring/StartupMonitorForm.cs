@@ -23,7 +23,7 @@ namespace ServerTest.Monitoring
         private Panel _historyPanel = null!;
         private Panel _networkPanel = null!;
         private Panel _downloadPanel = null!;
-        private ListView _historyList = null!;
+        private TreeView _historyTree = null!;
         private ListView _networkUserList = null!;
         private Label _historySummaryLabel = null!;
         private Label _networkSummaryLabel = null!;
@@ -384,7 +384,7 @@ namespace ServerTest.Monitoring
 
             var title = new Label
             {
-                Text = "历史行情缓存",
+                Text = "History Cache",
                 Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 AutoSize = true,
                 Location = new Point(6, 4)
@@ -392,36 +392,31 @@ namespace ServerTest.Monitoring
 
             _historySummaryLabel = new Label
             {
-                Text = "缓存项: 0",
+                Text = "Symbols: 0 | Rows: 0",
                 Font = new Font("Segoe UI", 9, FontStyle.Regular),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(90, 90, 90),
                 Location = new Point(8, 30)
             };
 
-            _historyList = new ListView
+            _historyTree = new TreeView
             {
-                View = View.Details,
-                FullRowSelect = true,
-                GridLines = true,
                 Dock = DockStyle.Bottom,
+                HideSelection = false,
+                FullRowSelect = true,
+                ShowLines = true,
+                ShowNodeToolTips = false,
                 Height = 400
             };
-            _historyList.Columns.Add("交易所", 120);
-            _historyList.Columns.Add("币对", 140);
-            _historyList.Columns.Add("周期", 80);
-            _historyList.Columns.Add("开始时间", 180);
-            _historyList.Columns.Add("结束时间", 180);
-            _historyList.Columns.Add("缓存数量", 90);
 
             panel.Controls.Add(title);
             panel.Controls.Add(_historySummaryLabel);
-            panel.Controls.Add(_historyList);
-            _historyList.Dock = DockStyle.Fill;
+            panel.Controls.Add(_historyTree);
+            _historyTree.Dock = DockStyle.Fill;
             return panel;
         }
 
-        private Panel BuildNetworkPanel()
+private Panel BuildNetworkPanel()
         {
             var panel = new Panel
             {
@@ -1182,21 +1177,116 @@ namespace ServerTest.Monitoring
                 return;
             }
 
-            _historyList.BeginUpdate();
-            _historyList.Items.Clear();
-            foreach (var item in data)
-            {
-                var row = new ListViewItem(item.Exchange);
-                row.SubItems.Add(item.Symbol);
-                row.SubItems.Add(item.Timeframe);
-                row.SubItems.Add(item.StartTime.ToString("yyyy-MM-dd HH:mm:ss"));
-                row.SubItems.Add(item.EndTime.ToString("yyyy-MM-dd HH:mm:ss"));
-                row.SubItems.Add(item.Count.ToString());
-                _historyList.Items.Add(row);
-            }
-            _historyList.EndUpdate();
+            var groups = data
+                .GroupBy(item => item.Symbol, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            _historySummaryLabel.Text = $"缓存项: {data.Count}";
+            var expanded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectExpandedNodes(_historyTree.Nodes, expanded);
+            var selectedKey = _historyTree.SelectedNode?.FullPath;
+            var topKey = _historyTree.TopNode?.FullPath;
+
+            _historyTree.BeginUpdate();
+            _historyTree.Nodes.Clear();
+
+            foreach (var group in groups)
+            {
+                var exchanges = group.Select(item => item.Exchange)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var groupLabel = exchanges.Count <= 1
+                    ? group.Key
+                    : $"{group.Key} [{string.Join(", ", exchanges)}]";
+
+                var symbolNode = new TreeNode(groupLabel);
+                foreach (var item in group.OrderBy(i => i.Timeframe, StringComparer.OrdinalIgnoreCase))
+                {
+                    var line = $"{item.Timeframe} | {item.Count} | {item.StartTime:yyyy-MM-dd HH:mm:ss} -> {item.EndTime:yyyy-MM-dd HH:mm:ss}";
+                    symbolNode.Nodes.Add(new TreeNode(line));
+                }
+
+                _historyTree.Nodes.Add(symbolNode);
+            }
+
+            RestoreExpandedNodes(_historyTree.Nodes, expanded);
+            if (!string.IsNullOrWhiteSpace(selectedKey))
+            {
+                var selectedNode = FindNodeByPath(_historyTree.Nodes, selectedKey);
+                if (selectedNode != null)
+                {
+                    _historyTree.SelectedNode = selectedNode;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(topKey))
+            {
+                var topNode = FindNodeByPath(_historyTree.Nodes, topKey);
+                if (topNode != null)
+                {
+                    _historyTree.TopNode = topNode;
+                }
+            }
+
+            _historyTree.EndUpdate();
+            _historySummaryLabel.Text = $"Symbols: {groups.Count} | Rows: {data.Count}";
+        }
+
+        private static void CollectExpandedNodes(TreeNodeCollection nodes, HashSet<string> expanded)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (node.IsExpanded)
+                {
+                    expanded.Add(node.FullPath);
+                }
+
+                if (node.Nodes.Count > 0)
+                {
+                    CollectExpandedNodes(node.Nodes, expanded);
+                }
+            }
+        }
+
+        private static void RestoreExpandedNodes(TreeNodeCollection nodes, HashSet<string> expanded)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (expanded.Contains(node.FullPath))
+                {
+                    node.Expand();
+                }
+
+                if (node.Nodes.Count > 0)
+                {
+                    RestoreExpandedNodes(node.Nodes, expanded);
+                }
+            }
+        }
+
+        private static TreeNode? FindNodeByPath(TreeNodeCollection nodes, string fullPath)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if (string.Equals(node.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return node;
+                }
+
+                if (node.Nodes.Count > 0)
+                {
+                    var match = FindNodeByPath(node.Nodes, fullPath);
+                    if (match != null)
+                    {
+                        return match;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private void RefreshNetworkData()
