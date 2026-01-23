@@ -377,6 +377,366 @@
   margin-bottom: 8px;
 }
 
+/* Exchange API */
+.user-settings-exchange-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 12px;
+}
+
+.user-settings-exchange-summary {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.user-settings-exchange-state {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.03);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.user-settings-exchange-state-error {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.user-settings-exchange-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.user-settings-exchange-card {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  padding: 12px 16px;
+  background: #ffffff;
+}
+
+.user-settings-exchange-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-settings-exchange-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.user-settings-exchange-count {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.user-settings-exchange-empty {
+  padding: 8px 0 4px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.user-settings-exchange-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.user-settings-exchange-key-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.user-settings-exchange-key-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.user-settings-exchange-key-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #000000;
+}
+
+.user-settings-exchange-key-mask {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 520px;
+}
+
+.user-settings-exchange-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.user-settings-exchange-form {
+  margin-top: 8px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.user-settings-exchange-form-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.user-settings-form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.user-settings-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.user-settings-form-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.user-settings-input,
+.user-settings-select {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #ffffff;
+  color: #000000;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.user-settings-input:focus,
+.user-settings-select:focus {
+  outline: none;
+  border-color: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.05);
+}
+
+.user-settings-input-hint {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.user-settings-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.user-settings-exchange-limit {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.user-settings-action-button {
+  border: none;
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.05);
+  color: #000000;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+}
+
+.user-settings-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.user-settings-action-button--primary {
+  background: #111111;
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.user-settings-action-button--primary:hover:not(:disabled) {
+  background: #000000;
+  transform: translateY(-1px);
+}
+
+.user-settings-action-button--danger {
+  background: rgba(255, 77, 79, 0.12);
+  color: #ff4d4f;
+}
+
+.user-settings-action-button--danger:hover:not(:disabled) {
+  background: rgba(255, 77, 79, 0.18);
+}
+
+/* Notify Channels */
+.user-settings-notify-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 12px;
+}
+
+.user-settings-notify-summary {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.user-settings-notify-state {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.03);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.user-settings-notify-state-error {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.user-settings-notify-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.user-settings-notify-card {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-settings-notify-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.user-settings-notify-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.user-settings-notify-status {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.user-settings-notify-status--active {
+  background: rgba(0, 0, 0, 0.08);
+  color: #000000;
+}
+
+.user-settings-notify-status--idle {
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.user-settings-notify-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-settings-notify-line {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+  word-break: break-all;
+}
+
+.user-settings-notify-actions {
+  margin-top: 6px;
+}
+
+.user-settings-notify-empty {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.user-settings-notify-form {
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.user-settings-notify-form-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.user-settings-notify-hint {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.user-settings-notify-limit {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
 /* Logout row - stick to bottom right of profile tab */
 .user-settings-logout-row {
   margin-top: auto;
@@ -480,6 +840,120 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.dark-theme .user-settings-exchange-card {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark-theme .user-settings-exchange-title,
+.dark-theme .user-settings-exchange-key-label,
+.dark-theme .user-settings-exchange-form-title {
+  color: #ffffff;
+}
+
+.dark-theme .user-settings-exchange-summary,
+.dark-theme .user-settings-exchange-count,
+.dark-theme .user-settings-exchange-empty,
+.dark-theme .user-settings-exchange-key-mask,
+.dark-theme .user-settings-form-label,
+.dark-theme .user-settings-input-hint,
+.dark-theme .user-settings-exchange-limit {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dark-theme .user-settings-exchange-key-item {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark-theme .user-settings-exchange-form {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dark-theme .user-settings-input,
+.dark-theme .user-settings-select {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.dark-theme .user-settings-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.dark-theme .user-settings-action-button {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.dark-theme .user-settings-action-button--primary {
+  background: #ffffff;
+  color: #000000;
+}
+
+.dark-theme .user-settings-action-button--danger {
+  background: rgba(255, 77, 79, 0.2);
+  color: #ffb3b3;
+}
+
+.dark-theme .user-settings-exchange-state {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dark-theme .user-settings-exchange-state-error {
+  background: rgba(255, 77, 79, 0.2);
+  color: #ffb3b3;
+}
+
+.dark-theme .user-settings-notify-card {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark-theme .user-settings-notify-title,
+.dark-theme .user-settings-notify-form-title {
+  color: #ffffff;
+}
+
+.dark-theme .user-settings-notify-summary,
+.dark-theme .user-settings-notify-line,
+.dark-theme .user-settings-notify-empty,
+.dark-theme .user-settings-notify-hint,
+.dark-theme .user-settings-notify-limit {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dark-theme .user-settings-notify-status {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dark-theme .user-settings-notify-status--active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.dark-theme .user-settings-notify-status--idle {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.dark-theme .user-settings-notify-form {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dark-theme .user-settings-notify-state {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dark-theme .user-settings-notify-state-error {
+  background: rgba(255, 77, 79, 0.2);
+  color: #ffb3b3;
+}
+
 .dark-theme .user-settings-divider {
   border-top-color: rgba(255, 255, 255, 0.1);
 }
@@ -515,5 +989,27 @@
   .user-settings-nav-item {
     flex-shrink: 0;
     min-width: fit-content;
+  }
+
+  .user-settings-form-row {
+    flex-direction: column;
+  }
+
+  .user-settings-exchange-key-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .user-settings-exchange-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .user-settings-exchange-key-mask {
+    max-width: 100%;
+  }
+
+  .user-settings-notify-grid {
+    grid-template-columns: 1fr;
   }
 }
