@@ -1,20 +1,24 @@
 {
   "format": 1,
   "restore": {
-    "D:\\UGit\\DWQuant\\SeverTest\\ServerTest.csproj": {}
+    "E:\\Study\\DWQuant\\SeverTest\\ServerTest.csproj": {}
   },
   "projects": {
-    "D:\\UGit\\DWQuant\\SeverTest\\ServerTest.csproj": {
+    "E:\\Study\\DWQuant\\SeverTest\\ServerTest.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\UGit\\DWQuant\\SeverTest\\ServerTest.csproj",
+        "projectUniqueName": "E:\\Study\\DWQuant\\SeverTest\\ServerTest.csproj",
         "projectName": "ServerTest",
-        "projectPath": "D:\\UGit\\DWQuant\\SeverTest\\ServerTest.csproj",
-        "packagesPath": "C:\\Users\\30558\\.nuget\\packages\\",
-        "outputPath": "D:\\UGit\\DWQuant\\SeverTest\\obj\\",
+        "projectPath": "E:\\Study\\DWQuant\\SeverTest\\ServerTest.csproj",
+        "packagesPath": "C:\\Users\\Adminis\\.nuget\\packages\\",
+        "outputPath": "E:\\Study\\DWQuant\\SeverTest\\obj\\",
         "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
         "configFilePaths": [
-          "C:\\Users\\30558\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\Adminis\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [
@@ -118,24 +122,6 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
-          "downloadDependencies": [
-            {
-              "name": "Microsoft.AspNetCore.App.Ref",
-              "version": "[8.0.23, 8.0.23]"
-            },
-            {
-              "name": "Microsoft.NETCore.App.Host.win-x64",
-              "version": "[8.0.23, 8.0.23]"
-            },
-            {
-              "name": "Microsoft.NETCore.App.Ref",
-              "version": "[8.0.23, 8.0.23]"
-            },
-            {
-              "name": "Microsoft.WindowsDesktop.App.Ref",
-              "version": "[8.0.23, 8.0.23]"
-            }
-          ],
           "frameworkReferences": {
             "Microsoft.AspNetCore.App": {
               "privateAssets": "none"
