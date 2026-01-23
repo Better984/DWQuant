@@ -121,7 +121,9 @@ builder.Services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.Acc
 builder.Services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.MarketSubscribeHandler>();
 builder.Services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.MarketUnsubscribeHandler>();
 builder.Services.AddSingleton<ServerTest.WebSockets.Subscriptions.IMarketSubscriptionStore, ServerTest.WebSockets.Subscriptions.InMemoryMarketSubscriptionStore>();
-builder.Services.AddHostedService<MarketTickerBroadcastService>();
+builder.Services.AddSingleton<MarketTickerBroadcastService>();
+builder.Services.AddHostedService<MarketTickerBroadcastService>(sp => sp.GetRequiredService<MarketTickerBroadcastService>());
+builder.Services.AddHostedService<KlineCloseListenerService>();
 
 // 配置选项
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection("RateLimit"));

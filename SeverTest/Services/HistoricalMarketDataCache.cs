@@ -114,8 +114,13 @@ namespace ServerTest.Services
         public async Task WarmUpCacheAsync(DateTime startDate, CancellationToken ct = default)
         {
             // 预热缓存：按交易所/币对/周期读取数据库并写入内存
+            // 只预热币安
+            List<MarketDataConfig.ExchangeEnum> exchangesToPreload = new()
+            {
+                MarketDataConfig.ExchangeEnum.Binance
+            };
             var preloadLimit = ResolvePreloadLimit();
-            foreach (var exchangeEnum in Enum.GetValues<MarketDataConfig.ExchangeEnum>())
+            foreach (var exchangeEnum in exchangesToPreload)//Enum.GetValues<MarketDataConfig.ExchangeEnum>())
             {
                 var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
                 foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
