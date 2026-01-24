@@ -9,6 +9,14 @@ import PlusIcon from '../assets/SnowUI/icon/Plus.svg';
 import FilePlusIcon from '../assets/SnowUI/icon/FilePlus.svg';
 import FileTextIcon from '../assets/SnowUI/icon/FileText.svg';
 import ShareNetworkIcon from '../assets/SnowUI/icon/ShareNetwork.svg';
+import BinanceLogo from '../assets/SnowUI/cexlogo/Binance.svg';
+import BitgetLogo from '../assets/SnowUI/cexlogo/bitget.svg';
+import BTCIcon from '../assets/SnowUI/cryptoicon/BTC.svg';
+import ETHIcon from '../assets/SnowUI/cryptoicon/ETH.svg';
+import XRPIcon from '../assets/SnowUI/cryptoicon/XRP.svg';
+import SOLIcon from '../assets/SnowUI/cryptoicon/SOL.svg';
+import DOGEIcon from '../assets/SnowUI/cryptoicon/DOGE.svg';
+import BNBIcon from '../assets/SnowUI/cryptoicon/BNB.svg';
 import IndicatorGeneratorSelector, { type GeneratedIndicatorPayload } from './IndicatorGeneratorSelector';
 import { Dialog, useNotification } from './ui';
 
@@ -154,6 +162,8 @@ const StrategyModule: React.FC = () => {
   const [isStrategyEditorOpen, setIsStrategyEditorOpen] = useState(false);
   const [isIndicatorGeneratorOpen, setIsIndicatorGeneratorOpen] = useState(false);
   const [selectedIndicators, setSelectedIndicators] = useState<GeneratedIndicatorPayload[]>([]);
+  const [isConfigReviewOpen, setIsConfigReviewOpen] = useState(false);
+  const [isLogicPreviewVisible, setIsLogicPreviewVisible] = useState(false);
   const { error, success } = useNotification();
   const [conditionContainers, setConditionContainers] = useState<ConditionContainer[]>([
     { id: 'open-long', title: '开多条件', enabled: true, required: false, groups: [] },
@@ -161,6 +171,27 @@ const StrategyModule: React.FC = () => {
     { id: 'close-long', title: '平多条件', enabled: true, required: false, groups: [] },
     { id: 'close-short', title: '平空条件', enabled: true, required: false, groups: [] },
   ]);
+  const [tradeConfig, setTradeConfig] = useState<StrategyTradeConfig>({
+    exchange: 'bitget',
+    symbol: 'BTC/USDT',
+    timeframeSec: 60,
+    positionMode: 'LongShort',
+    openConflictPolicy: 'GiveUp',
+    sizing: {
+      orderQty: 0.001,
+      maxPositionQty: 10,
+      leverage: 100,
+    },
+    risk: {
+      takeProfitPct: 0.1,
+      stopLossPct: 0.05,
+      trailing: {
+        enabled: false,
+        activationProfitPct: 0.05,
+        closeOnDrawdownPct: 0.01,
+      },
+    },
+  });
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [conditionDraft, setConditionDraft] = useState<ConditionItem | null>(null);
   const [conditionEditTarget, setConditionEditTarget] = useState<ConditionEditTarget | null>(null);
@@ -175,12 +206,66 @@ const StrategyModule: React.FC = () => {
     { id: 'create', label: '创建策略', icon: PlusIcon },
   ];
 
+  const exchangeOptions = [
+    { value: 'binance', label: '币安', icon: BinanceLogo },
+    { value: 'okx', label: 'OKX' },
+    { value: 'bitget', label: 'Bitget', icon: BitgetLogo },
+  ];
+
+  const symbolOptions = [
+    { value: 'BTC/USDT', label: 'BTC', icon: BTCIcon },
+    { value: 'ETH/USDT', label: 'ETH', icon: ETHIcon },
+    { value: 'XRP/USDT', label: 'XRP', icon: XRPIcon },
+    { value: 'SOL/USDT', label: 'SOL', icon: SOLIcon },
+    { value: 'DOGE/USDT', label: 'DOGE', icon: DOGEIcon },
+    { value: 'BNB/USDT', label: 'BNB', icon: BNBIcon },
+  ];
+
+  const timeframeOptions = [
+    { value: 60, label: '1m' },
+    { value: 180, label: '3m' },
+    { value: 300, label: '5m' },
+    { value: 900, label: '15m' },
+    { value: 1800, label: '30m' },
+    { value: 3600, label: '1h' },
+    { value: 7200, label: '2h' },
+    { value: 14400, label: '4h' },
+    { value: 21600, label: '6h' },
+    { value: 28800, label: '8h' },
+    { value: 43200, label: '12h' },
+    { value: 86400, label: '1d' },
+    { value: 259200, label: '3d' },
+    { value: 604800, label: '1w' },
+    { value: 2592000, label: '1mo' },
+  ];
+
+  const timeframeSecondsMap = useMemo(() => {
+    return new Map(timeframeOptions.map((option) => [option.label, option.value]));
+  }, [timeframeOptions]);
+
+  const leverageOptions = [10, 20, 50, 100];
+
   const openStrategyEditor = () => {
     setIsStrategyEditorOpen(true);
   };
 
   const closeStrategyEditor = () => {
     setIsStrategyEditorOpen(false);
+  };
+
+  const openConfigReview = () => {
+    setIsConfigReviewOpen(true);
+    setIsLogicPreviewVisible(false);
+    if (selectedIndicators.length > 0 && tradeConfig.timeframeSec === 60) {
+      const derived = resolveTradeTimeframeSec();
+      if (derived) {
+        setTradeConfig((prev) => ({ ...prev, timeframeSec: derived }));
+      }
+    }
+  };
+
+  const closeConfigReview = () => {
+    setIsConfigReviewOpen(false);
   };
 
   const generateId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -202,25 +287,20 @@ const StrategyModule: React.FC = () => {
     if (!raw) {
       return null;
     }
-    const value = raw.trim().toLowerCase();
+    const value = raw.trim().toLowerCase().replace(/\s+/g, '');
     if (!value) {
       return null;
     }
-    const match = value.match(/^(\d+)([smhdw])$/);
-    const swappedMatch = value.match(/^([smhdw])(\d+)$/);
-    const size = match ? Number(match[1]) : swappedMatch ? Number(swappedMatch[2]) : NaN;
-    const unit = match ? match[2] : swappedMatch ? swappedMatch[1] : '';
-    if (!unit || Number.isNaN(size)) {
+    const direct = timeframeSecondsMap.get(value);
+    if (direct) {
+      return direct;
+    }
+    const match = value.match(/^([a-z]+)(\d+)$/);
+    if (!match) {
       return null;
     }
-    const multiplier = {
-      s: 1,
-      m: 60,
-      h: 60 * 60,
-      d: 60 * 60 * 24,
-      w: 60 * 60 * 24 * 7,
-    }[unit];
-    return multiplier ? size * multiplier : null;
+    const swapped = `${match[2]}${match[1]}`;
+    return timeframeSecondsMap.get(swapped) ?? null;
   };
 
   const resolveTradeTimeframeSec = () => {
@@ -232,6 +312,42 @@ const StrategyModule: React.FC = () => {
       }
     }
     return 60;
+  };
+
+  const updateTradeSizing = (key: keyof StrategyTradeConfig['sizing'], value: number) => {
+    setTradeConfig((prev) => ({
+      ...prev,
+      sizing: {
+        ...prev.sizing,
+        [key]: value,
+      },
+    }));
+  };
+
+  const updateTradeRisk = (key: keyof StrategyTradeConfig['risk'], value: number) => {
+    setTradeConfig((prev) => ({
+      ...prev,
+      risk: {
+        ...prev.risk,
+        [key]: value,
+      },
+    }));
+  };
+
+  const updateTrailingRisk = (
+    key: keyof StrategyTradeConfig['risk']['trailing'],
+    value: number | boolean,
+  ) => {
+    setTradeConfig((prev) => ({
+      ...prev,
+      risk: {
+        ...prev.risk,
+        trailing: {
+          ...prev.risk.trailing,
+          [key]: value,
+        },
+      },
+    }));
   };
 
   const formatIndicatorName = (indicator: GeneratedIndicatorPayload) => {
@@ -324,6 +440,98 @@ const StrategyModule: React.FC = () => {
   const indicatorValueMap = useMemo(() => {
     return new Map(indicatorOutputOptions.map((option) => [option.id, option]));
   }, [indicatorOutputOptions]);
+
+  const outputHintMap = useMemo(() => {
+    const map = new Map<string, string>();
+    selectedIndicators.forEach((indicator) => {
+      (indicator.outputs || []).forEach((output) => {
+        map.set(`${indicator.code}:${output.key}`, output.hint || output.key);
+      });
+    });
+    return map;
+  }, [selectedIndicators]);
+
+  const formatTimeframeLabel = (raw?: string) => {
+    if (!raw) {
+      return '';
+    }
+    const value = raw.trim().toLowerCase().replace(/\s+/g, '');
+    if (!value) {
+      return '';
+    }
+    if (timeframeSecondsMap.has(value)) {
+      return value;
+    }
+    const match = value.match(/^([a-z]+)(\d+)$/);
+    if (!match) {
+      return value;
+    }
+    const swapped = `${match[2]}${match[1]}`;
+    return swapped;
+  };
+
+  const formatValueRefLabel = (ref?: StrategyValueRef | null) => {
+    if (!ref) {
+      return '未配置';
+    }
+    const refType = (ref.refType || '').toLowerCase();
+    if (refType === 'const') {
+      return ref.input?.trim() || '0';
+    }
+    if (refType === 'field') {
+      const timeframe = formatTimeframeLabel(ref.timeframe);
+      const inputLabel = ref.input || 'Field';
+      return timeframe ? `${inputLabel} ${timeframe}` : inputLabel;
+    }
+    const timeframe = formatTimeframeLabel(ref.timeframe);
+    const paramsLabel = ref.params && ref.params.length > 0 ? ref.params.join(',') : '默认参数';
+    const outputKey = ref.output || 'Value';
+    const outputLabel = outputHintMap.get(`${ref.indicator}:${outputKey}`) || outputKey;
+    const indicatorLabel = ref.indicator || 'Indicator';
+    const timeframeLabel = timeframe ? ` ${timeframe}` : '';
+    return `${indicatorLabel}${timeframeLabel} (${paramsLabel}) ${outputLabel}`.trim();
+  };
+
+  const getMethodLabel = (method: string) => {
+    const rawLabel = methodOptions.find((option) => option.value === method)?.label || method;
+    return rawLabel.split(' ')[0];
+  };
+
+  const conditionSummarySections = useMemo(() => {
+    const sections = [
+      { id: 'open-long', label: '开多' },
+      { id: 'open-short', label: '开空' },
+      { id: 'close-long', label: '平多' },
+      { id: 'close-short', label: '平空' },
+    ];
+    return sections.map((section) => {
+      const container = conditionContainers.find((item) => item.id === section.id);
+      const groups = container?.groups ?? [];
+      const groupSummaries = groups.map((group, groupIndex) => {
+        const conditions = group.conditions.map((condition, conditionIndex) => {
+          const leftOption = indicatorValueMap.get(condition.leftValueId);
+          const leftLabel = formatValueRefLabel(leftOption?.ref);
+          const rightLabel =
+            condition.rightValueType === 'number'
+              ? condition.rightNumber?.trim() || '0'
+              : formatValueRefLabel(indicatorValueMap.get(condition.rightValueId || '')?.ref);
+          const methodLabel = getMethodLabel(condition.method);
+          const statusLabel = !condition.enabled ? '（未启用）' : condition.required ? '（必须）' : '';
+          return `条件${conditionIndex + 1}：${leftLabel} ${methodLabel} ${rightLabel}${statusLabel}`;
+        });
+        return {
+          title: `第${groupIndex + 1}个条件组${group.required ? '（必须满足）' : ''}${
+            group.enabled ? '' : '（未启用）'
+          }`,
+          conditions: conditions.length > 0 ? conditions : ['暂无条件'],
+        };
+      });
+      return {
+        title: `${section.label} 共${groups.length}个条件组${container?.enabled ? '' : '（未启用）'}`,
+        groups: groupSummaries.length > 0 ? groupSummaries : [{ title: '暂无条件组', conditions: [] }],
+      };
+    });
+  }, [conditionContainers, indicatorValueMap, methodOptions, outputHintMap]);
 
   const buildConstantValueRef = (
     rawValue: string | undefined,
@@ -421,24 +629,16 @@ const StrategyModule: React.FC = () => {
 
   const buildStrategyConfig = (): StrategyConfig => ({
     trade: {
-      exchange: 'Bitget',
-      symbol: 'BTC/USDT',
-      timeframeSec: resolveTradeTimeframeSec(),
-      positionMode: 'LongShort',
-      openConflictPolicy: 'GiveUp',
-      sizing: {
-        orderQty: 0.001,
-        maxPositionQty: 10,
-        leverage: 100,
-      },
+      exchange: tradeConfig.exchange,
+      symbol: tradeConfig.symbol,
+      timeframeSec: tradeConfig.timeframeSec,
+      positionMode: tradeConfig.positionMode,
+      openConflictPolicy: tradeConfig.openConflictPolicy,
+      sizing: { ...tradeConfig.sizing },
       risk: {
-        takeProfitPct: 0.1,
-        stopLossPct: 0.05,
-        trailing: {
-          enabled: false,
-          activationProfitPct: 0.05,
-          closeOnDrawdownPct: 0.01,
-        },
+        takeProfitPct: tradeConfig.risk.takeProfitPct,
+        stopLossPct: tradeConfig.risk.stopLossPct,
+        trailing: { ...tradeConfig.risk.trailing },
       },
     },
     logic: {
@@ -453,15 +653,25 @@ const StrategyModule: React.FC = () => {
     },
   });
 
-  const handleGenerateConfig = () => {
-    const config = buildStrategyConfig();
-    const payload = JSON.stringify(config, null, 2);
+  const configPreview = useMemo(() => {
+    return buildStrategyConfig();
+  }, [conditionContainers, tradeConfig, indicatorValueMap]);
+
+  const logicPreview = useMemo(() => {
+    return JSON.stringify(configPreview.logic, null, 2);
+  }, [configPreview]);
+
+  const handleConfirmGenerate = () => {
+    const payload = JSON.stringify(configPreview, null, 2);
     if (!navigator.clipboard?.writeText) {
       error('当前环境不支持复制到剪贴板');
       return;
     }
     navigator.clipboard.writeText(payload).then(
-      () => success('配置已复制到剪贴板'),
+      () => {
+        success('配置已复制到剪贴板');
+        closeConfigReview();
+      },
       () => error('复制失败，请稍后重试'),
     );
   };
@@ -934,8 +1144,8 @@ const StrategyModule: React.FC = () => {
                 </div>
               </div>
               <div className="strategy-editor-footer">
-                <button className="strategy-generate-button" onClick={handleGenerateConfig}>
-                  生成配置并复制
+                <button className="strategy-generate-button" onClick={openConfigReview}>
+                  生成配置
                 </button>
               </div>
             </div>
@@ -1092,6 +1302,284 @@ const StrategyModule: React.FC = () => {
               )}
             </div>
             {conditionError && <div className="condition-form-error">{conditionError}</div>}
+          </div>
+        </div>
+      </Dialog>
+      <Dialog
+        open={isConfigReviewOpen}
+        onClose={closeConfigReview}
+        title="生成策略配置"
+        cancelText="取消"
+        confirmText="复制配置"
+        onConfirm={handleConfirmGenerate}
+        className="strategy-config-dialog"
+      >
+        <div className="strategy-config-dialog-body">
+          <div className="strategy-config-preview">
+            <div className="strategy-config-preview-header">
+              <div className="strategy-config-preview-title">
+                {isLogicPreviewVisible ? '逻辑配置' : '条件概览'}
+              </div>
+              <button
+                type="button"
+                className="strategy-config-toggle"
+                onClick={() => setIsLogicPreviewVisible((prev) => !prev)}
+              >
+                {isLogicPreviewVisible ? '查看概览' : '查看 JSON'}
+              </button>
+            </div>
+            {isLogicPreviewVisible ? (
+              <pre className="strategy-config-code">{logicPreview}</pre>
+            ) : (
+              <div className="strategy-config-summary">
+                {conditionSummarySections.map((section) => (
+                  <div key={section.title} className="strategy-config-summary-section">
+                    <div className="strategy-config-summary-title">{section.title}</div>
+                    {section.groups.map((group) => (
+                      <div key={`${section.title}-${group.title}`} className="strategy-config-summary-group">
+                        <div className="strategy-config-summary-group-title">{group.title}</div>
+                        {group.conditions.length > 0 && (
+                          <div className="strategy-config-summary-list">
+                            {group.conditions.map((line, index) => (
+                              <div
+                                key={`${group.title}-${index}`}
+                                className="strategy-config-summary-item"
+                              >
+                                {line}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="strategy-config-trade">
+            <div className="strategy-config-trade-title">交易规则</div>
+            <div className="trade-form-section">
+              <div className="trade-form-label">目标交易所</div>
+              <div className="trade-option-grid">
+                {exchangeOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`trade-option-card ${
+                      tradeConfig.exchange === option.value ? 'active' : ''
+                    }`}
+                    onClick={() =>
+                      setTradeConfig((prev) => ({
+                        ...prev,
+                        exchange: option.value,
+                      }))
+                    }
+                  >
+                    {option.icon ? (
+                      <img className="trade-option-icon" src={option.icon} alt={option.label} />
+                    ) : (
+                      <div className="trade-option-icon-text">{option.label}</div>
+                    )}
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="trade-form-section">
+              <div className="trade-form-label">交易对</div>
+              <div className="trade-option-grid">
+                {symbolOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`trade-option-card ${
+                      tradeConfig.symbol === option.value ? 'active' : ''
+                    }`}
+                    onClick={() =>
+                      setTradeConfig((prev) => ({
+                        ...prev,
+                        symbol: option.value,
+                      }))
+                    }
+                  >
+                    <img className="trade-option-icon" src={option.icon} alt={option.label} />
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="trade-form-section">
+              <div className="trade-form-label">交易周期</div>
+              <div className="trade-chip-group">
+                {timeframeOptions.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className={`trade-chip ${
+                      tradeConfig.timeframeSec === option.value ? 'active' : ''
+                    }`}
+                    onClick={() =>
+                      setTradeConfig((prev) => ({
+                        ...prev,
+                        timeframeSec: option.value,
+                      }))
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="trade-form-row">
+              <div className="trade-form-field">
+                <div className="trade-form-label">单次开仓数量</div>
+                <div className="trade-input-group">
+                  <input
+                    className="trade-input"
+                    type="number"
+                    min={0}
+                    step="0.0001"
+                    value={tradeConfig.sizing.orderQty}
+                    onChange={(event) =>
+                      updateTradeSizing('orderQty', Number(event.target.value) || 0)
+                    }
+                  />
+                  <span className="trade-input-suffix">张</span>
+                </div>
+              </div>
+              <div className="trade-form-field">
+                <div className="trade-form-label">最大持仓数量</div>
+                <div className="trade-input-group">
+                  <input
+                    className="trade-input"
+                    type="number"
+                    min={0}
+                    step="0.0001"
+                    value={tradeConfig.sizing.maxPositionQty}
+                    onChange={(event) =>
+                      updateTradeSizing('maxPositionQty', Number(event.target.value) || 0)
+                    }
+                  />
+                  <span className="trade-input-suffix">张</span>
+                </div>
+              </div>
+            </div>
+            <div className="trade-form-section">
+              <div className="trade-form-label">杠杆</div>
+              <div className="trade-chip-group">
+                {leverageOptions.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`trade-chip ${
+                      tradeConfig.sizing.leverage === value ? 'active' : ''
+                    }`}
+                    onClick={() => updateTradeSizing('leverage', value)}
+                  >
+                    {value}x
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="trade-form-row">
+              <div className="trade-form-field">
+                <div className="trade-form-label">止盈比例</div>
+                <div className="trade-input-group">
+                  <input
+                    className="trade-input"
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={tradeConfig.risk.takeProfitPct * 100}
+                    onChange={(event) =>
+                      updateTradeRisk('takeProfitPct', (Number(event.target.value) || 0) / 100)
+                    }
+                  />
+                  <span className="trade-input-suffix">%</span>
+                </div>
+              </div>
+              <div className="trade-form-field">
+                <div className="trade-form-label">止损比例</div>
+                <div className="trade-input-group">
+                  <input
+                    className="trade-input"
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={tradeConfig.risk.stopLossPct * 100}
+                    onChange={(event) =>
+                      updateTradeRisk('stopLossPct', (Number(event.target.value) || 0) / 100)
+                    }
+                  />
+                  <span className="trade-input-suffix">%</span>
+                </div>
+              </div>
+            </div>
+            <div className="trade-form-section">
+              <label className="trade-toggle">
+                <input
+                  type="checkbox"
+                  checked={tradeConfig.risk.trailing.enabled}
+                  onChange={() =>
+                    updateTrailingRisk('enabled', !tradeConfig.risk.trailing.enabled)
+                  }
+                />
+                <span className="trade-toggle-indicator" />
+                <span className="trade-toggle-label">启用移动止盈止损</span>
+              </label>
+              <div
+                className={`trade-trailing-panel ${
+                  tradeConfig.risk.trailing.enabled ? '' : 'is-disabled'
+                }`}
+              >
+                <div className="trade-form-row">
+                  <div className="trade-form-field">
+                    <div className="trade-form-label">触发收益阈值</div>
+                    <div className="trade-input-group">
+                      <input
+                        className="trade-input"
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={tradeConfig.risk.trailing.activationProfitPct * 100}
+                        onChange={(event) =>
+                          updateTrailingRisk(
+                            'activationProfitPct',
+                            (Number(event.target.value) || 0) / 100,
+                          )
+                        }
+                        disabled={!tradeConfig.risk.trailing.enabled}
+                      />
+                      <span className="trade-input-suffix">%</span>
+                    </div>
+                  </div>
+                  <div className="trade-form-field">
+                    <div className="trade-form-label">回撤触发比例</div>
+                    <div className="trade-input-group">
+                      <input
+                        className="trade-input"
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={tradeConfig.risk.trailing.closeOnDrawdownPct * 100}
+                        onChange={(event) =>
+                          updateTrailingRisk(
+                            'closeOnDrawdownPct',
+                            (Number(event.target.value) || 0) / 100,
+                          )
+                        }
+                        disabled={!tradeConfig.risk.trailing.enabled}
+                      />
+                      <span className="trade-input-suffix">%</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="trade-form-hint">
+                  触发后按回撤比例自动止盈。
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </Dialog>
