@@ -34,45 +34,7 @@
                 {
                   "enabled": true,
                   "minPassConditions": 1,
-                  "conditions": [
-                    {
-                      "enabled": true,
-                      "required": false,
-                      "method": "GreaterThanOrEqual",
-                      "args": [
-                        {
-                          "refType": "Indicator",
-                          "indicator": "MACD",
-                          "timeframe": "m1",
-                          "input": "Close",
-                          "params": [
-                            14,
-                            14,
-                            9
-                          ],
-                          "output": "MACD",
-                          "offsetRange": [
-                            1,
-                            1
-                          ],
-                          "calcMode": "OnBarClose"
-                        },
-                        {
-                          "refType": "Const",
-                          "indicator": "",
-                          "timeframe": "m1",
-                          "input": "0",
-                          "params": [],
-                          "output": "Value",
-                          "offsetRange": [
-                            0,
-                            0
-                          ],
-                          "calcMode": "OnBarClose"
-                        }
-                      ]
-                    }
-                  ]
+                  "conditions": []
                 }
               ]
             }
@@ -101,51 +63,7 @@
             "checks": {
               "enabled": true,
               "minPassGroups": 1,
-              "groups": [
-                {
-                  "enabled": true,
-                  "minPassConditions": 1,
-                  "conditions": [
-                    {
-                      "enabled": true,
-                      "required": false,
-                      "method": "GreaterThanOrEqual",
-                      "args": [
-                        {
-                          "refType": "Indicator",
-                          "indicator": "MACD",
-                          "timeframe": "m1",
-                          "input": "Close",
-                          "params": [
-                            14,
-                            14,
-                            9
-                          ],
-                          "output": "MACD Hist",
-                          "offsetRange": [
-                            1,
-                            1
-                          ],
-                          "calcMode": "OnBarClose"
-                        },
-                        {
-                          "refType": "Const",
-                          "indicator": "",
-                          "timeframe": "m1",
-                          "input": "0",
-                          "params": [],
-                          "output": "Value",
-                          "offsetRange": [
-                            0,
-                            0
-                          ],
-                          "calcMode": "OnBarClose"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
+              "groups": []
             }
           }
         ],
