@@ -58,9 +58,21 @@ interface ParamDefinition {
   enumOptions?: TalibEnumOption[];
 }
 
+export interface GeneratedIndicatorPayload {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  outputs: Array<{ key: string; hint?: string }>;
+  config: Record<string, unknown>;
+  configText: string;
+}
+
 interface IndicatorGeneratorSelectorProps {
   open: boolean;
   onClose: () => void;
+  onGenerated?: (indicator: GeneratedIndicatorPayload) => void;
+  autoCloseOnGenerate?: boolean;
 }
 
 const INPUT_OPTIONS = [
@@ -86,10 +98,18 @@ const OFFSET_DEFAULT = { min: '1', max: '1' };
 const getIndicatorName = (indicator: TalibIndicator) =>
   indicator.name_en || indicator.abbr_en || indicator.code;
 
+const getIndicatorDisplayName = (indicator: TalibIndicator) =>
+  indicator.name_cn || indicator.name_en || indicator.abbr_en || indicator.code;
+
 const getIndicatorCategory = (indicator: TalibIndicator) =>
   indicator.indicator_type || indicator.group || 'Other';
 
-const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({ open, onClose }) => {
+const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
+  open,
+  onClose,
+  onGenerated,
+  autoCloseOnGenerate = false,
+}) => {
   const { success, error } = useNotification();
   const [catalog, setCatalog] = useState<TalibRoot | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -327,6 +347,21 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     const formatted = JSON.stringify(config, null, 2);
     setGeneratedConfig(formatted);
     success('已生成指标配置');
+
+    if (onGenerated) {
+      onGenerated({
+        id: `${activeIndicator.code}-${Date.now()}`,
+        code: activeIndicator.code,
+        name: getIndicatorName(activeIndicator),
+        category: getIndicatorCategory(activeIndicator),
+        outputs: activeIndicator.outputs || [],
+        config: config as Record<string, unknown>,
+        configText: formatted,
+      });
+      if (autoCloseOnGenerate) {
+        onClose();
+      }
+    }
   };
 
   const handleCopy = () => {
@@ -404,11 +439,11 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                         >
                           <div className="indicator-generator__card-code">{indicator.code}</div>
                           <div className="indicator-generator__card-name">
-                            {getIndicatorName(indicator)}
+                            {getIndicatorDisplayName(indicator)}
                           </div>
-                          {indicator.inputs?.shape && (
+                          {indicator.outputs && indicator.outputs.length > 0 && (
                             <div className="indicator-generator__card-meta">
-                              输入: {indicator.inputs.shape}
+                              输出: {indicator.outputs.map((output) => output.key).join(', ')}
                             </div>
                           )}
                         </button>
