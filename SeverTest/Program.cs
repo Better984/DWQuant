@@ -73,6 +73,7 @@ builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 builder.Services.AddDbInfrastructure(builder.Configuration);
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddSingleton<OSSService>();
 builder.Services.Configure<HistoricalMarketDataOptions>(builder.Configuration.GetSection("HistoricalData"));
 builder.Services.AddSingleton<HistoricalMarketDataCache>();
 builder.Services.AddSingleton<HistoricalMarketDataSyncService>();

@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { clearAuthProfile, getAuthProfile } from '../auth/profileStore';
-import { clearToken, disconnectWs, getToken, HttpClient, HttpError } from '../network';
+import { clearAuthProfile, getAuthProfile, setAuthProfile } from '../auth/profileStore';
+import { clearToken, disconnectWs, getToken, HttpClient, HttpError, getNetworkConfig, getWsStatus, ensureWsConnected, onWsStatusChange } from '../network';
 import AvatarByewind from '../assets/SnowUI/head/AvatarByewind.svg';
 import PlugsConnectedIcon from '../assets/SnowUI/icon/PlugsConnected.svg';
 import NotificationIcon from '../assets/SnowUI/icon/Notification.svg';
@@ -10,6 +10,10 @@ import ArrowLineRightIcon from '../assets/SnowUI/icon/ArrowLineRight.svg';
 import CloseIcon from '../assets/SnowUI/icon/X.svg';
 import { useNotification } from './ui';
 import './UserSettings.css';
+
+// 头像上传限制
+const MAX_AVATAR_SIZE_BYTES = 524288; // 0.5MB
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 interface UserSettingsProps {
   onClose: () => void;
@@ -104,6 +108,12 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   const userEmail = userProfile?.email || 'byewind@twitter.com';
   const { success, error: showError } = useNotification();
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
+  
+  // 头像上传相关状态
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(userProfile?.avatarUrl ?? null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  
   const [exchangeKeys, setExchangeKeys] = useState<ExchangeApiKeyItem[]>([]);
   const [isLoadingKeys, setIsLoadingKeys] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -122,12 +132,140 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   const [notifySecret, setNotifySecret] = useState('');
   const [isNotifySubmitting, setIsNotifySubmitting] = useState(false);
   const [deletingPlatform, setDeletingPlatform] = useState<string | null>(null);
+  
+  // WebSocket状态管理
+  const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>(getWsStatus());
+  const [isConnectingWs, setIsConnectingWs] = useState(false);
 
   const selectedExchange = EXCHANGE_OPTIONS.find((option) => option.id === formExchange) ?? EXCHANGE_OPTIONS[0];
   const selectedCount = exchangeKeys.filter((item) => item.exchangeType === formExchange).length;
   const selectedNotifyPlatform = NOTIFY_PLATFORM_OPTIONS.find((option) => option.id === notifyPlatform)
     ?? NOTIFY_PLATFORM_OPTIONS[0];
   const selectedNotifyBinding = notifyChannels.find((item) => item.platform === notifyPlatform);
+
+  // 加载头像
+  const loadAvatar = useCallback(async () => {
+    try {
+      const data = await client.get<{ avatarUrl: string | null }>('/api/media/avatar');
+      if (data?.avatarUrl) {
+        setAvatarUrl(data.avatarUrl);
+        // 更新本地存储
+        const profile = getAuthProfile();
+        if (profile) {
+          setAuthProfile({ ...profile, avatarUrl: data.avatarUrl });
+        }
+      }
+    } catch (err) {
+      // 忽略加载错误，使用默认头像
+    }
+  }, [client]);
+
+  // 页面加载时获取头像
+  useEffect(() => {
+    if (activeNavIndex === 0) {
+      void loadAvatar();
+    }
+  }, [activeNavIndex, loadAvatar]);
+
+  // WebSocket状态监听
+  useEffect(() => {
+    const unsubscribe = onWsStatusChange((status) => {
+      setWsStatus(status);
+      setIsConnectingWs(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // 断开WebSocket
+  const handleDisconnectWs = useCallback(() => {
+    disconnectWs();
+    success('WebSocket已断开，将使用HTTP方式与服务器交互');
+  }, [success]);
+
+  // 连接WebSocket
+  const handleConnectWs = useCallback(async () => {
+    setIsConnectingWs(true);
+    try {
+      await ensureWsConnected();
+      success('WebSocket连接成功');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '连接失败，请稍后重试';
+      showError(message);
+    } finally {
+      setIsConnectingWs(false);
+    }
+  }, [success, showError]);
+
+  // 处理头像文件选择
+  const handleAvatarSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // 验证文件类型
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      showError('不支持的图片格式，仅支持 JPG、PNG、GIF、WebP');
+      return;
+    }
+
+    // 验证文件大小
+    if (file.size > MAX_AVATAR_SIZE_BYTES) {
+      const maxSizeMB = MAX_AVATAR_SIZE_BYTES / 1024 / 1024;
+      showError(`图片大小不能超过 ${maxSizeMB}MB`);
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const token = getToken();
+      const { apiBaseUrl } = getNetworkConfig();
+      const response = await fetch(`${apiBaseUrl}/api/media/avatar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.message || '上传失败');
+      }
+
+      const result = await response.json();
+      const newAvatarUrl = result?.data?.avatarUrl;
+
+      if (newAvatarUrl) {
+        setAvatarUrl(newAvatarUrl);
+        // 更新本地存储
+        const profile = getAuthProfile();
+        if (profile) {
+          setAuthProfile({ ...profile, avatarUrl: newAvatarUrl });
+        }
+        success('头像上传成功');
+      } else {
+        throw new Error('未获取到头像地址');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '上传失败，请稍后重试';
+      showError(message);
+    } finally {
+      setIsUploadingAvatar(false);
+      // 清空文件输入，允许重复选择同一文件
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  }, [client, showError, success]);
+
+  // 点击头像区域触发文件选择
+  const handleAvatarClick = useCallback(() => {
+    if (!isUploadingAvatar && avatarInputRef.current) {
+      avatarInputRef.current.click();
+    }
+  }, [isUploadingAvatar]);
 
   const loadExchangeKeys = useCallback(async () => {
     setIsLoadingKeys(true);
@@ -299,7 +437,7 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   };
 
   const navItems = [
-    { id: 'profile', label: userName, icon: AvatarByewind },
+    { id: 'profile', label: userName, icon: avatarUrl || AvatarByewind },
     { id: 'exchange', label: '交易所API', icon: PlugsConnectedIcon },
     { id: 'notifications', label: '通知设置', icon: NotificationIcon },
     { id: 'wallet', label: '量化钱包', icon: WalletIcon },
@@ -328,11 +466,30 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
         <div className="user-settings-content">
           {activeNavIndex === 0 && (
             <>
+              {/* 隐藏的文件输入 */}
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                style={{ display: 'none' }}
+                onChange={handleAvatarSelect}
+              />
+
               {/* User Profile Header */}
               <div className="user-settings-header">
-                <div className="user-settings-avatar-large">
+                <div 
+                  className="user-settings-avatar-large"
+                  onClick={handleAvatarClick}
+                  style={{ cursor: isUploadingAvatar ? 'wait' : 'pointer' }}
+                  title="点击更换头像"
+                >
                   <div className="user-settings-avatar-bg">
-                    <img src={AvatarByewind} alt="Avatar" />
+                    <img src={avatarUrl || AvatarByewind} alt="Avatar" />
+                    {isUploadingAvatar && (
+                      <div className="user-settings-avatar-uploading">
+                        上传中...
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="user-settings-header-text">
@@ -342,10 +499,14 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
               </div>
 
               {/* Avatar Field */}
-              <div className="user-settings-field">
+              <div 
+                className="user-settings-field"
+                onClick={handleAvatarClick}
+                style={{ cursor: isUploadingAvatar ? 'wait' : 'pointer' }}
+              >
                 <div className="user-settings-field-label">头像</div>
                 <div className="user-settings-field-value">
-                  <span>点击修改</span>
+                  <span>{isUploadingAvatar ? '上传中...' : '点击修改'}</span>
                   <img src={ArrowLineRightIcon} alt="Edit" className="user-settings-edit-icon" />
                 </div>
               </div>
@@ -368,8 +529,24 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
                 </div>
               </div>
 
-              {/* Logout Button - bottom right */}
+              {/* WebSocket Control and Logout Buttons - bottom right */}
               <div className="user-settings-logout-row">
+                <button
+                  type="button"
+                  className="user-settings-ws-control-button"
+                  onClick={handleDisconnectWs}
+                  disabled={wsStatus === 'disconnected' || wsStatus === 'connecting'}
+                >
+                  {wsStatus === 'disconnected' ? '已断开' : '断开WebSocket'}
+                </button>
+                <button
+                  type="button"
+                  className="user-settings-ws-control-button"
+                  onClick={handleConnectWs}
+                  disabled={wsStatus === 'connected' || isConnectingWs}
+                >
+                  {isConnectingWs ? '连接中...' : wsStatus === 'connected' ? '已连接' : '连接WebSocket'}
+                </button>
                 <button
                   type="button"
                   className="user-settings-logout-button"

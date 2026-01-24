@@ -249,12 +249,13 @@ const StrategyModule: React.FC = () => {
 
   const formatIndicatorMeta = (indicator: GeneratedIndicatorPayload) => {
     const config = indicator.config as {
-      output?: string;
       input?: string;
     };
-    const output = config.output || '-';
     const input = config.input || '-';
-    return `输入 ${input} · 输出 ${output}`;
+    const outputs = indicator.outputs && indicator.outputs.length > 0
+      ? indicator.outputs.map((output) => output.key).join(', ')
+      : '-';
+    return `输入 ${input} · 输出 ${outputs}`;
   };
 
   const methodOptions = [
