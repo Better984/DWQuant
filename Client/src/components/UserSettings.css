@@ -219,6 +219,36 @@
   border-radius: 80px;
 }
 
+/* Avatar Upload Overlay */
+.user-settings-avatar-uploading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 10px;
+  color: #ffffff;
+}
+
+.user-settings-avatar-large {
+  position: relative;
+}
+
+.user-settings-avatar-large:hover .user-settings-avatar-bg {
+  opacity: 0.9;
+}
+
+.user-settings-avatar-bg {
+  position: relative;
+  transition: opacity 0.2s ease;
+}
+
 .user-settings-header-text {
   display: flex;
   flex-direction: column;
@@ -742,7 +772,42 @@
   margin-top: auto;
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
   padding: 16px 12px 0;
+}
+
+/* WebSocket控制按钮样式 */
+.user-settings-ws-control-button {
+  min-width: 120px;
+  padding: 8px 16px;
+  border-radius: 16px;
+  border: none;
+  background: #1890ff;
+  color: #ffffff;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+}
+
+.user-settings-ws-control-button:hover:not(:disabled) {
+  background: #40a9ff;
+  box-shadow: 0 6px 16px rgba(24, 144, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.user-settings-ws-control-button:active:not(:disabled) {
+  background: #096dd9;
+  box-shadow: 0 3px 8px rgba(24, 144, 255, 0.3);
+  transform: translateY(0);
+}
+
+.user-settings-ws-control-button:disabled {
+  background: #d9d9d9;
+  color: #ffffff;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .user-settings-logout-button {

@@ -3,6 +3,7 @@ const PROFILE_KEY = "dwq_auth_profile";
 export type AuthProfile = {
   email: string;
   nickname?: string | null;
+  avatarUrl?: string | null;
 };
 
 let inMemoryProfile: AuthProfile | null = null;
