@@ -13,6 +13,7 @@ export interface DialogProps {
   onConfirm?: () => void;
   showCloseButton?: boolean;
   className?: string;
+  footer?: React.ReactNode;
 }
 
 const Dialog: React.FC<DialogProps> = ({
@@ -26,6 +27,7 @@ const Dialog: React.FC<DialogProps> = ({
   onConfirm,
   showCloseButton = true,
   className = '',
+  footer,
 }) => {
   // 处理 ESC 键关闭
   useEffect(() => {
@@ -124,25 +126,29 @@ const Dialog: React.FC<DialogProps> = ({
         )}
 
         {/* 按钮区域 */}
-        {(cancelText || confirmText) && (
+        {(footer || cancelText || confirmText) && (
           <>
             <div className="snowui-dialog__divider">{Divider}</div>
             <div className="snowui-dialog__footer">
-              {cancelText && (
-                <button
-                  className="snowui-dialog__button snowui-dialog__button--cancel"
-                  onClick={handleCancel}
-                >
-                  {cancelText}
-                </button>
-              )}
-              {confirmText && (
-                <button
-                  className="snowui-dialog__button snowui-dialog__button--confirm"
-                  onClick={handleConfirm}
-                >
-                  {confirmText}
-                </button>
+              {footer || (
+                <>
+                  {cancelText && (
+                    <button
+                      className="snowui-dialog__button snowui-dialog__button--cancel"
+                      onClick={handleCancel}
+                    >
+                      {cancelText}
+                    </button>
+                  )}
+                  {confirmText && (
+                    <button
+                      className="snowui-dialog__button snowui-dialog__button--confirm"
+                      onClick={handleConfirm}
+                    >
+                      {confirmText}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </>
