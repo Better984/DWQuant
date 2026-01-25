@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import './StrategyModule.css';
 
 // 导入图标
@@ -164,7 +164,19 @@ const StrategyModule: React.FC = () => {
   const [selectedIndicators, setSelectedIndicators] = useState<GeneratedIndicatorPayload[]>([]);
   const [isConfigReviewOpen, setIsConfigReviewOpen] = useState(false);
   const [isLogicPreviewVisible, setIsLogicPreviewVisible] = useState(false);
+  const [configStep, setConfigStep] = useState(0); // 0: 基本信息, 1: 详细配置
+  const [strategyName, setStrategyName] = useState('');
+  const [strategyDescription, setStrategyDescription] = useState('');
   const { error, success } = useNotification();
+  
+  // 滚动条 refs
+  const summaryListRef = useRef<HTMLDivElement>(null);
+  const summaryTrackRef = useRef<HTMLDivElement>(null);
+  const summaryThumbRef = useRef<HTMLDivElement>(null);
+  const codeListRef = useRef<HTMLPreElement>(null);
+  const codeTrackRef = useRef<HTMLDivElement>(null);
+  const codeThumbRef = useRef<HTMLDivElement>(null);
+  const tradeConfigRef = useRef<HTMLDivElement>(null);
   const [conditionContainers, setConditionContainers] = useState<ConditionContainer[]>([
     { id: 'open-long', title: '开多条件', enabled: true, required: false, groups: [] },
     { id: 'open-short', title: '开空条件', enabled: true, required: false, groups: [] },
@@ -256,6 +268,9 @@ const StrategyModule: React.FC = () => {
   const openConfigReview = () => {
     setIsConfigReviewOpen(true);
     setIsLogicPreviewVisible(false);
+    setConfigStep(0);
+    setStrategyName('');
+    setStrategyDescription('');
     if (selectedIndicators.length > 0 && tradeConfig.timeframeSec === 60) {
       const derived = resolveTradeTimeframeSec();
       if (derived) {
@@ -266,7 +281,153 @@ const StrategyModule: React.FC = () => {
 
   const closeConfigReview = () => {
     setIsConfigReviewOpen(false);
+    setConfigStep(0);
   };
+
+  const handleNextStep = () => {
+    setConfigStep(1);
+  };
+
+  const handlePrevStep = () => {
+    setConfigStep(0);
+  };
+
+  // 更新条件组滚动条
+  useEffect(() => {
+    const list = summaryListRef.current;
+    const track = summaryTrackRef.current;
+    const thumb = summaryThumbRef.current;
+    if (!list || !track || !thumb) {
+      return;
+    }
+
+    const updateScroll = () => {
+      const { scrollHeight, clientHeight, scrollTop } = list;
+      const trackHeight = track.clientHeight;
+      const isScrollable = scrollHeight > clientHeight + 1;
+      track.style.opacity = isScrollable ? '1' : '0';
+
+      if (!isScrollable) {
+        thumb.style.height = `${trackHeight}px`;
+        thumb.style.transform = 'translateY(0px)';
+        return;
+      }
+
+      const thumbHeight = Math.max(24, (clientHeight / scrollHeight) * trackHeight);
+      const maxThumbTop = trackHeight - thumbHeight;
+      const thumbTop =
+        scrollHeight === clientHeight
+          ? 0
+          : (scrollTop / (scrollHeight - clientHeight)) * maxThumbTop;
+
+      thumb.style.height = `${thumbHeight}px`;
+      thumb.style.transform = `translateY(${thumbTop}px)`;
+    };
+
+    updateScroll();
+    list.addEventListener('scroll', updateScroll);
+
+    const resizeObserver = new ResizeObserver(updateScroll);
+    resizeObserver.observe(list);
+
+    return () => {
+      list.removeEventListener('scroll', updateScroll);
+      resizeObserver.disconnect();
+    };
+  }, [isConfigReviewOpen, isLogicPreviewVisible]);
+
+  // 更新代码区域滚动条
+  useEffect(() => {
+    const list = codeListRef.current;
+    const track = codeTrackRef.current;
+    const thumb = codeThumbRef.current;
+    if (!list || !track || !thumb) {
+      return;
+    }
+
+    const updateScroll = () => {
+      const { scrollHeight, clientHeight, scrollTop } = list;
+      const trackHeight = track.clientHeight;
+      const isScrollable = scrollHeight > clientHeight + 1;
+      track.style.opacity = isScrollable ? '1' : '0';
+
+      if (!isScrollable) {
+        thumb.style.height = `${trackHeight}px`;
+        thumb.style.transform = 'translateY(0px)';
+        return;
+      }
+
+      const thumbHeight = Math.max(24, (clientHeight / scrollHeight) * trackHeight);
+      const maxThumbTop = trackHeight - thumbHeight;
+      const thumbTop =
+        scrollHeight === clientHeight
+          ? 0
+          : (scrollTop / (scrollHeight - clientHeight)) * maxThumbTop;
+
+      thumb.style.height = `${thumbHeight}px`;
+      thumb.style.transform = `translateY(${thumbTop}px)`;
+    };
+
+    updateScroll();
+    list.addEventListener('scroll', updateScroll);
+
+    const resizeObserver = new ResizeObserver(updateScroll);
+    resizeObserver.observe(list);
+
+    return () => {
+      list.removeEventListener('scroll', updateScroll);
+      resizeObserver.disconnect();
+    };
+  }, [isConfigReviewOpen, isLogicPreviewVisible]);
+
+  // 交易规则区域滚轮切换步骤
+  useEffect(() => {
+    const tradeElement = tradeConfigRef.current;
+    if (!tradeElement || !isConfigReviewOpen) {
+      return;
+    }
+
+    let scrollTimeout: NodeJS.Timeout | null = null;
+    let isScrolling = false;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (isScrolling) {
+        return;
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = tradeElement;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10; // 10px 容差
+      const isAtTop = scrollTop <= 10; // 10px 容差
+
+      // 向下滚动且到达底部，切换到下一步
+      if (e.deltaY > 0 && isAtBottom && configStep === 0) {
+        e.preventDefault();
+        isScrolling = true;
+        setConfigStep(1);
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+          isScrolling = false;
+        }, 500);
+      }
+      // 向上滚动且到达顶部，切换到上一步
+      else if (e.deltaY < 0 && isAtTop && configStep === 1) {
+        e.preventDefault();
+        isScrolling = true;
+        setConfigStep(0);
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+          isScrolling = false;
+        }, 500);
+      }
+    };
+
+    tradeElement.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      tradeElement.removeEventListener('wheel', handleWheel);
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+    };
+  }, [isConfigReviewOpen, configStep]);
 
   const generateId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -532,6 +693,36 @@ const StrategyModule: React.FC = () => {
       };
     });
   }, [conditionContainers, indicatorValueMap, methodOptions, outputHintMap]);
+
+  const usedIndicatorOutputs = useMemo(() => {
+    const map = new Map<string, string>();
+    const addIndicator = (ref?: StrategyValueRef | null) => {
+      if (!ref) {
+        return;
+      }
+      if ((ref.refType || '').toLowerCase() !== 'indicator') {
+        return;
+      }
+      const paramsKey = ref.params && ref.params.length > 0 ? ref.params.join(',') : 'default';
+      const key = [ref.indicator, ref.timeframe, ref.input, ref.output, ref.calcMode, paramsKey].join('|');
+      if (!map.has(key)) {
+        map.set(key, formatValueRefLabel(ref));
+      }
+    };
+
+    conditionContainers.forEach((container) => {
+      container.groups.forEach((group) => {
+        group.conditions.forEach((condition) => {
+          addIndicator(indicatorValueMap.get(condition.leftValueId)?.ref);
+          if (condition.rightValueType === 'field') {
+            addIndicator(indicatorValueMap.get(condition.rightValueId || '')?.ref);
+          }
+        });
+      });
+    });
+
+    return Array.from(map.values());
+  }, [conditionContainers, indicatorValueMap, outputHintMap]);
 
   const buildConstantValueRef = (
     rawValue: string | undefined,
@@ -1309,12 +1500,57 @@ const StrategyModule: React.FC = () => {
         open={isConfigReviewOpen}
         onClose={closeConfigReview}
         title="生成策略配置"
-        cancelText="取消"
-        confirmText="复制配置"
-        onConfirm={handleConfirmGenerate}
+        cancelText={configStep === 1 ? undefined : "取消"}
+        confirmText={configStep === 1 ? "复制配置" : undefined}
+        onConfirm={configStep === 1 ? handleConfirmGenerate : undefined}
+        onCancel={configStep === 0 ? closeConfigReview : undefined}
         className="strategy-config-dialog"
+        footer={
+          <div className="strategy-config-footer">
+            {configStep === 0 ? (
+              <>
+                <button
+                  className="snowui-dialog__button snowui-dialog__button--cancel"
+                  onClick={closeConfigReview}
+                >
+                  取消
+                </button>
+                <button
+                  className="snowui-dialog__button snowui-dialog__button--confirm"
+                  onClick={handleNextStep}
+                >
+                  下一步
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="snowui-dialog__button snowui-dialog__button--cancel"
+                  onClick={handlePrevStep}
+                >
+                  上一步
+                </button>
+                <button
+                  className="snowui-dialog__button snowui-dialog__button--confirm"
+                  onClick={handleConfirmGenerate}
+                >
+                  复制配置
+                </button>
+              </>
+            )}
+          </div>
+        }
       >
-        <div className="strategy-config-dialog-body">
+        <div className={`strategy-config-dialog-body strategy-config-step-${configStep}`}>
+          <div className="strategy-config-progress">
+            <div className="strategy-config-progress-item">
+              <div className={`strategy-config-progress-dot ${configStep >= 0 ? 'active' : ''}`}></div>
+              <div className={`strategy-config-progress-line ${configStep >= 1 ? 'active' : ''}`}></div>
+            </div>
+            <div className="strategy-config-progress-item">
+              <div className={`strategy-config-progress-dot ${configStep >= 1 ? 'active' : ''}`}></div>
+            </div>
+          </div>
           <div className="strategy-config-preview">
             <div className="strategy-config-preview-header">
               <div className="strategy-config-preview-title">
@@ -1329,108 +1565,161 @@ const StrategyModule: React.FC = () => {
               </button>
             </div>
             {isLogicPreviewVisible ? (
-              <pre className="strategy-config-code">{logicPreview}</pre>
+              <div className="strategy-config-code-wrapper">
+                <pre className="strategy-config-code" ref={codeListRef}>{logicPreview}</pre>
+                <div className="strategy-config-scrollbar" ref={codeTrackRef}>
+                  <div className="strategy-config-scrollbar-thumb" ref={codeThumbRef}></div>
+                </div>
+              </div>
             ) : (
-              <div className="strategy-config-summary">
-                {conditionSummarySections.map((section) => (
-                  <div key={section.title} className="strategy-config-summary-section">
-                    <div className="strategy-config-summary-title">{section.title}</div>
-                    {section.groups.map((group) => (
-                      <div key={`${section.title}-${group.title}`} className="strategy-config-summary-group">
-                        <div className="strategy-config-summary-group-title">{group.title}</div>
-                        {group.conditions.length > 0 && (
-                          <div className="strategy-config-summary-list">
-                            {group.conditions.map((line, index) => (
-                              <div
-                                key={`${group.title}-${index}`}
-                                className="strategy-config-summary-item"
-                              >
-                                {line}
+              <>
+                <div className="strategy-config-indicator-summary">
+                  <div className="strategy-config-indicator-title">
+                    当前参与指标数量：{usedIndicatorOutputs.length}
+                  </div>
+                  {usedIndicatorOutputs.length === 0 ? (
+                    <div className="strategy-config-indicator-empty">暂无参与指标</div>
+                  ) : (
+                    <div className="strategy-config-indicator-list">
+                      {usedIndicatorOutputs.map((label) => (
+                        <div key={label} className="strategy-config-indicator-item">
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="strategy-config-summary-wrapper">
+                  <div className="strategy-config-summary" ref={summaryListRef}>
+                    {conditionSummarySections.map((section) => (
+                      <div key={section.title} className="strategy-config-summary-section">
+                        <div className="strategy-config-summary-title">{section.title}</div>
+                        {section.groups.map((group) => (
+                          <div key={`${section.title}-${group.title}`} className="strategy-config-summary-group">
+                            <div className="strategy-config-summary-group-title">{group.title}</div>
+                            {group.conditions.length > 0 && (
+                              <div className="strategy-config-summary-list">
+                                {group.conditions.map((line, index) => (
+                                  <div
+                                    key={`${group.title}-${index}`}
+                                    className="strategy-config-summary-item"
+                                  >
+                                    {line}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
                           </div>
-                        )}
+                        ))}
                       </div>
                     ))}
                   </div>
-                ))}
-              </div>
+                  <div className="strategy-config-scrollbar" ref={summaryTrackRef}>
+                    <div className="strategy-config-scrollbar-thumb" ref={summaryThumbRef}></div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
-          <div className="strategy-config-trade">
+          <div className={`strategy-config-trade strategy-config-trade-step-${configStep}`} ref={tradeConfigRef}>
             <div className="strategy-config-trade-title">交易规则</div>
-            <div className="trade-form-section">
-              <div className="trade-form-label">目标交易所</div>
-              <div className="trade-option-grid">
-                {exchangeOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`trade-option-card ${
-                      tradeConfig.exchange === option.value ? 'active' : ''
-                    }`}
-                    onClick={() =>
-                      setTradeConfig((prev) => ({
-                        ...prev,
-                        exchange: option.value,
-                      }))
-                    }
-                  >
-                    {option.icon ? (
-                      <img className="trade-option-icon" src={option.icon} alt={option.label} />
-                    ) : (
-                      <div className="trade-option-icon-text">{option.label}</div>
-                    )}
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="trade-form-section">
-              <div className="trade-form-label">交易对</div>
-              <div className="trade-option-grid">
-                {symbolOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`trade-option-card ${
-                      tradeConfig.symbol === option.value ? 'active' : ''
-                    }`}
-                    onClick={() =>
-                      setTradeConfig((prev) => ({
-                        ...prev,
-                        symbol: option.value,
-                      }))
-                    }
-                  >
-                    <img className="trade-option-icon" src={option.icon} alt={option.label} />
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="trade-form-section">
-              <div className="trade-form-label">交易周期</div>
-              <div className="trade-chip-group">
-                {timeframeOptions.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    className={`trade-chip ${
-                      tradeConfig.timeframeSec === option.value ? 'active' : ''
-                    }`}
-                    onClick={() =>
-                      setTradeConfig((prev) => ({
-                        ...prev,
-                        timeframeSec: option.value,
-                      }))
-                    }
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {configStep === 0 ? (
+              <>
+                <div className="trade-form-section">
+                  <div className="trade-form-label">策略名称</div>
+                  <input
+                    className="trade-input trade-input-full"
+                    type="text"
+                    placeholder="请输入策略名称"
+                    value={strategyName}
+                    onChange={(e) => setStrategyName(e.target.value)}
+                  />
+                </div>
+                <div className="trade-form-section">
+                  <div className="trade-form-label">策略描述</div>
+                  <textarea
+                    className="trade-textarea"
+                    placeholder="请输入策略描述"
+                    value={strategyDescription}
+                    onChange={(e) => setStrategyDescription(e.target.value)}
+                    rows={4}
+                  />
+                </div>
+                <div className="trade-form-section">
+                  <div className="trade-form-label">目标交易所</div>
+                  <div className="trade-option-grid">
+                    {exchangeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`trade-option-card ${
+                          tradeConfig.exchange === option.value ? 'active' : ''
+                        }`}
+                        onClick={() =>
+                          setTradeConfig((prev) => ({
+                            ...prev,
+                            exchange: option.value,
+                          }))
+                        }
+                      >
+                        {option.icon ? (
+                          <img className="trade-option-icon" src={option.icon} alt={option.label} />
+                        ) : (
+                          <div className="trade-option-icon-text">{option.label}</div>
+                        )}
+                        <span>{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="trade-form-section">
+                  <div className="trade-form-label">交易对</div>
+                  <div className="trade-option-grid">
+                    {symbolOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`trade-option-card ${
+                          tradeConfig.symbol === option.value ? 'active' : ''
+                        }`}
+                        onClick={() =>
+                          setTradeConfig((prev) => ({
+                            ...prev,
+                            symbol: option.value,
+                          }))
+                        }
+                      >
+                        <img className="trade-option-icon" src={option.icon} alt={option.label} />
+                        <span>{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="trade-form-section">
+                  <div className="trade-form-label">交易周期</div>
+                  <div className="trade-chip-group">
+                    {timeframeOptions.map((option) => (
+                      <button
+                        key={option.label}
+                        type="button"
+                        className={`trade-chip ${
+                          tradeConfig.timeframeSec === option.value ? 'active' : ''
+                        }`}
+                        onClick={() =>
+                          setTradeConfig((prev) => ({
+                            ...prev,
+                            timeframeSec: option.value,
+                          }))
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
             <div className="trade-form-row">
               <div className="trade-form-field">
                 <div className="trade-form-label">单次开仓数量</div>
@@ -1580,6 +1869,8 @@ const StrategyModule: React.FC = () => {
                 </div>
               </div>
             </div>
+              </>
+            )}
           </div>
         </div>
       </Dialog>

@@ -718,11 +718,82 @@
 
 .strategy-config-dialog-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   flex: 1;
-  min-height: 0;
+  min-height: 600px;
+  max-height: calc(90vh - 200px);
+  height: calc(90vh - 200px);
   overflow: hidden;
+  position: relative;
+}
+
+.strategy-config-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.strategy-config-progress-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.strategy-config-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.strategy-config-progress-dot.active {
+  background: #000000;
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.strategy-config-progress-line {
+  width: 2px;
+  height: 40px;
+  background: rgba(0, 0, 0, 0.15);
+  margin-top: 4px;
+  transition: background 0.3s ease;
+  flex-shrink: 0;
+}
+
+.strategy-config-progress-line.active {
+  background: #000000;
+}
+
+.strategy-config-trade {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.strategy-config-trade-step-0 {
+  animation: slideInFromRight 0.3s ease;
+}
+
+.strategy-config-trade-step-1 {
+  animation: slideInFromRight 0.3s ease;
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .strategy-config-preview,
@@ -735,6 +806,8 @@
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .strategy-config-preview-header {
@@ -742,6 +815,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .strategy-config-preview-title,
@@ -767,12 +841,61 @@
   transform: translateY(-1px);
 }
 
+.strategy-config-indicator-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.strategy-config-summary-wrapper,
+.strategy-config-code-wrapper {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding-right: 6px;
+}
+
 .strategy-config-summary {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  overflow: auto;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
+  max-height: 100%;
+  scrollbar-width: none;
+}
+
+.strategy-config-summary::-webkit-scrollbar {
+  display: none;
+}
+
+.strategy-config-indicator-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.strategy-config-indicator-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.strategy-config-indicator-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.strategy-config-indicator-item {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .strategy-config-summary-section {
@@ -827,7 +950,37 @@
   font-size: 12px;
   color: #1f2937;
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: auto;
+  min-height: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 100%;
+  scrollbar-width: none;
+}
+
+.strategy-config-code::-webkit-scrollbar {
+  display: none;
+}
+
+.strategy-config-scrollbar {
+  position: absolute;
+  top: 8px;
+  right: 2px;
+  bottom: 12px;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.strategy-config-scrollbar-thumb {
+  width: 100%;
+  border-radius: 999px;
+  background: var(--text-tertiary, rgba(0, 0, 0, 0.3));
+  transition: background-color 0.3s ease;
 }
 
 .trade-form-section {
@@ -959,6 +1112,48 @@
   flex-shrink: 0;
 }
 
+.trade-input-full {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  width: 100%;
+  background: #ffffff;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.trade-input-full:focus {
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.trade-textarea {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  width: 100%;
+  background: #ffffff;
+  color: var(--text-primary);
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.trade-textarea:focus {
+  border-color: rgba(0, 0, 0, 0.3);
+}
+
+.strategy-config-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+}
+
 .trade-toggle {
   display: inline-flex;
   align-items: center;
@@ -1041,6 +1236,11 @@
 
   .trade-form-row {
     grid-template-columns: 1fr;
+  }
+
+  .strategy-config-footer {
+    flex-direction: row;
+    justify-content: flex-end;
   }
 }
 
