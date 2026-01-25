@@ -16,6 +16,7 @@ import CryptoMarketPanel from './CryptoMarketPanel';
 import WhatsOnRoadPanel from './WhatsOnRoadPanel';
 import ChangePassword from './ChangePassword';
 import UserSettings from './UserSettings';
+import StrategyList from './StrategyList';
 import HomeModule from './HomeModule';
 import MarketModule from './MarketModule';
 import StrategyModule from './StrategyModule';
@@ -206,7 +207,7 @@ const Dashboard: React.FC = () => {
       case 5:
         return <ChatModule />;
       case 6:
-        return <ChangePassword />;
+        return <StrategyList />;
       default:
         return <HomeModule />;
     }

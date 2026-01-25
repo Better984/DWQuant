@@ -1,5 +1,12 @@
 import React from 'react';
 import arrowRise from '../assets/arrow-rise.svg';
+import StrategyItem from './StrategyItem';
+import type { StrategyItemProps } from './StrategyItem.types';
+import AvatarByewind from '../assets/SnowUI/head/AvatarByewind.svg';
+import AvatarFemale04 from '../assets/SnowUI/head/AvatarFemale04.svg';
+import Avatar3d04 from '../assets/SnowUI/head/Avatar3d04.svg';
+import AvatarAbstract04 from '../assets/SnowUI/head/AvatarAbstract04.svg';
+import AvatarMale01 from '../assets/SnowUI/head/AvatarMale01.svg';
 
 const HomeModule: React.FC = () => {
   const projects = [
@@ -7,6 +14,74 @@ const HomeModule: React.FC = () => {
     { name: 'CTA 趋势策略', dueDate: '2026-05-15', status: '回测中', statusColor: 'blue', progress: '8 / 30', percentage: '27%', avatar: 'female04', progressValue: 27 },
     { name: '日内高频套利', dueDate: '2026-02-10', status: '待上线', statusColor: 'yellow', progress: '3 / 10', percentage: '30%', avatar: '3d04', progressValue: 30 },
     { name: '指数增强组合', dueDate: '2026-06-30', status: '运行中', statusColor: 'green', progress: '18 / 24', percentage: '75%', avatar: 'abstract04', progressValue: 75 },
+  ];
+
+  const strategies: StrategyItemProps[] = [
+    {
+      usId: 1,
+      name: 'BTC/USDT 网格交易策略',
+      currency: 'BTC',
+      tradingPair: 'BTC/USDT',
+      leverage: 3,
+      singlePosition: '0.1 BTC',
+      totalPosition: '2.5 BTC',
+      profitLossRatio: '止盈 5% / 止损 3%',
+      ownerAvatar: AvatarByewind,
+      status: 'running',
+      version: '1.2',
+    },
+    {
+      usId: 2,
+      name: 'ETH 趋势跟踪策略',
+      currency: 'ETH',
+      tradingPair: 'ETH/USDT',
+      leverage: 5,
+      singlePosition: '2 ETH',
+      totalPosition: '15 ETH',
+      profitLossRatio: '止盈 8% / 止损 4%',
+      ownerAvatar: AvatarFemale04,
+      status: 'running',
+      version: '2.0',
+    },
+    {
+      usId: 3,
+      name: 'SOL 高频套利策略',
+      currency: 'SOL',
+      tradingPair: 'SOL/USDT',
+      leverage: 10,
+      singlePosition: '50 SOL',
+      totalPosition: '300 SOL',
+      profitLossRatio: '止盈 3% / 止损 2%',
+      ownerAvatar: Avatar3d04,
+      status: 'paused',
+      version: '1.5',
+    },
+    {
+      usId: 4,
+      name: 'BNB 量化对冲策略',
+      currency: 'BNB',
+      tradingPair: 'BNB/USDT',
+      leverage: 2,
+      singlePosition: '10 BNB',
+      totalPosition: '80 BNB',
+      profitLossRatio: '止盈 6% / 止损 3.5%',
+      ownerAvatar: AvatarAbstract04,
+      status: 'running',
+      version: '1.0',
+    },
+    {
+      usId: 5,
+      name: 'DOGE 波段交易策略',
+      currency: 'DOGE',
+      tradingPair: 'DOGE/USDT',
+      leverage: 20,
+      singlePosition: '10000 DOGE',
+      totalPosition: '50000 DOGE',
+      profitLossRatio: '止盈 10% / 止损 5%',
+      ownerAvatar: AvatarMale01,
+      status: 'stopped',
+      version: '3.1',
+    },
   ];
 
   return (
@@ -108,6 +183,18 @@ const HomeModule: React.FC = () => {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Strategy List */}
+      <div className="strategy-list-section">
+        <div className="page-title" style={{ marginTop: '40px', marginBottom: '20px' }}>
+          <h2 className="title-text">策略列表</h2>
+        </div>
+        <div className="strategy-list-container">
+          {strategies.map((strategy, index) => (
+            <StrategyItem key={index} {...strategy} />
+          ))}
+        </div>
       </div>
     </>
   );

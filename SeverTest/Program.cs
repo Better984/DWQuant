@@ -82,7 +82,7 @@ builder.Services.AddHostedService<HistoricalMarketDataSyncHostedService>();
 
 // Redis 连接（用于速率限制和连接管理）
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"] ?? "127.0.0.1:6379"));
+        ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"] ?? "127.0.0.1:6379"));
 builder.Services.AddSingleton<IRateLimiter, RedisRateLimiter>();
 builder.Services.AddSingleton<IConnectionManager, RedisConnectionManager>();
 
