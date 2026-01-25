@@ -202,6 +202,9 @@
   border-radius: 16px;
   background: var(--bg-secondary);
   min-height: 420px;
+  height: 100%;
+  max-height: 90vh;
+  overflow: hidden;
 }
 
 .strategy-editor-header {
@@ -209,6 +212,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .strategy-editor-title {
@@ -239,6 +243,15 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.strategy-editor-body::-webkit-scrollbar {
+  display: none;
 }
 
 .strategy-editor-footer {
@@ -708,6 +721,7 @@
   flex-direction: column;
 }
 
+
 .snowui-dialog.strategy-config-dialog .snowui-dialog__content {
   flex: 1;
   min-height: 0;
@@ -974,6 +988,11 @@
   opacity: 0;
   transition: opacity 0.3s ease;
   pointer-events: none;
+}
+
+.strategy-config-summary-wrapper:hover .strategy-config-scrollbar,
+.strategy-config-code-wrapper:hover .strategy-config-scrollbar {
+  opacity: 1 !important;
 }
 
 .strategy-config-scrollbar-thumb {
