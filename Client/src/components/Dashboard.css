@@ -1785,10 +1785,10 @@
   right: var(--right-sidebar-width);
   top: 72px;
   bottom: 0px;
-  /* 行情页需要 TradingView 图表与主内容区域的左右 / 上间距为 0，这里统一将主内容区的上、左、右内边距去掉 */
-  padding-top: 0;
-  padding-left: 0;
-  padding-right: 0;
+  /* 统一为所有模块添加固定的左右上内边距，内容不会顶满边缘 */
+  padding-top: 24px;
+  padding-left: 24px;
+  padding-right: 24px;
   padding-bottom: 24px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -2262,6 +2262,7 @@
   .dashboard-main-content {
     left: var(--sidebar-current-width);
     right: 0px;
+    padding: 20px 24px;
     position: fixed;
     top: 72px;
   }

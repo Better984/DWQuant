@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import './Dialog.css';
 
 export interface DialogProps {
@@ -47,6 +48,7 @@ const Dialog: React.FC<DialogProps> = ({
   }, [open, onClose]);
 
   if (!open) return null;
+  if (typeof document === 'undefined') return null;
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
@@ -90,7 +92,7 @@ const Dialog: React.FC<DialogProps> = ({
   // 分隔线
   const Divider = <div className="snowui-dialog__divider-line" />;
 
-  return (
+  return createPortal(
     <div className="snowui-dialog-overlay" onClick={handleBackdropClick}>
       <div className={`snowui-dialog ${className}`} onClick={(e) => e.stopPropagation()}>
         {/* 标题区域 */}
@@ -146,7 +148,8 @@ const Dialog: React.FC<DialogProps> = ({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

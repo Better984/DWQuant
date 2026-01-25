@@ -28,3 +28,6 @@ SeverTest/obj/Debug/net8.0-windows/ServerTest.csproj.FileListAbsolute.txt
 SeverTest/obj/ServerTest.csproj.nuget.dgspec.json
 SeverTest/obj/ServerTest.csproj.nuget.g.props
 SeverTest/obj/project.assets.json
+SeverTest/.vs/ProjectEvaluation/servertest.metadata.v10.bin
+SeverTest/.vs/ProjectEvaluation/servertest.projects.v10.bin
+SeverTest/.vs/ProjectEvaluation/servertest.strings.v10.bin
