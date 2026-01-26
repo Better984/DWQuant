@@ -96,7 +96,7 @@ const CALC_MODE_OPTIONS = [
 const OFFSET_DEFAULT = { min: '1', max: '1' };
 
 const getIndicatorName = (indicator: TalibIndicator) =>
-  indicator.name_en || indicator.abbr_en || indicator.code;
+  indicator.name_cn || indicator.name_en || indicator.abbr_en || indicator.code;
 
 const getIndicatorDisplayName = (indicator: TalibIndicator) =>
   indicator.name_cn || indicator.name_en || indicator.abbr_en || indicator.code;
