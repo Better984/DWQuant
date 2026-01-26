@@ -10,5 +10,5 @@ export type StrategyItemProps = {
   ownerAvatar: string;
   status: 'running' | 'stopped' | 'paused' | 'error';
   version?: string | number;
-  onCreateVersion?: (usId: number) => void;
+  onViewDetail?: (usId: number) => void;
 };

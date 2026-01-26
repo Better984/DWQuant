@@ -1,6 +1,7 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using MySqlConnector;
@@ -22,6 +23,12 @@ namespace ServerTest.Controllers
             "paused",
             "archived"
         };
+        private static readonly JsonSerializerOptions CamelCaseSerializerOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        private const string ShareCodeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        private const int ShareCodeLength = 8;
 
         private readonly DatabaseService _db;
         private readonly AuthTokenService _tokenService;
@@ -37,6 +44,22 @@ namespace ServerTest.Controllers
             public int VersionNo { get; set; }
             public JsonElement? ConfigJson { get; set; }
             public DateTime UpdatedAt { get; set; }
+        }
+
+        private sealed class StrategyVersionItem
+        {
+            public long VersionId { get; set; }
+            public int VersionNo { get; set; }
+            public string Changelog { get; set; } = string.Empty;
+            public JsonElement? ConfigJson { get; set; }
+            public DateTime CreatedAt { get; set; }
+            public bool IsPinned { get; set; }
+        }
+
+        private sealed class SharePolicySnapshot
+        {
+            public bool CanFork { get; set; } = true;
+            public int? MaxClaims { get; set; }
         }
 
         public StrategyController(
@@ -540,6 +563,543 @@ WHERE def_id = @def_id
             }
         }
 
+        [HttpPost("share/create-code")]
+        public async Task<IActionResult> CreateShareCode([FromBody] StrategyShareCreateRequest request)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            var policy = request.Policy ?? new ShareCodePolicy();
+            var canFork = policy.CanFork ?? policy.AllowCopy ?? true;
+            var maxClaims = policy.MaxClaims.HasValue && policy.MaxClaims.Value > 0
+                ? policy.MaxClaims.Value
+                : (int?)null;
+            var expiredAt = policy.ExpiredAt;
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                long defId;
+                string? existingShareCode = null;
+                var ownerCmd = new MySqlCommand(@"
+SELECT def_id, share_code
+FROM user_strategy
+WHERE us_id = @us_id AND uid = @uid
+LIMIT 1
+", connection, transaction);
+                ownerCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                ownerCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                await using (var reader = await ownerCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                    }
+
+                    defId = reader.GetInt64("def_id");
+                    if (!reader.IsDBNull(reader.GetOrdinal("share_code")))
+                    {
+                        existingShareCode = reader.GetString("share_code");
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(existingShareCode))
+                {
+                    var deactivateCmd = new MySqlCommand(@"
+UPDATE share_code
+SET is_active = 0
+WHERE share_code = @share_code
+", connection, transaction);
+                    deactivateCmd.Parameters.AddWithValue("@share_code", existingShareCode);
+                    await deactivateCmd.ExecuteNonQueryAsync();
+                }
+
+                var shareCode = await GenerateUniqueShareCodeAsync(connection, transaction);
+                var policyJson = JsonSerializer.Serialize(new
+                {
+                    canFork,
+                    maxClaims,
+                    expiredAt
+                }, CamelCaseSerializerOptions);
+
+                var insertShareCmd = new MySqlCommand(@"
+INSERT INTO share_code
+  (share_code, def_id, created_by_uid, policy_json, is_active, expired_at, created_at)
+VALUES
+  (@share_code, @def_id, @created_by_uid, @policy_json, 1, @expired_at, CURRENT_TIMESTAMP)
+", connection, transaction);
+                insertShareCmd.Parameters.AddWithValue("@share_code", shareCode);
+                insertShareCmd.Parameters.AddWithValue("@def_id", defId);
+                insertShareCmd.Parameters.AddWithValue("@created_by_uid", uid.Value);
+                insertShareCmd.Parameters.AddWithValue("@policy_json", policyJson);
+                insertShareCmd.Parameters.AddWithValue("@expired_at", (object?)expiredAt ?? DBNull.Value);
+                await insertShareCmd.ExecuteNonQueryAsync();
+
+                var updateUsCmd = new MySqlCommand(@"
+UPDATE user_strategy
+SET visibility = 'shared', share_code = @share_code, updated_at = CURRENT_TIMESTAMP
+WHERE us_id = @us_id AND uid = @uid
+", connection, transaction);
+                updateUsCmd.Parameters.AddWithValue("@share_code", shareCode);
+                updateUsCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                updateUsCmd.Parameters.AddWithValue("@uid", uid.Value);
+                await updateUsCmd.ExecuteNonQueryAsync();
+
+                var insertEventCmd = new MySqlCommand(@"
+INSERT INTO share_event
+  (share_code, def_id, from_uid, to_uid, from_instance_id, to_instance_id, event_type, created_at)
+VALUES
+  (@share_code, @def_id, @from_uid, @to_uid, @from_instance_id, @to_instance_id, @event_type, CURRENT_TIMESTAMP)
+", connection, transaction);
+                insertEventCmd.Parameters.AddWithValue("@share_code", shareCode);
+                insertEventCmd.Parameters.AddWithValue("@def_id", defId);
+                insertEventCmd.Parameters.AddWithValue("@from_uid", uid.Value);
+                insertEventCmd.Parameters.AddWithValue("@to_uid", uid.Value);
+                insertEventCmd.Parameters.AddWithValue("@from_instance_id", request.UsId);
+                insertEventCmd.Parameters.AddWithValue("@to_instance_id", request.UsId);
+                insertEventCmd.Parameters.AddWithValue("@event_type", "create_code");
+                await insertEventCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+
+                var response = new
+                {
+                    UsId = request.UsId,
+                    Visibility = "shared",
+                    ShareCode = shareCode
+                };
+                return Ok(ApiResponse<object>.Ok(response, "分享码生成成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "创建分享码失败: uid={Uid} usId={UsId}", uid.Value, request.UsId);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("创建分享码失败，请稍后重试"));
+            }
+        }
+
+        [HttpPost("import/share-code")]
+        public async Task<IActionResult> ImportShareCode([FromBody] StrategyImportShareCodeRequest request)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            var rawShareCode = request.ShareCode?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(rawShareCode))
+            {
+                return BadRequest(ApiResponse<object>.Error("请输入分享码"));
+            }
+
+            var shareCode = NormalizeShareCode(rawShareCode);
+            if (!IsValidShareCode(shareCode))
+            {
+                return BadRequest(ApiResponse<object>.Error("分享码格式不正确"));
+            }
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                long defId;
+                long creatorUid;
+                string policyJson;
+                bool isActive;
+                DateTime? expiredAt;
+
+                var shareCmd = new MySqlCommand(@"
+SELECT def_id, created_by_uid, policy_json, is_active, expired_at
+FROM share_code
+WHERE share_code = @share_code
+LIMIT 1
+", connection, transaction);
+                shareCmd.Parameters.AddWithValue("@share_code", shareCode);
+
+                await using (var reader = await shareCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("分享码不存在"));
+                    }
+
+                    defId = reader.GetInt64("def_id");
+                    creatorUid = reader.GetInt64("created_by_uid");
+                    policyJson = reader.GetString("policy_json");
+                    isActive = reader.GetBoolean("is_active");
+                    expiredAt = reader.IsDBNull(reader.GetOrdinal("expired_at"))
+                        ? null
+                        : reader.GetDateTime("expired_at");
+                }
+
+                if (!isActive)
+                {
+                    return BadRequest(ApiResponse<object>.Error("分享码已失效"));
+                }
+
+                if (expiredAt.HasValue && expiredAt.Value <= DateTime.Now)
+                {
+                    return BadRequest(ApiResponse<object>.Error("分享码已过期"));
+                }
+
+                var policySnapshot = ParseSharePolicy(policyJson);
+                if (!policySnapshot.CanFork)
+                {
+                    return BadRequest(ApiResponse<object>.Error("该分享码不允许复制"));
+                }
+
+                if (policySnapshot.MaxClaims.HasValue)
+                {
+                    var countCmd = new MySqlCommand(@"
+SELECT COUNT(*)
+FROM share_event
+WHERE share_code = @share_code AND event_type IN ('claim', 'fork')
+", connection, transaction);
+                    countCmd.Parameters.AddWithValue("@share_code", shareCode);
+                    var usedCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+                    if (usedCount >= policySnapshot.MaxClaims.Value)
+                    {
+                        return BadRequest(ApiResponse<object>.Error("分享码使用次数已达上限"));
+                    }
+                }
+
+                long sourceUsId;
+                long pinnedVersionId;
+                string sourceAlias;
+                string sourceDescription;
+                var sourceCmd = new MySqlCommand(@"
+SELECT us_id, pinned_version_id, alias_name, description
+FROM user_strategy
+WHERE share_code = @share_code
+LIMIT 1
+", connection, transaction);
+                sourceCmd.Parameters.AddWithValue("@share_code", shareCode);
+
+                await using (var reader = await sourceCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return BadRequest(ApiResponse<object>.Error("分享码未绑定策略"));
+                    }
+
+                    sourceUsId = reader.GetInt64("us_id");
+                    pinnedVersionId = reader.GetInt64("pinned_version_id");
+                    sourceAlias = reader.GetString("alias_name");
+                    sourceDescription = reader.GetString("description");
+                }
+
+                var aliasName = request.AliasName?.Trim();
+                if (string.IsNullOrWhiteSpace(aliasName))
+                {
+                    aliasName = $"{sourceAlias} 副本";
+                }
+
+                var insertUsCmd = new MySqlCommand(@"
+INSERT INTO user_strategy
+  (uid, def_id, pinned_version_id, alias_name, description, state, visibility, share_code, price_usdt, source_type, source_ref, created_at, updated_at)
+VALUES
+  (@uid, @def_id, @pinned_version_id, @alias_name, @description, @state, @visibility, NULL, @price_usdt, @source_type, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+", connection, transaction);
+                insertUsCmd.Parameters.AddWithValue("@uid", uid.Value);
+                insertUsCmd.Parameters.AddWithValue("@def_id", defId);
+                insertUsCmd.Parameters.AddWithValue("@pinned_version_id", pinnedVersionId);
+                insertUsCmd.Parameters.AddWithValue("@alias_name", aliasName);
+                insertUsCmd.Parameters.AddWithValue("@description", sourceDescription);
+                insertUsCmd.Parameters.AddWithValue("@state", "draft");
+                insertUsCmd.Parameters.AddWithValue("@visibility", "private");
+                insertUsCmd.Parameters.AddWithValue("@price_usdt", 0);
+                insertUsCmd.Parameters.AddWithValue("@source_type", "share_code");
+                await insertUsCmd.ExecuteNonQueryAsync();
+                var newUsId = insertUsCmd.LastInsertedId;
+
+                var insertLogCmd = new MySqlCommand(@"
+INSERT INTO strategy_import_log
+  (uid, us_id, source_type, source_ref, created_at)
+VALUES
+  (@uid, @us_id, @source_type, @source_ref, CURRENT_TIMESTAMP)
+", connection, transaction);
+                insertLogCmd.Parameters.AddWithValue("@uid", uid.Value);
+                insertLogCmd.Parameters.AddWithValue("@us_id", newUsId);
+                insertLogCmd.Parameters.AddWithValue("@source_type", "share_code");
+                insertLogCmd.Parameters.AddWithValue("@source_ref", shareCode);
+                await insertLogCmd.ExecuteNonQueryAsync();
+                var importLogId = insertLogCmd.LastInsertedId;
+
+                var updateUsCmd = new MySqlCommand(@"
+UPDATE user_strategy
+SET source_ref = @source_ref, updated_at = CURRENT_TIMESTAMP
+WHERE us_id = @us_id AND uid = @uid
+", connection, transaction);
+                updateUsCmd.Parameters.AddWithValue("@source_ref", importLogId.ToString());
+                updateUsCmd.Parameters.AddWithValue("@us_id", newUsId);
+                updateUsCmd.Parameters.AddWithValue("@uid", uid.Value);
+                await updateUsCmd.ExecuteNonQueryAsync();
+
+                var insertEventCmd = new MySqlCommand(@"
+INSERT INTO share_event
+  (share_code, def_id, from_uid, to_uid, from_instance_id, to_instance_id, event_type, created_at)
+VALUES
+  (@share_code, @def_id, @from_uid, @to_uid, @from_instance_id, @to_instance_id, @event_type, CURRENT_TIMESTAMP)
+", connection, transaction);
+                insertEventCmd.Parameters.AddWithValue("@share_code", shareCode);
+                insertEventCmd.Parameters.AddWithValue("@def_id", defId);
+                insertEventCmd.Parameters.AddWithValue("@from_uid", creatorUid);
+                insertEventCmd.Parameters.AddWithValue("@to_uid", uid.Value);
+                insertEventCmd.Parameters.AddWithValue("@from_instance_id", sourceUsId);
+                insertEventCmd.Parameters.AddWithValue("@to_instance_id", newUsId);
+                insertEventCmd.Parameters.AddWithValue("@event_type", "claim");
+                await insertEventCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+
+                var response = new
+                {
+                    NewUsId = newUsId,
+                    DefId = defId,
+                    PinnedVersionId = pinnedVersionId,
+                    SourceType = "share_code",
+                    ImportLogId = importLogId
+                };
+                return Ok(ApiResponse<object>.Ok(response, "导入成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "导入分享码失败: uid={Uid} shareCode={ShareCode}", uid.Value, request.ShareCode);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("导入失败，请稍后重试"));
+            }
+        }
+
+        [HttpGet("versions")]
+        public async Task<IActionResult> Versions([FromQuery] long usId)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (usId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+
+                long defId;
+                long pinnedVersionId;
+                var ownerCmd = new MySqlCommand(@"
+SELECT def_id, pinned_version_id
+FROM user_strategy
+WHERE us_id = @us_id AND uid = @uid
+LIMIT 1
+", connection);
+                ownerCmd.Parameters.AddWithValue("@us_id", usId);
+                ownerCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                await using (var reader = await ownerCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                    }
+
+                    defId = reader.GetInt64("def_id");
+                    pinnedVersionId = reader.GetInt64("pinned_version_id");
+                }
+
+                var versionCmd = new MySqlCommand(@"
+SELECT version_id, version_no, config_json, changelog, created_at
+FROM strategy_version
+WHERE def_id = @def_id
+ORDER BY version_no ASC
+", connection);
+                versionCmd.Parameters.AddWithValue("@def_id", defId);
+
+                using var versionReader = await versionCmd.ExecuteReaderAsync();
+                var results = new List<StrategyVersionItem>();
+                var changelogOrdinal = versionReader.GetOrdinal("changelog");
+                while (await versionReader.ReadAsync())
+                {
+                    var versionId = versionReader.GetInt64("version_id");
+                    results.Add(new StrategyVersionItem
+                    {
+                        VersionId = versionId,
+                        VersionNo = versionReader.GetInt32("version_no"),
+                        Changelog = versionReader.IsDBNull(changelogOrdinal) ? string.Empty : versionReader.GetString(changelogOrdinal),
+                        ConfigJson = ParseConfigJson(versionReader["config_json"]),
+                        CreatedAt = versionReader.GetDateTime("created_at"),
+                        IsPinned = versionId == pinnedVersionId,
+                    });
+                }
+
+                return Ok(ApiResponse<List<StrategyVersionItem>>.Ok(results));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取策略版本失败: uid={Uid} usId={UsId}", uid.Value, usId);
+                return StatusCode(500, ApiResponse<object>.Error("获取策略版本失败，请稍后重试"));
+            }
+        }
+
+        [HttpPost("delete")]
+        public async Task<IActionResult> Delete([FromBody] StrategyDeleteRequest request)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+                var deleteCmd = new MySqlCommand(@"
+DELETE FROM user_strategy
+WHERE us_id = @us_id AND uid = @uid
+", connection);
+                deleteCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                deleteCmd.Parameters.AddWithValue("@uid", uid.Value);
+                var affected = await deleteCmd.ExecuteNonQueryAsync();
+
+                if (affected == 0)
+                {
+                    return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                }
+
+                return Ok(ApiResponse<object>.Ok(new { request.UsId }, "删除成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "删除策略失败: uid={Uid} usId={UsId}", uid.Value, request.UsId);
+                return StatusCode(500, ApiResponse<object>.Error("删除失败，请稍后重试"));
+            }
+        }
+
+        private static string GenerateShareCode()
+        {
+            Span<byte> buffer = stackalloc byte[ShareCodeLength];
+            RandomNumberGenerator.Fill(buffer);
+            var chars = new char[ShareCodeLength];
+            for (var i = 0; i < ShareCodeLength; i++)
+            {
+                chars[i] = ShareCodeAlphabet[buffer[i] % ShareCodeAlphabet.Length];
+            }
+
+            return $"{new string(chars[..4])}-{new string(chars[4..])}";
+        }
+
+        private static async Task<string> GenerateUniqueShareCodeAsync(MySqlConnection connection, MySqlTransaction transaction)
+        {
+            for (var attempt = 0; attempt < 10; attempt++)
+            {
+                var code = GenerateShareCode();
+                var checkCmd = new MySqlCommand(@"
+SELECT 1
+FROM share_code
+WHERE share_code = @share_code
+LIMIT 1
+", connection, transaction);
+                checkCmd.Parameters.AddWithValue("@share_code", code);
+                var exists = await checkCmd.ExecuteScalarAsync();
+                if (exists == null)
+                {
+                    return code;
+                }
+            }
+
+            throw new InvalidOperationException("无法生成唯一分享码");
+        }
+
+        private static string NormalizeShareCode(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return string.Empty;
+            }
+
+            var cleaned = new string(raw.Where(char.IsLetterOrDigit).ToArray())
+                .ToUpperInvariant();
+            if (cleaned.Length == ShareCodeLength)
+            {
+                return $"{cleaned[..4]}-{cleaned[4..]}";
+            }
+
+            return cleaned;
+        }
+
+        private static bool IsValidShareCode(string shareCode)
+        {
+            var cleaned = new string(shareCode.Where(char.IsLetterOrDigit).ToArray());
+            return cleaned.Length == ShareCodeLength;
+        }
+
+        private static SharePolicySnapshot ParseSharePolicy(string policyJson)
+        {
+            var snapshot = new SharePolicySnapshot();
+            if (string.IsNullOrWhiteSpace(policyJson))
+            {
+                return snapshot;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(policyJson);
+                var root = document.RootElement;
+                if (root.TryGetProperty("canFork", out var canForkElement) &&
+                    (canForkElement.ValueKind == JsonValueKind.True || canForkElement.ValueKind == JsonValueKind.False))
+                {
+                    snapshot.CanFork = canForkElement.GetBoolean();
+                }
+                else if (root.TryGetProperty("allowCopy", out var allowCopyElement) &&
+                         (allowCopyElement.ValueKind == JsonValueKind.True || allowCopyElement.ValueKind == JsonValueKind.False))
+                {
+                    snapshot.CanFork = allowCopyElement.GetBoolean();
+                }
+
+                if (root.TryGetProperty("maxClaims", out var maxClaimsElement) && maxClaimsElement.ValueKind == JsonValueKind.Number)
+                {
+                    if (maxClaimsElement.TryGetInt32(out var maxClaims) && maxClaims > 0)
+                    {
+                        snapshot.MaxClaims = maxClaims;
+                    }
+                }
+                else if (root.TryGetProperty("maxUses", out var maxUsesElement) && maxUsesElement.ValueKind == JsonValueKind.Number)
+                {
+                    if (maxUsesElement.TryGetInt32(out var maxUses) && maxUses > 0)
+                    {
+                        snapshot.MaxClaims = maxUses;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                return snapshot;
+            }
+
+            return snapshot;
+        }
+
         private async Task<long?> GetUserIdAsync()
         {
             var token = GetBearerToken(Request.Headers.Authorization.ToString());
@@ -612,3 +1172,5 @@ WHERE def_id = @def_id
         }
     }
 }
+
+

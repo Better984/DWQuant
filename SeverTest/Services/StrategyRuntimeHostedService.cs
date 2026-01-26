@@ -32,7 +32,7 @@ namespace ServerTest.Services
             await _marketDataEngine.WaitForInitializationAsync();
             _logger.LogInformation("行情引擎初始化完成，开始加载策略配置");
 
-            LoadTestStrategy();
+            //LoadTestStrategy();
 
             var workerCount = Math.Max(1, Environment.ProcessorCount);
             var indicatorTask = _indicatorEngine.RunAsync(workerCount, stoppingToken);

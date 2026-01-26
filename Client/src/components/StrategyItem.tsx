@@ -14,7 +14,7 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
   status,
   version,
   usId,
-  onCreateVersion,
+  onViewDetail,
 }) => {
   const getStatusText = () => {
     switch (status) {
@@ -46,9 +46,9 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
     }
   };
 
-  const handleCreateVersion = () => {
-    if (onCreateVersion) {
-      onCreateVersion(usId);
+  const handleViewDetail = () => {
+    if (onViewDetail) {
+      onViewDetail(usId);
     }
   };
 
@@ -68,9 +68,11 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
             <span className="strategy-leverage">{leverage}x 杠杆</span>
           </div>
         </div>
-        <div className={`strategy-status ${getStatusColor()}`}>
-          <div className="status-dot"></div>
-          <span>{getStatusText()}</span>
+        <div className="strategy-item-header-right">
+          <div className={`strategy-status ${getStatusColor()}`}>
+            <div className="status-dot"></div>
+            <span>{getStatusText()}</span>
+          </div>
         </div>
       </div>
 
@@ -94,14 +96,16 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
           <img src={ownerAvatar} alt="Owner" className="strategy-owner-avatar" />
           <span className="strategy-owner-name">策略持有人</span>
         </div>
-        <button
-          className="strategy-create-version-btn"
-          type="button"
-          onClick={handleCreateVersion}
-          disabled={!onCreateVersion}
-        >
-          创建新版本
-        </button>
+        <div className="strategy-item-actions">
+          <button
+            className="strategy-action-btn strategy-action-btn--primary"
+            type="button"
+            onClick={handleViewDetail}
+            disabled={!onViewDetail}
+          >
+            详情/编辑
+          </button>
+        </div>
       </div>
     </div>
   );
