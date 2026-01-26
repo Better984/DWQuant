@@ -1,0 +1,88 @@
+.strategy-import-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px;
+}
+
+.strategy-import-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.strategy-import-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.strategy-import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.strategy-import-label {
+  font-weight: 600;
+}
+
+.strategy-import-input {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: #111827;
+  background: #ffffff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.strategy-import-input:focus {
+  outline: none;
+  border-color: #111827;
+  box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.08);
+}
+
+.strategy-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.strategy-import-btn {
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.strategy-import-btn.primary {
+  background: #111827;
+  color: #ffffff;
+}
+
+.strategy-import-btn.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.strategy-import-btn.ghost {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #111827;
+}
+
+@media (max-width: 640px) {
+  .strategy-import-actions {
+    flex-direction: column;
+  }
+
+  .strategy-import-btn {
+    width: 100%;
+  }
+}
