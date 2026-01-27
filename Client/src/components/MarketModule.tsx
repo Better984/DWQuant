@@ -7,8 +7,8 @@ type MarketModuleProps = {
 
 const MarketModule: React.FC<MarketModuleProps> = ({ chartSymbol }) => {
   return (
-    <div className="module-container">
-      <MarketChart height={420} symbol={chartSymbol} />
+    <div className="market-module">
+      <MarketChart height="100%" symbol={chartSymbol} />
     </div>
   );
 };

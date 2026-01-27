@@ -13,6 +13,10 @@ const TestPage: React.FC = () => {
     navigate('/ui-components-test');
   };
 
+  const handleKlineChartsClick = () => {
+    navigate('/klinecharts-demo');
+  };
+
   return (
     <div className="test-page">
       {/* Main Content */}
@@ -23,6 +27,9 @@ const TestPage: React.FC = () => {
           </button>
           <button type="button" className="quick-action-button" onClick={handleSnowUIClick}>
             SnowUI
+          </button>
+          <button type="button" className="quick-action-button" onClick={handleKlineChartsClick}>
+            klinecharts示范
           </button>
           <button type="button" className="quick-action-button">
             HTTP / WebSocket 协议测试
