@@ -37,4 +37,43 @@ namespace ServerTest.Models.Strategy
 
         public string? Changelog { get; set; }
     }
+
+    public sealed class StrategyDeleteRequest
+    {
+        [Required]
+        public long UsId { get; set; }
+    }
+
+    public sealed class StrategyInstanceStateRequest
+    {
+        [Required]
+        public string State { get; set; } = string.Empty;
+    }
+
+    public sealed class StrategyShareCreateRequest
+    {
+        [Required]
+        public long UsId { get; set; }
+
+        public ShareCodePolicy? Policy { get; set; }
+    }
+
+    public sealed class StrategyImportShareCodeRequest
+    {
+        [Required]
+        public string ShareCode { get; set; } = string.Empty;
+
+        public string? AliasName { get; set; }
+    }
+
+    public sealed class ShareCodePolicy
+    {
+        public bool? CanFork { get; set; }
+
+        public bool? AllowCopy { get; set; }
+
+        public int? MaxClaims { get; set; }
+
+        public DateTime? ExpiredAt { get; set; }
+    }
 }

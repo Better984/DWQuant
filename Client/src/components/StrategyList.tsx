@@ -2,9 +2,14 @@
 import StrategyItem from './StrategyItem';
 import type { StrategyItemProps } from './StrategyItem.types';
 import StrategyEditorFlow, { type StrategyEditorSubmitPayload } from './StrategyEditorFlow';
+import StrategyHistoryDialog, { type StrategyHistoryVersion } from './StrategyHistoryDialog';
+import StrategyShareDialog, { type SharePolicyPayload } from './StrategyShareDialog';
+import StrategyShareImportDialog from './StrategyShareImportDialog';
+import StrategyDetailDialog, { type StrategyDetailRecord } from './StrategyDetailDialog';
 import type { StrategyConfig, StrategyTradeConfig } from './StrategyModule.types';
 import AvatarByewind from '../assets/SnowUI/head/AvatarByewind.svg';
 import { Dialog, useNotification } from './ui';
+import AlertDialog from './AlertDialog';
 import { HttpClient, getToken } from '../network';
 import './StrategyItem.css';
 
@@ -22,7 +27,7 @@ type StrategyListRecord = {
 
 const resolveStatus = (state: string | undefined): StrategyItemProps['status'] => {
   if (!state) {
-    return 'stopped';
+    return 'completed';
   }
   const normalized = state.trim().toLowerCase();
   if (normalized === 'running') {
@@ -31,7 +36,10 @@ const resolveStatus = (state: string | undefined): StrategyItemProps['status'] =
   if (normalized === 'paused') {
     return 'paused';
   }
-  return 'stopped';
+  if (normalized === 'paused_open_position') {
+    return 'paused_open_position';
+  }
+  return 'completed';
 };
 
 const resolveSymbol = (symbol?: string) => {
@@ -63,7 +71,7 @@ const formatQuantity = (value: number | undefined, currency: string) => {
 
 const buildStrategyItem = (
   record: StrategyListRecord,
-  onCreateVersion: (usId: number) => void,
+  onViewDetail: (usId: number) => void,
 ): StrategyItemProps => {
   const trade = record.configJson?.trade as StrategyTradeConfig | undefined;
   const risk = trade?.risk;
@@ -87,17 +95,30 @@ const buildStrategyItem = (
     ownerAvatar: AvatarByewind,
     status: resolveStatus(record.state),
     version: record.versionNo,
-    onCreateVersion,
+    onViewDetail,
   };
 };
 
 const StrategyList: React.FC = () => {
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
-  const { error: showError } = useNotification();
+  const { error: showError, success: showSuccess } = useNotification();
   const [records, setRecords] = useState<StrategyListRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [activeStrategy, setActiveStrategy] = useState<StrategyListRecord | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [historyStrategy, setHistoryStrategy] = useState<StrategyListRecord | null>(null);
+  const [historyVersions, setHistoryVersions] = useState<StrategyHistoryVersion[]>([]);
+  const [selectedHistoryVersionId, setSelectedHistoryVersionId] = useState<number | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [shareTarget, setShareTarget] = useState<StrategyListRecord | null>(null);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StrategyListRecord | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<StrategyListRecord | null>(null);
+  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
 
   const fetchStrategies = useCallback(async () => {
     setIsLoading(true);
@@ -130,6 +151,134 @@ const StrategyList: React.FC = () => {
     setIsEditorOpen(true);
   };
 
+  const handleViewHistory = async (usId: number) => {
+    const target = records.find((item) => item.usId === usId) ?? null;
+    if (!target) {
+      return;
+    }
+    setHistoryStrategy(target);
+    setIsHistoryOpen(true);
+    setIsHistoryLoading(true);
+
+    try {
+      const data = await client.get<StrategyHistoryVersion[]>('/api/strategy/versions', { usId });
+      const versions = Array.isArray(data) ? data : [];
+      setHistoryVersions(versions);
+      const pinnedVersion = versions.find((item) => item.isPinned);
+      const fallbackVersion = pinnedVersion ?? versions[versions.length - 1];
+      setSelectedHistoryVersionId(fallbackVersion ? fallbackVersion.versionId : null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '获取历史版本失败';
+      showError(message);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  };
+
+  const handleOpenShare = (usId: number) => {
+    const target = records.find((item) => item.usId === usId) ?? null;
+    if (!target) {
+      return;
+    }
+    setShareTarget(target);
+    setIsShareDialogOpen(true);
+  };
+
+  const closeShareDialog = () => {
+    setIsShareDialogOpen(false);
+    setShareTarget(null);
+  };
+
+  const handleCreateShare = async (usId: number, payload: SharePolicyPayload) => {
+    const data = await client.post<{ shareCode: string }>('/api/strategy/share/create-code', {
+      usId,
+      policy: payload,
+    });
+    return data.shareCode;
+  };
+
+  const handleUpdateStatus = async (
+    usId: number,
+    status: 'running' | 'paused' | 'paused_open_position' | 'completed',
+  ) => {
+    await client.request({
+      method: 'PATCH',
+      path: `/api/strategy/instances/${usId}/state`,
+      body: { state: status },
+    });
+    await fetchStrategies();
+  };
+
+  const handleViewDetail = (usId: number) => {
+    const target = records.find((item) => item.usId === usId) ?? null;
+    if (!target) {
+      return;
+    }
+    setDetailTarget(target);
+    setIsDetailDialogOpen(true);
+  };
+
+  const closeDetailDialog = () => {
+    setIsDetailDialogOpen(false);
+    setDetailTarget(null);
+  };
+
+  const openImportDialog = () => {
+    setIsImportDialogOpen(true);
+  };
+
+  const closeImportDialog = () => {
+    setIsImportDialogOpen(false);
+  };
+
+  const handleImportShare = async (payload: { shareCode: string; aliasName?: string }) => {
+    await client.post('/api/strategy/import/share-code', payload);
+    await fetchStrategies();
+  };
+
+  const closeHistory = () => {
+    setIsHistoryOpen(false);
+    setHistoryStrategy(null);
+    setHistoryVersions([]);
+    setSelectedHistoryVersionId(null);
+    setIsHistoryLoading(false);
+  };
+
+  const handleDelete = (usId: number) => {
+    const target = records.find((item) => item.usId === usId) ?? null;
+    if (!target) {
+      return;
+    }
+    setDeleteTarget(target);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = () => {
+    setIsDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget || isDeleting) {
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await client.post('/api/strategy/delete', { usId: deleteTarget.usId });
+      showSuccess('策略删除成功');
+      if (historyStrategy?.usId === deleteTarget.usId) {
+        closeHistory();
+      }
+      closeDeleteDialog();
+      await fetchStrategies();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除策略失败';
+      showError(message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const closeEditor = () => {
     setIsEditorOpen(false);
     setActiveStrategy(null);
@@ -147,17 +296,22 @@ const StrategyList: React.FC = () => {
   };
 
   const strategyItems = useMemo(
-    () => records.map((record) => buildStrategyItem(record, handleCreateVersion)),
-    [records],
+    () => records.map((record) => buildStrategyItem(record, handleViewDetail)),
+    [records, handleViewDetail],
   );
 
   const initialTradeConfig = activeStrategy?.configJson?.trade as StrategyTradeConfig | undefined;
 
   return (
     <div className="strategy-list-page">
-      <div className="page-title">
-        <h1 className="title-text">策略列表</h1>
-        <span className="title-subtext">查看和管理您的交易策略</span>
+      <div className="page-title strategy-list-header">
+        <div className="strategy-list-title">
+          <h1 className="title-text">策略列表</h1>
+          <span className="title-subtext">查看和管理您的交易策略</span>
+        </div>
+        <button className="strategy-import-btn" type="button" onClick={openImportDialog}>
+          分享码导入
+        </button>
       </div>
       <div className="strategy-list-container">
         {isLoading ? (
@@ -189,6 +343,83 @@ const StrategyList: React.FC = () => {
             initialTradeConfig={initialTradeConfig}
             initialConfig={activeStrategy.configJson}
             disableMetaFields={true}
+          />
+        )}
+      </Dialog>
+      <Dialog
+        open={isShareDialogOpen}
+        onClose={closeShareDialog}
+        showCloseButton={false}
+        cancelText=""
+        confirmText=""
+      >
+        {shareTarget && (
+          <StrategyShareDialog
+            key={shareTarget.usId}
+            strategyName={shareTarget.aliasName || shareTarget.defName}
+            onCreateShare={handleCreateShare}
+            onClose={closeShareDialog}
+          />
+        )}
+      </Dialog>
+      <Dialog
+        open={isImportDialogOpen}
+        onClose={closeImportDialog}
+        showCloseButton={false}
+        cancelText=""
+        confirmText=""
+      >
+        <StrategyShareImportDialog onImportShare={handleImportShare} onClose={closeImportDialog} />
+      </Dialog>
+      <Dialog
+        open={isHistoryOpen}
+        onClose={closeHistory}
+        showCloseButton={false}
+        cancelText=""
+        confirmText=""
+        className="strategy-history-dialog"
+      >
+        <StrategyHistoryDialog
+          versions={historyVersions}
+          selectedVersionId={selectedHistoryVersionId}
+          onSelectVersion={setSelectedHistoryVersionId}
+          onClose={closeHistory}
+          isLoading={isHistoryLoading}
+        />
+      </Dialog>
+      <AlertDialog
+        open={isDeleteDialogOpen}
+        title="删除策略"
+        description={`确定删除策略"${deleteTarget?.aliasName || deleteTarget?.defName || ''}"吗？`}
+        helperText="删除后将无法恢复，请谨慎操作。"
+        cancelText="取消"
+        confirmText={isDeleting ? '删除中...' : '删除'}
+        danger={true}
+        onCancel={closeDeleteDialog}
+        onClose={closeDeleteDialog}
+        onConfirm={handleConfirmDelete}
+      />
+      <Dialog
+        open={isDetailDialogOpen}
+        onClose={closeDetailDialog}
+        showCloseButton={false}
+        cancelText=""
+        confirmText=""
+        className="strategy-detail-dialog"
+      >
+        {detailTarget && (
+          <StrategyDetailDialog
+            key={detailTarget.usId}
+            strategy={detailTarget as StrategyDetailRecord}
+            onClose={closeDetailDialog}
+            onCreateVersion={handleCreateVersion}
+            onViewHistory={async (usId: number) => {
+              const data = await client.get<StrategyHistoryVersion[]>('/api/strategy/versions', { usId });
+              return Array.isArray(data) ? data : [];
+            }}
+            onCreateShare={handleCreateShare}
+            onUpdateStatus={handleUpdateStatus}
+            onDelete={handleDelete}
           />
         )}
       </Dialog>
