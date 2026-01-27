@@ -79,7 +79,7 @@ const HomeModule: React.FC = () => {
       totalPosition: '50000 DOGE',
       profitLossRatio: '止盈 10% / 止损 5%',
       ownerAvatar: AvatarMale01,
-      status: 'stopped',
+      status: 'completed',
       version: '3.1',
     },
   ];

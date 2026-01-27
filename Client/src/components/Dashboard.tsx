@@ -39,6 +39,7 @@ const Dashboard: React.FC = () => {
     opacity: 0,
   });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(280);
   const rightSidebarResizeRef = useRef<{ x: number; width: number } | null>(null);
@@ -215,8 +216,8 @@ const Dashboard: React.FC = () => {
 
   return (
     <div
-      className={`dashboard-container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}
-      style={{ ['--right-sidebar-width' as string]: `${rightSidebarWidth}px` }}
+      className={`dashboard-container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isRightSidebarCollapsed ? 'right-sidebar-collapsed' : ''}`}
+      style={{ ['--right-sidebar-width' as string]: `${isRightSidebarCollapsed ? 0 : rightSidebarWidth}px` }}
     >
       {/* Left Sidebar */}
       <aside className={`dashboard-left-sidebar ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
@@ -422,9 +423,6 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="header-icons-group">
-            <button className="header-icon-button">
-              <img src={SidebarIcon} alt="Sidebar" className="header-icon-img" />
-            </button>
             <button className="header-icon-button" onClick={toggleTheme}>
               <img src={VectorIcon} alt="Theme Toggle" className="header-icon-img" />
             </button>
@@ -433,6 +431,12 @@ const Dashboard: React.FC = () => {
             </button>
             <button className="header-icon-button">
               <img src={BellIcon} alt="Bell" className="header-icon-img" />
+            </button>
+            <button 
+              className="header-icon-button"
+              onClick={() => setIsRightSidebarCollapsed((prev) => !prev)}
+            >
+              <img src={SidebarIcon} alt="Right Sidebar Toggle" className="header-icon-img" />
             </button>
           </div>
         </div>
@@ -444,7 +448,10 @@ const Dashboard: React.FC = () => {
       </main>
 
       {/* Right Sidebar */}
-      <aside className="dashboard-right-sidebar" onPointerDown={handleRightSidebarResizeStart}>
+      <aside 
+        className={`dashboard-right-sidebar ${isRightSidebarCollapsed ? 'is-collapsed' : ''}`}
+        onPointerDown={handleRightSidebarResizeStart}
+      >
         <CryptoMarketPanel
           allowResize
           allowWidthResize={false}

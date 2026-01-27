@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import './StrategyItem.css';
 import type { StrategyItemProps } from './StrategyItem.types';
 
@@ -20,14 +20,16 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
     switch (status) {
       case 'running':
         return '运行中';
-      case 'stopped':
-        return '已停止';
       case 'paused':
         return '已暂停';
+      case 'paused_open_position':
+        return '暂停开新仓';
+      case 'completed':
+        return '完成';
       case 'error':
         return '错误';
       default:
-        return '未知';
+        return '完成';
     }
   };
 
@@ -35,14 +37,16 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
     switch (status) {
       case 'running':
         return 'status-running';
-      case 'stopped':
-        return 'status-stopped';
       case 'paused':
         return 'status-paused';
+      case 'paused_open_position':
+        return 'status-paused-open-position';
+      case 'completed':
+        return 'status-completed';
       case 'error':
         return 'status-error';
       default:
-        return 'status-stopped';
+        return 'status-completed';
     }
   };
 
@@ -62,10 +66,10 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
           </h3>
           <div className="strategy-item-meta">
             <span className="strategy-currency">{currency}</span>
-            <span className="strategy-separator">·</span>
+            <span className="strategy-separator">路</span>
             <span className="strategy-trading-pair">{tradingPair}</span>
-            <span className="strategy-separator">·</span>
-            <span className="strategy-leverage">{leverage}x 杠杆</span>
+            <span className="strategy-separator">路</span>
+            <span className="strategy-leverage">{leverage}x 鏉犳潌</span>
           </div>
         </div>
         <div className="strategy-item-header-right">
@@ -113,3 +117,8 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
 
 export default StrategyItem;
 export type { StrategyItemProps } from './StrategyItem.types';
+
+
+
+
+

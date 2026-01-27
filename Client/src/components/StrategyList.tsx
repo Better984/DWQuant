@@ -27,7 +27,7 @@ type StrategyListRecord = {
 
 const resolveStatus = (state: string | undefined): StrategyItemProps['status'] => {
   if (!state) {
-    return 'stopped';
+    return 'completed';
   }
   const normalized = state.trim().toLowerCase();
   if (normalized === 'running') {
@@ -36,7 +36,10 @@ const resolveStatus = (state: string | undefined): StrategyItemProps['status'] =
   if (normalized === 'paused') {
     return 'paused';
   }
-  return 'stopped';
+  if (normalized === 'paused_open_position') {
+    return 'paused_open_position';
+  }
+  return 'completed';
 };
 
 const resolveSymbol = (symbol?: string) => {
@@ -194,13 +197,16 @@ const StrategyList: React.FC = () => {
     return data.shareCode;
   };
 
-  const handleUpdateStatus = async (usId: number, status: 'running' | 'stopped' | 'paused') => {
-    // TODO: 实现更新策略状态的API调用
-    // 当前协议还未实现，先写占位代码
-    await client.post('/api/strategy/update-status', {
-      usId,
-      status,
+  const handleUpdateStatus = async (
+    usId: number,
+    status: 'running' | 'paused' | 'paused_open_position' | 'completed',
+  ) => {
+    await client.request({
+      method: 'PATCH',
+      path: `/api/strategy/instances/${usId}/state`,
+      body: { state: status },
     });
+    await fetchStrategies();
   };
 
   const handleViewDetail = (usId: number) => {
