@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import './AlertDialog.css';
 
 export interface AlertDialogProps {
@@ -57,7 +58,7 @@ const AlertDialog: React.FC<AlertDialogProps> = ({
     onClose?.();
   };
 
-  return (
+  return createPortal(
     <div className="alert-dialog-overlay" onClick={handleOverlayClick}>
       <div className="alert-dialog-container">
         {/* 标题 */}
@@ -102,7 +103,8 @@ const AlertDialog: React.FC<AlertDialogProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

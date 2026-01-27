@@ -61,6 +61,10 @@
   --sidebar-current-width: var(--sidebar-collapsed-width);
 }
 
+.dashboard-container.right-sidebar-collapsed {
+  --right-sidebar-width: 0px;
+}
+
 /* Left Sidebar - 根据 Figma 设计精确还原 */
 .dashboard-left-sidebar {
   box-sizing: border-box;
@@ -1520,7 +1524,10 @@
   gap: 312px;
   background: var(--bg-primary);
   border-bottom: 0.5px solid var(--border-color);
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              right 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.3s ease, 
+              border-color 0.3s ease;
   box-sizing: border-box;
   z-index: 4;
   flex-wrap: nowrap;
@@ -1795,7 +1802,9 @@
   box-sizing: border-box;
   z-index: 1;
   background: var(--bg-primary);
-  transition: background-color 0.3s ease;
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              right 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.3s ease;
 }
 
 /* 行情模块：无内边距，让图表填满 */
@@ -2403,7 +2412,11 @@
   bottom: 0px;
   border-left: 0.5px solid var(--border-color);
   background: var(--bg-sidebar);
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              background-color 0.3s ease, 
+              border-color 0.3s ease,
+              opacity 0.3s ease,
+              visibility 0.3s ease;
   overflow-y: auto;
   overflow-x: hidden;
   z-index: 1;
@@ -2413,6 +2426,15 @@
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE and Edge */
   isolation: isolate;
+}
+
+.dashboard-right-sidebar.is-collapsed {
+  width: 0px;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+  border-left: none;
+  overflow: hidden;
 }
 
 /* 右侧栏内：除最后一个外保持内容高度，最后一个面板填满剩余高度且可滚动 */

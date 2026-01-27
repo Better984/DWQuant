@@ -116,6 +116,17 @@ namespace ServerTest.Services
             return true;
         }
 
+        public int GetRegisteredStrategyCount()
+        {
+            var total = 0;
+            foreach (var bucket in _strategiesByKey.Values)
+            {
+                total += bucket.Count;
+            }
+
+            return total;
+        }
+
         public bool TryProcessNextTask()
         {
             if (!_marketDataEngine.TryDequeueMarketTask(out var task))
@@ -220,6 +231,12 @@ namespace ServerTest.Services
 
             ExecuteBranch(context, logic.Exit.Long, "Exit.Long");
             //ExecuteBranch(context, logic.Exit.Short, "Exit.Short");
+
+            if (context.Strategy.State == StrategyState.PausedOpenPosition)
+            {
+                return;
+            }
+
             ExecuteBranch(context, logic.Entry.Long, "Entry.Long");
             //ExecuteBranch(context, logic.Entry.Short, "Entry.Short");
         }
@@ -525,7 +542,9 @@ namespace ServerTest.Services
 
         private static bool IsRunnableState(StrategyState state)
         {
-            return state == StrategyState.Running || state == StrategyState.Testing;
+            return state == StrategyState.Running
+                || state == StrategyState.Testing
+                || state == StrategyState.PausedOpenPosition;
         }
 
         private static string FormatTimestamp(long timestamp)

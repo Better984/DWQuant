@@ -52,6 +52,35 @@ namespace ServerTest.Services
             return strategy;
         }
 
+        public StrategyModel? LoadFromDocument(StrategyDocument document)
+        {
+            var strategy = BuildFromDocument(document);
+            if (strategy == null)
+            {
+                return null;
+            }
+
+            NormalizeStrategy(strategy);
+            return strategy;
+        }
+
+        public StrategyConfig? ParseConfig(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonConvert.DeserializeObject<StrategyConfig>(json, _settings);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
         private static void NormalizeStrategy(StrategyModel strategy)
         {
             var trade = strategy.StrategyConfig?.Trade;
@@ -151,6 +180,8 @@ namespace ServerTest.Services
                     return StrategyState.Testing;
                 case "paused":
                     return StrategyState.Paused;
+                case "paused_open_position":
+                    return StrategyState.PausedOpenPosition;
                 case "draft":
                     return StrategyState.Draft;
                 case "ready":
