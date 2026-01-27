@@ -1,9 +1,10 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Models;
 using ServerTest.Services;
 using ServerTest.WebSockets;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ServerTest.Monitoring
 {
@@ -31,6 +32,7 @@ namespace ServerTest.Monitoring
         private Button _toggleHistoryButton = null!;
         private Button _toggleNetworkButton = null!;
         private Button _toggleDownloadButton = null!;
+        private Button _toggleTradingButton = null!;
         private Button _toggleUserListButton = null!;
         private bool _networkDetailsExpanded;
         private readonly System.Windows.Forms.Timer _refreshTimer;
@@ -46,6 +48,18 @@ namespace ServerTest.Monitoring
         private CancellationTokenSource? _downloadCts;
         private bool _downloadRunning;
         private ContextMenuStrip _downloadLogMenu = null!;
+        private Panel _tradingPanel = null!;
+        private Label _tradingSummaryLabel = null!;
+        private ListView _tradingLogList = null!;
+        private Button _tradingDetailButton = null!;
+        private Button _tradingStatsButton = null!;
+        private readonly RealTimeStrategyEngine _strategyEngine;
+        private readonly List<StartupMonitorLogEntry> _tradingLogEntries = new();
+        private const int MaxTradingLogItems = 300;
+        private const string StrategyStateLogTag = "[StrategyState]";
+        private static readonly Regex StrategyStateLogRegex = new(
+            @"uid=(\d+)\s+usId=(\d+)\s+state=([a-z_]+)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private readonly Dictionary<SystemModule, ListViewItem> _statusItems = new();
         private readonly List<StartupMonitorLogEntry> _logEntries = new();
@@ -65,6 +79,7 @@ namespace ServerTest.Monitoring
             _connectionsProvider = connectionsProvider ?? (() => Array.Empty<WebSocketConnection>());
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+            _strategyEngine = serviceProvider.GetRequiredService<RealTimeStrategyEngine>();
 
             Text = "DWQuant Server Monitor";
             StartPosition = FormStartPosition.CenterScreen;
@@ -96,6 +111,7 @@ namespace ServerTest.Monitoring
             {
                 RefreshHistoryData();
                 RefreshNetworkData();
+                RefreshTradingData();
             };
             _refreshTimer.Start();
 
@@ -178,6 +194,18 @@ namespace ServerTest.Monitoring
                 AppendLogItem(entry);
                 _logList.EnsureVisible(_logList.Items.Count - 1);
             }
+
+            if (!string.IsNullOrWhiteSpace(entry.Message) &&
+                entry.Message.Contains(StrategyStateLogTag, StringComparison.OrdinalIgnoreCase))
+            {
+                _tradingLogEntries.Add(entry);
+                if (_tradingLogEntries.Count > MaxTradingLogItems)
+                {
+                    _tradingLogEntries.RemoveAt(0);
+                }
+
+                AppendTradingLog(entry);
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -194,7 +222,8 @@ namespace ServerTest.Monitoring
             Output,
             History,
             Network,
-            Download
+            Download,
+            Trading
         }
 
         private Control BuildHeader()
@@ -247,11 +276,14 @@ namespace ServerTest.Monitoring
             _toggleNetworkButton.Click += (_, __) => SetActiveView(ViewMode.Network);
             _toggleDownloadButton = BuildToggleButton("数据下载");
             _toggleDownloadButton.Click += (_, __) => SetActiveView(ViewMode.Download);
+            _toggleTradingButton = BuildToggleButton("\u5b9e\u76d8\u8be6\u60c5");
+            _toggleTradingButton.Click += (_, __) => SetActiveView(ViewMode.Trading);
 
             togglePanel.Controls.Add(_toggleOutputButton);
             togglePanel.Controls.Add(_toggleHistoryButton);
             togglePanel.Controls.Add(_toggleNetworkButton);
             togglePanel.Controls.Add(_toggleDownloadButton);
+            togglePanel.Controls.Add(_toggleTradingButton);
 
             var headerLayout = new TableLayoutPanel
             {
@@ -260,7 +292,7 @@ namespace ServerTest.Monitoring
                 RowCount = 1,
             };
             headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 450));
+            headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 560));
 
             headerLayout.Controls.Add(titlePanel, 0, 0);
             headerLayout.Controls.Add(togglePanel, 1, 0);
@@ -327,20 +359,24 @@ namespace ServerTest.Monitoring
             _historyPanel = BuildHistoryPanel();
             _networkPanel = BuildNetworkPanel();
             _downloadPanel = BuildDownloadPanel();
+            _tradingPanel = BuildTradingPanel();
 
             container.Controls.Add(_outputPanel);
             container.Controls.Add(_historyPanel);
             container.Controls.Add(_networkPanel);
             container.Controls.Add(_downloadPanel);
+            container.Controls.Add(_tradingPanel);
 
             _outputPanel.Dock = DockStyle.Fill;
             _historyPanel.Dock = DockStyle.Fill;
             _networkPanel.Dock = DockStyle.Fill;
             _downloadPanel.Dock = DockStyle.Fill;
+            _tradingPanel.Dock = DockStyle.Fill;
             _outputPanel.Visible = false;
             _historyPanel.Visible = false;
             _networkPanel.Visible = false;
             _downloadPanel.Visible = false;
+            _tradingPanel.Visible = false;
 
             return container;
         }
@@ -372,6 +408,142 @@ namespace ServerTest.Monitoring
             split.Panel2.Controls.Add(BuildStatusPanel());
 
             return split;
+        }
+
+        private Panel BuildTradingPanel()
+        {
+            var panel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(16),
+                BackColor = Color.FromArgb(245, 247, 250),
+            };
+
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+
+            var split = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterDistance = 520,
+                BackColor = Color.White
+            };
+
+            var summaryPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(12),
+                BackColor = Color.White
+            };
+
+            var title = new Label
+            {
+                Text = "\u5b9e\u76d8\u8be6\u60c5",
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(4, 4)
+            };
+
+            var summaryLabel = new Label
+            {
+                Text = "\u8fd0\u884c\u4e2d\u7b56\u7565: 0",
+                Font = new Font("Segoe UI", 11, FontStyle.Bold),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(34, 197, 94),
+                Location = new Point(6, 36)
+            };
+            _tradingSummaryLabel = summaryLabel;
+
+            summaryPanel.Controls.Add(title);
+            summaryPanel.Controls.Add(summaryLabel);
+
+            var logPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(12),
+                BackColor = Color.White
+            };
+
+            var logTitle = new Label
+            {
+                Text = "\u7b56\u7565\u72b6\u6001\u4fee\u6539\u65e5\u5fd7",
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(4, 4)
+            };
+
+            _tradingLogList = new ListView
+            {
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                Dock = DockStyle.Bottom,
+                Height = 400
+            };
+            _tradingLogList.Columns.Add("\u65f6\u95f4", 90);
+            _tradingLogList.Columns.Add("\u7528\u6237ID", 100);
+            _tradingLogList.Columns.Add("\u7b56\u7565ID", 100);
+            _tradingLogList.Columns.Add("\u72b6\u6001", 120);
+            _tradingLogList.Columns.Add("\u5185\u5bb9", 360);
+
+            logPanel.Controls.Add(logTitle);
+            logPanel.Controls.Add(_tradingLogList);
+            _tradingLogList.Dock = DockStyle.Fill;
+
+            split.Panel1.Controls.Add(summaryPanel);
+            split.Panel2.Controls.Add(logPanel);
+
+            var footer = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Padding = new Padding(10, 8, 10, 8)
+            };
+
+            var buttonRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = true,
+            };
+
+            _tradingDetailButton = new Button
+            {
+                Text = "\u5b9e\u76d8\u8be6\u60c5",
+                Width = 100,
+                Height = 30,
+                BackColor = Color.FromArgb(17, 24, 39),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+            };
+
+            _tradingStatsButton = new Button
+            {
+                Text = "\u5f00\u4ed3\u7edf\u8ba1",
+                Width = 100,
+                Height = 30,
+                Enabled = false,
+                BackColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+            };
+
+            buttonRow.Controls.Add(_tradingDetailButton);
+            buttonRow.Controls.Add(_tradingStatsButton);
+            footer.Controls.Add(buttonRow);
+
+            layout.Controls.Add(split, 0, 0);
+            layout.Controls.Add(footer, 0, 1);
+
+            panel.Controls.Add(layout);
+            return panel;
         }
 
         private Panel BuildHistoryPanel()
@@ -493,7 +665,7 @@ private Panel BuildNetworkPanel()
 
             var info = new Label
             {
-                Text = "Binance Futures 下载日线 ZIP，遇到首次有数据后继续至今天",
+                Text = "Binance Futures 下载日线 ZIP（检测首日后补齐至今天）",
                 Font = new Font("Segoe UI", 9, FontStyle.Regular),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(90, 90, 90),
@@ -641,7 +813,7 @@ private Panel BuildNetworkPanel()
 
             _downloadStatusLabel = new Label
             {
-                Text = "状态 待机",
+                Text = "状态：待机",
                 Font = new Font("Segoe UI", 9, FontStyle.Regular),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(90, 90, 90),
@@ -707,7 +879,7 @@ private Panel BuildNetworkPanel()
                 Width = 200,
             };
 
-            // 使用SplitContainer分隔Level和Source筛选
+            // 使用 SplitContainer 分隔 Level 和 Source 筛选
             var splitContainer = new SplitContainer
             {
                 Dock = DockStyle.Fill,
@@ -717,7 +889,7 @@ private Panel BuildNetworkPanel()
                 FixedPanel = FixedPanel.None
             };
 
-            // Level筛选区域（上方）
+            // Level 筛选区域（上方）
             var levelPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -784,7 +956,7 @@ private Panel BuildNetworkPanel()
                 }
             };
 
-            // 初始化Level列表
+            // 初始化 Level 列表
             var allLevels = Enum.GetValues<Microsoft.Extensions.Logging.LogLevel>()
                 .OrderBy(l => l)
                 .ToList();
@@ -800,7 +972,7 @@ private Panel BuildNetworkPanel()
             levelPanel.Controls.Add(levelFilterActions);
             levelPanel.Controls.Add(levelFilterLabel);
 
-            // Source筛选区域（下方）
+            // Source 筛选区域（下方）
             var sourcePanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -958,10 +1130,10 @@ private Panel BuildNetworkPanel()
         {
             return status switch
             {
-                SystemStatus.Ready => "✅ 就绪",
-                SystemStatus.Starting => "⏳ 启动中",
-                SystemStatus.Failed => "❌ 失败",
-                _ => "⚪ 未启动"
+                SystemStatus.Ready => "就绪",
+                SystemStatus.Starting => "启动中",
+                SystemStatus.Failed => "失败",
+                _ => "未启动"
             };
         }
 
@@ -1002,7 +1174,7 @@ private Panel BuildNetworkPanel()
 
         private void TrackLevel(Microsoft.Extensions.Logging.LogLevel level)
         {
-            // Level已经在初始化时添加，这里不需要额外处理
+            // Level 已在初始化时添加，这里无需额外处理
         }
 
         private void SetSourceFilterSelection(bool isChecked)
@@ -1041,7 +1213,7 @@ private Panel BuildNetworkPanel()
 
         private void ApplyFilters()
         {
-            // 更新选中的Sources
+            // 更新选中的 Sources
             _selectedSources.Clear();
             foreach (var item in _sourceFilterList.CheckedItems)
             {
@@ -1051,7 +1223,7 @@ private Panel BuildNetworkPanel()
                 }
             }
 
-            // 更新选中的Levels
+            // 更新选中的 Levels
             _selectedLevels.Clear();
             foreach (var item in _levelFilterList.CheckedItems)
             {
@@ -1121,6 +1293,7 @@ private Panel BuildNetworkPanel()
             _historyPanel.Visible = mode == ViewMode.History;
             _networkPanel.Visible = mode == ViewMode.Network;
             _downloadPanel.Visible = mode == ViewMode.Download;
+            _tradingPanel.Visible = mode == ViewMode.Trading;
 
             if (mode == ViewMode.Output)
             {
@@ -1134,6 +1307,10 @@ private Panel BuildNetworkPanel()
             {
                 _networkPanel.BringToFront();
             }
+            else if (mode == ViewMode.Trading)
+            {
+                _tradingPanel.BringToFront();
+            }
             else
             {
                 _downloadPanel.BringToFront();
@@ -1143,6 +1320,7 @@ private Panel BuildNetworkPanel()
             ApplyToggleStyle(_toggleHistoryButton, mode == ViewMode.History);
             ApplyToggleStyle(_toggleNetworkButton, mode == ViewMode.Network);
             ApplyToggleStyle(_toggleDownloadButton, mode == ViewMode.Download);
+            ApplyToggleStyle(_toggleTradingButton, mode == ViewMode.Trading);
 
             if (mode == ViewMode.History)
             {
@@ -1151,6 +1329,10 @@ private Panel BuildNetworkPanel()
             else if (mode == ViewMode.Network)
             {
                 RefreshNetworkData();
+            }
+            else if (mode == ViewMode.Trading)
+            {
+                RefreshTradingData();
             }
         }
 
@@ -1313,7 +1495,7 @@ private Panel BuildNetworkPanel()
                 .ThenBy(g => g.UserId, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            _networkSummaryLabel.Text = $"WebSocket 连接: {connections.Count} | 用户数: {userGroups.Count}";
+            _networkSummaryLabel.Text = $"WebSocket 连接: {connections.Count} | 用户数 {userGroups.Count}";
 
             _networkUserList.BeginUpdate();
             _networkUserList.Items.Clear();
@@ -1324,6 +1506,52 @@ private Panel BuildNetworkPanel()
                 _networkUserList.Items.Add(row);
             }
             _networkUserList.EndUpdate();
+        }
+
+        private void RefreshTradingData()
+        {
+            if (_tradingSummaryLabel == null)
+            {
+                return;
+            }
+
+            var count = _strategyEngine?.GetRegisteredStrategyCount() ?? 0;
+            _tradingSummaryLabel.Text = $"\u8fd0\u884c\u4e2d\u7b56\u7565: {count}";
+        }
+
+        private void AppendTradingLog(StartupMonitorLogEntry entry)
+        {
+            if (_tradingLogList == null)
+            {
+                return;
+            }
+
+            var message = entry.Message ?? string.Empty;
+            var uidText = "-";
+            var usIdText = "-";
+            var stateText = "-";
+
+            var match = StrategyStateLogRegex.Match(message);
+            if (match.Success)
+            {
+                uidText = match.Groups[1].Value;
+                usIdText = match.Groups[2].Value;
+                stateText = match.Groups[3].Value;
+            }
+
+            var item = new ListViewItem(entry.Timestamp.ToString("HH:mm:ss"));
+            item.SubItems.Add(uidText);
+            item.SubItems.Add(usIdText);
+            item.SubItems.Add(stateText);
+            item.SubItems.Add(message.Replace(StrategyStateLogTag, string.Empty).Trim());
+
+            _tradingLogList.Items.Add(item);
+            if (_tradingLogList.Items.Count > MaxTradingLogItems)
+            {
+                _tradingLogList.Items.RemoveAt(0);
+            }
+
+            _tradingLogList.EnsureVisible(_tradingLogList.Items.Count - 1);
         }
 
         private async Task StartDownloadAsync()
@@ -1347,7 +1575,7 @@ private Panel BuildNetworkPanel()
             _downloadStartButton.Enabled = false;
             _downloadCancelButton.Enabled = true;
             _downloadLogList.Items.Clear();
-            _downloadStatusLabel.Text = "状态 进行中...";
+            _downloadStatusLabel.Text = "状态：进行中...";
 
             _downloadCts?.Cancel();
             _downloadCts?.Dispose();
@@ -1367,15 +1595,15 @@ private Panel BuildNetworkPanel()
                     () => _downloader.DownloadAsync(symbolEnum, timeframeEnum, startDate, AppendDownloadLog, _downloadCts.Token, forceDailyOnly),
                     _downloadCts.Token);
 
-                _downloadStatusLabel.Text = $"状态 完成, 天数={summary.DaysProcessed}, 下载={summary.DaysDownloaded}, 入库={summary.RowsInserted}";
+                _downloadStatusLabel.Text = $"状态：完成, 澶╂暟={summary.DaysProcessed}, 涓嬭浇={summary.DaysDownloaded}, 鍏ュ簱={summary.RowsInserted}";
             }
             catch (OperationCanceledException)
             {
-                _downloadStatusLabel.Text = "状态 已停止";
+                _downloadStatusLabel.Text = "状态：已停止";
             }
             catch (Exception ex)
             {
-                _downloadStatusLabel.Text = "状态 失败";
+                _downloadStatusLabel.Text = "状态：失败";
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Error,
@@ -1533,7 +1761,7 @@ SELECT * FROM `{tableName}` ORDER BY open_time ASC;";
                 var dbManager = _serviceProvider.GetRequiredService<IDbManager>();
                 var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
                 var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
-                var timeframeStr = "1m"; // 固定为1分钟
+                var timeframeStr = "1m"; // 固定 1 分钟
                 var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
                 var timeframeMs = MarketDataConfig.TimeframeToMs(timeframeStr);
 
@@ -1602,21 +1830,21 @@ LIMIT 20;";
                         AppendDownloadLog(new DownloadLogEntry
                         {
                             Level = DownloadLogLevel.Warning,
-                            Message = $"缺失: {gap.gap_start_time} -> {gap.gap_end_time} (约 {gap.gap_minutes:F1} 分钟)"
+                            Message = $"缺失: {gap.gap_start_time} -> {gap.gap_end_time} (约{gap.gap_minutes:F1} 分钟)"
                         });
                     }
 
-                    // 显示尝试补齐按钮提示（只对1m周期显示）
+                    // 显示尝试补齐按钮提示（仅对 1m 周期显示）
                     AppendDownloadLog(new DownloadLogEntry
                     {
                         Level = DownloadLogLevel.Info,
-                        Message = ">>> 点击下方'尝试补齐数据'按钮，将自动下载缺失时间段前后一天的数据尝试补齐（仅处理1分钟周期） <<<"
+                        Message = ">>> 点击下方“尝试补齐数据”按钮，将自动下载缺失时间段前后一天的数据尝试补齐（仅处理1分钟周期）<<<"
                     });
 
-                    // 保存缺失信息供补齐功能使用（只保存1m周期的缺失）
+                    // 保存缺失信息供补齐功能使用（只保存 1m 周期的缺失）
                     _detectedGaps = gapList.ToList();
 
-                    // 启用补齐按钮（只对1m周期启用）
+                    // 启用补齐按钮（仅对 1m 周期启用）
                     if (InvokeRequired)
                     {
                         BeginInvoke(() => _fillGapsButton.Enabled = true);
@@ -1740,12 +1968,12 @@ LIMIT 20;";
                                 Level = DownloadLogLevel.Warning,
                                 Message = $"[{tf}] 发现 {gapList.Count} 处数据缺失："
                             });
-                            foreach (var gap in gapList.Take(5)) // 只显示前5个
+                            foreach (var gap in gapList.Take(5)) // 只显示前 5 个
                             {
                                 AppendDownloadLog(new DownloadLogEntry
                                 {
                                     Level = DownloadLogLevel.Warning,
-                                    Message = $"[{tf}] 缺失: {gap.gap_start_time} -> {gap.gap_end_time} (约 {gap.gap_minutes:F1} 分钟)"
+                                    Message = $"[{tf}] 缺失: {gap.gap_start_time} -> {gap.gap_end_time} (约{gap.gap_minutes:F1} 分钟)"
                                 });
                             }
                             if (gapList.Count > 5)
@@ -1776,7 +2004,7 @@ FROM `{tableName}`;";
                             AppendDownloadLog(new DownloadLogEntry
                             {
                                 Level = DownloadLogLevel.Info,
-                                Message = $"[{tf}] ✓ 数据完整，无缺失无重复"
+                                Message = $"[{tf}] 数据完整，无缺失无重复"
                             });
                         }
                     }
@@ -1794,7 +2022,7 @@ FROM `{tableName}`;";
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = totalGaps == 0 && totalDuplicates == 0 ? DownloadLogLevel.Info : DownloadLogLevel.Warning,
-                    Message = $"所有周期检查完成: 检查了 {checkedCount} 个周期，共发现 {totalGaps} 处缺失，{totalDuplicates} 条重复记录"
+                    Message = $"所有周期检查完成：检查了 {checkedCount} 个周期，共发现 {totalGaps} 处缺失，{totalDuplicates} 条重复记录"
                 });
 
                 if (totalGaps > 0 || totalDuplicates > 0)
@@ -1802,7 +2030,7 @@ FROM `{tableName}`;";
                     AppendDownloadLog(new DownloadLogEntry
                     {
                         Level = DownloadLogLevel.Info,
-                        Message = "提示: 如果1分钟周期数据完整，可以使用'同步聚合其他周期'功能重新生成其他周期数据"
+                        Message = "提示: 如果1分钟周期数据完整，可使用“同步聚合其他周期”功能重新生成其他周期数据"
                     });
                 }
             }
@@ -2098,7 +2326,7 @@ INNER JOIN `{tableName1m}` last_row ON last_row.open_time = agg.max_open_time AN
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Warning,
-                    Message = "没有检测到数据缺失，请先运行'验证基础数据完整性'"
+                    Message = "没有检测到数据缺失，请先运行验证基础数据完整性"
                 });
                 return;
             }
@@ -2108,14 +2336,14 @@ INNER JOIN `{tableName1m}` last_row ON last_row.open_time = agg.max_open_time AN
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Info,
-                    Message = $"开始尝试补齐 {_detectedGaps.Count} 处数据缺失（仅处理1分钟周期）..."
+                    Message = $"开始尝试补齐 {_detectedGaps.Count} 处数据缺失（仅处理 1 分钟周期）..."
                 });
 
                 var dbManager = _serviceProvider.GetRequiredService<IDbManager>();
                 var exchangeId = MarketDataConfig.ExchangeToString(MarketDataConfig.ExchangeEnum.Binance);
                 var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
-                var timeframeStr = "1m"; // 固定为1分钟周期
-                var timeframeEnum = MarketDataConfig.TimeframeEnum.m1; // 固定为1分钟周期
+                var timeframeStr = "1m"; // 固定 1 分钟周期
+                var timeframeEnum = MarketDataConfig.TimeframeEnum.m1; // 固定 1 分钟周期
                 var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
                 var timeframeMs = MarketDataConfig.TimeframeToMs(timeframeStr);
 
@@ -2128,7 +2356,6 @@ INNER JOIN `{tableName1m}` last_row ON last_row.open_time = agg.max_open_time AN
                     {
                         var gapStart = DateTime.Parse(gap.gap_start_time.ToString());
                         var gapEnd = DateTime.Parse(gap.gap_end_time.ToString());
-
                         // 计算下载范围：前一天到后一天
                         var downloadStart = gapStart.AddDays(-1).Date;
                         var downloadEnd = gapEnd.AddDays(1).Date;
@@ -2136,7 +2363,7 @@ INNER JOIN `{tableName1m}` last_row ON last_row.open_time = agg.max_open_time AN
                         AppendDownloadLog(new DownloadLogEntry
                         {
                             Level = DownloadLogLevel.Info,
-                            Message = $"尝试补齐: {gapStart:yyyy-MM-dd HH:mm} -> {gapEnd:yyyy-MM-dd HH:mm}，下载范围: {downloadStart:yyyy-MM-dd} 至 {downloadEnd:yyyy-MM-dd}"
+                            Message = $"尝试补齐: {gapStart:yyyy-MM-dd HH:mm} -> {gapEnd:yyyy-MM-dd HH:mm}，下载范围 {downloadStart:yyyy-MM-dd} 至 {downloadEnd:yyyy-MM-dd}"
                         });
 
                         // 使用下载器下载数据（强制日线下载，限制结束日期）
@@ -2151,9 +2378,8 @@ INNER JOIN `{tableName1m}` last_row ON last_row.open_time = agg.max_open_time AN
                             forceDailyOnly: true,
                             endDate: downloadEnd);
 
-                        // 等待一下让数据写入完成
+                        // 等待一段让数据写入完成
                         await Task.Delay(1000, default);
-
                         // 检查是否补齐成功
                         var checkGapSql = $@"SELECT COUNT(*) as count
 FROM `{tableName}`
@@ -2171,12 +2397,12 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
                         var filledCount = countResult != null ? Convert.ToInt64(countResult.count) : 0;
                         var expectedCount = (long)((gapEndMs - gapStartMs) / timeframeMs);
 
-                        if (filledCount >= expectedCount * 0.9) // 如果补齐了90%以上认为成功
+                        if (filledCount >= expectedCount * 0.9) // 如果补齐 90% 以上认为成功
                         {
                             AppendDownloadLog(new DownloadLogEntry
                             {
                                 Level = DownloadLogLevel.Info,
-                                Message = $"✅ 补齐成功: {gapStart:yyyy-MM-dd HH:mm} -> {gapEnd:yyyy-MM-dd HH:mm}，补齐了 {filledCount}/{expectedCount} 条记录"
+                                Message = $"补齐成功: {gapStart:yyyy-MM-dd HH:mm} -> {gapEnd:yyyy-MM-dd HH:mm}，补齐了 {filledCount}/{expectedCount} 条记录"
                             });
                             successCount++;
                         }
@@ -2185,7 +2411,7 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
                             AppendDownloadLog(new DownloadLogEntry
                             {
                                 Level = DownloadLogLevel.Warning,
-                                Message = $"❌ 补齐失败: {gapStart:yyyy-MM-dd HH:mm} -> {gapEnd:yyyy-MM-dd HH:mm}，仅补齐了 {filledCount}/{expectedCount} 条记录"
+                                Message = $"补齐失败: {gapStart:yyyy-MM-dd HH:mm} -> {gapEnd:yyyy-MM-dd HH:mm}，仅补齐 {filledCount}/{expectedCount} 条记录"
                             });
                             failCount++;
                         }
@@ -2206,7 +2432,6 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
                     Level = successCount > 0 ? DownloadLogLevel.Info : DownloadLogLevel.Warning,
                     Message = $"补齐完成: 成功 {successCount} 处，失败 {failCount} 处"
                 });
-
                 // 重新检查基础数据完整性
                 AppendDownloadLog(new DownloadLogEntry
                 {
@@ -2220,7 +2445,7 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Error,
-                    Message = $"补齐失败: {ex.Message}"
+                    Message = $"琛ラ綈澶辫触: {ex.Message}"
                 });
             }
         }
@@ -2235,3 +2460,9 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
         }
     }
 }
+
+
+
+
+
+

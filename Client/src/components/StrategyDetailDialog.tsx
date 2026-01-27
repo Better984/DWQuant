@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+﻿import React, { useState, useMemo, useEffect } from 'react';
 import { useNotification } from './ui';
 import StrategyShareDialog, { type SharePolicyPayload } from './StrategyShareDialog';
 import StrategyHistoryDialog, { type StrategyHistoryVersion } from './StrategyHistoryDialog';
@@ -22,7 +22,7 @@ type StrategyDetailDialogProps = {
   onCreateVersion: (usId: number) => void;
   onViewHistory: (usId: number) => Promise<StrategyHistoryVersion[]>;
   onCreateShare: (usId: number, payload: SharePolicyPayload) => Promise<string>;
-  onUpdateStatus: (usId: number, status: 'running' | 'stopped' | 'paused') => Promise<void>;
+  onUpdateStatus: (usId: number, status: 'running' | 'paused' | 'paused_open_position' | 'completed') => Promise<void>;
   onDelete: (usId: number) => void;
 };
 
@@ -39,7 +39,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 }) => {
   const { success, error } = useNotification();
   const [activeTab, setActiveTab] = useState<TabType>('info');
-  const [currentStatus, setCurrentStatus] = useState<'running' | 'stopped' | 'paused'>('stopped');
+  const [currentStatus, setCurrentStatus] = useState<'running' | 'paused' | 'paused_open_position' | 'completed'>('completed');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [historyVersions, setHistoryVersions] = useState<StrategyHistoryVersion[]>([]);
   const [selectedHistoryVersionId, setSelectedHistoryVersionId] = useState<number | null>(null);
@@ -54,13 +54,15 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         setCurrentStatus('running');
       } else if (status === 'paused') {
         setCurrentStatus('paused');
+      } else if (status === 'paused_open_position') {
+        setCurrentStatus('paused_open_position');
       } else {
-        setCurrentStatus('stopped');
+        setCurrentStatus('completed');
       }
     }
   }, [strategy]);
 
-  const handleUpdateStatus = async (newStatus: 'running' | 'stopped' | 'paused') => {
+  const handleUpdateStatus = async (newStatus: 'running' | 'paused' | 'paused_open_position' | 'completed') => {
     if (!strategy || isUpdatingStatus) {
       return;
     }
@@ -128,14 +130,16 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     switch (status) {
       case 'running':
         return '运行中';
-      case 'stopped':
-        return '已停止';
       case 'paused':
         return '已暂停';
+      case 'paused_open_position':
+        return '暂停开新仓';
+      case 'completed':
+        return '完成';
       case 'error':
         return '错误';
       default:
-        return '未知';
+        return '完成';
     }
   };
 
@@ -143,14 +147,16 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     switch (status) {
       case 'running':
         return 'status-running';
-      case 'stopped':
-        return 'status-stopped';
       case 'paused':
         return 'status-paused';
+      case 'paused_open_position':
+        return 'status-paused-open-position';
+      case 'completed':
+        return 'status-completed';
       case 'error':
         return 'status-error';
       default:
-        return 'status-stopped';
+        return 'status-completed';
     }
   };
 
@@ -232,11 +238,19 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                 </button>
                 <button
                   type="button"
-                  className={`strategy-status-btn ${currentStatus === 'stopped' ? 'is-active' : ''}`}
-                  onClick={() => handleUpdateStatus('stopped')}
-                  disabled={isUpdatingStatus || currentStatus === 'stopped'}
+                  className={`strategy-status-btn ${currentStatus === 'paused_open_position' ? 'is-active' : ''}`}
+                  onClick={() => handleUpdateStatus('paused_open_position')}
+                  disabled={isUpdatingStatus || currentStatus === 'paused_open_position'}
                 >
-                  {isUpdatingStatus && currentStatus !== 'stopped' ? '更新中...' : '已停止'}
+                  {isUpdatingStatus && currentStatus !== 'paused_open_position' ? '更新中...' : '暂停开新仓'}
+                </button>
+                <button
+                  type="button"
+                  className={`strategy-status-btn ${currentStatus === 'completed' ? 'is-active' : ''}`}
+                  onClick={() => handleUpdateStatus('completed')}
+                  disabled={isUpdatingStatus || currentStatus === 'completed'}
+                >
+                  {isUpdatingStatus && currentStatus !== 'completed' ? '更新中...' : '完成'}
                 </button>
               </div>
             </div>
@@ -312,3 +326,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 };
 
 export default StrategyDetailDialog;
+
+
+

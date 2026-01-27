@@ -44,6 +44,12 @@ namespace ServerTest.Models.Strategy
         public long UsId { get; set; }
     }
 
+    public sealed class StrategyInstanceStateRequest
+    {
+        [Required]
+        public string State { get; set; } = string.Empty;
+    }
+
     public sealed class StrategyShareCreateRequest
     {
         [Required]

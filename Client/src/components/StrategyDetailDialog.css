@@ -87,12 +87,12 @@
   background: #22c55e;
 }
 
-.strategy-detail-status.status-stopped {
+.strategy-detail-status.status-completed {
   background: rgba(107, 114, 128, 0.1);
   color: #6b7280;
 }
 
-.strategy-detail-status.status-stopped .status-dot {
+.strategy-detail-status.status-completed .status-dot {
   background: #6b7280;
 }
 
@@ -103,6 +103,15 @@
 
 .strategy-detail-status.status-paused .status-dot {
   background: #fbbf24;
+}
+
+.strategy-detail-status.status-paused-open-position {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+.strategy-detail-status.status-paused-open-position .status-dot {
+  background: #0ea5e9;
 }
 
 .strategy-detail-status.status-error {
