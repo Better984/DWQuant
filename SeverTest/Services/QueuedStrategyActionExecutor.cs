@@ -31,6 +31,17 @@ namespace ServerTest.Services
             var task = new StrategyActionTask
             {
                 StrategyUid = context.Strategy.UidCode,
+                Uid = context.Strategy.CreatorUserId,
+                UsId = context.Strategy.Id,
+                Exchange = context.StrategyConfig?.Trade?.Exchange ?? string.Empty,
+                Symbol = context.StrategyConfig?.Trade?.Symbol ?? string.Empty,
+                TimeframeSec = context.StrategyConfig?.Trade?.TimeframeSec ?? 0,
+                OrderQty = context.StrategyConfig?.Trade?.Sizing?.OrderQty ?? 0m,
+                TakeProfitPct = context.StrategyConfig?.Trade?.Risk?.TakeProfitPct,
+                StopLossPct = context.StrategyConfig?.Trade?.Risk?.StopLossPct,
+                TrailingEnabled = context.StrategyConfig?.Trade?.Risk?.Trailing?.Enabled ?? false,
+                TrailingActivationPct = context.StrategyConfig?.Trade?.Risk?.Trailing?.ActivationProfitPct,
+                TrailingDrawdownPct = context.StrategyConfig?.Trade?.Risk?.Trailing?.CloseOnDrawdownPct,
                 Stage = method.Method ?? string.Empty,
                 MarketTask = context.Task,
                 Method = method.Method ?? string.Empty,
