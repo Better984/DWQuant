@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard';
 import SnowUITest from './components/SnowUITest';
 import UIComponentsTest from './components/UIComponentsTest';
 import AuthPage from './components/AuthPage';
+import KlineChartsDemo from './components/KlineChartsDemo';
 import { clearToken, disconnectWs, getToken, onAuthExpired } from './network';
 import { clearAuthProfile, getAuthProfile } from './auth/profileStore';
 import { NotificationProvider } from './components/ui';
@@ -68,6 +69,7 @@ function App() {
           <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
           <Route path="/snowui-test" element={<SnowUITest />} />
           <Route path="/ui-components-test" element={<UIComponentsTest />} />
+          <Route path="/klinecharts-demo" element={<KlineChartsDemo />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>

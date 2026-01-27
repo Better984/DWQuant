@@ -1,0 +1,61 @@
+.kline-demo-page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f7f8fb 0%, #eef2f5 100%);
+  padding: 32px 24px 48px;
+  color: #1a1a1a;
+}
+
+.kline-demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 980px;
+  margin: 0 auto 20px;
+}
+
+.kline-demo-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.kline-demo-back {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #d7dde4;
+  background: #ffffff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.kline-demo-back:hover {
+  background-color: #f4f6f9;
+  border-color: #c4ccd6;
+}
+
+.kline-demo-card {
+  max-width: 980px;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 12px 24px rgba(31, 38, 51, 0.08);
+}
+
+.kline-demo-chart {
+  width: 100%;
+  height: 420px;
+}
+
+@media (max-width: 720px) {
+  .kline-demo-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .kline-demo-chart {
+    height: 320px;
+  }
+}
