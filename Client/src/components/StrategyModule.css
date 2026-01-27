@@ -2,94 +2,138 @@
 
 .strategy-module-container {
   display: flex;
-  flex-direction: row;
-  gap: 28px;
+  flex-direction: column;
   width: 100%;
   min-height: 100%;
   box-sizing: border-box;
   padding: 0;
+  gap: 0;
 }
 
-/* 左侧导航栏 - 根据 Figma 设计 */
-.strategy-sidebar {
-  width: 124px;
-  flex-shrink: 0;
-  box-sizing: border-box;
-}
-
-.strategy-menu-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-
-/* 菜单项 - 根据 Figma 设计精确还原 */
-.strategy-menu-item {
+/* 顶部导航栏 - 根据Figma设计一比一复刻 */
+.strategy-top-tab {
   display: flex;
   flex-direction: row;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 16px;
   width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+/* 左侧标签页组 - 根据Figma设计 */
+.strategy-tab-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  box-sizing: border-box;
+  min-height: 24px;
+}
+
+/* 标签页项 - 根据Figma设计精确还原 */
+.strategy-tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   border: none;
   background: transparent;
   cursor: pointer;
-  border-radius: 12px;
-  transition: background-color 0.2s ease, border-radius 0.2s ease;
+  padding: 0;
   box-sizing: border-box;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-style: normal;
   font-weight: 400;
   font-size: 14px;
   line-height: 1.4285714285714286em;
-  text-align: left;
+  text-align: center;
+  transition: color 0.2s ease;
+  min-width: 0;
 }
 
-/* 选中状态 - 根据 Figma 设计 */
-.strategy-menu-item.active {
-  background: #EDEEFC;
-  border-radius: 16px;
+/* 标签页文本 - 根据Figma设计 */
+.strategy-tab-text {
+  white-space: nowrap;
+  transition: color 0.2s ease;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.strategy-menu-item.active .strategy-menu-text {
+/* 选中状态 - 根据Figma设计 */
+.strategy-tab-item.active .strategy-tab-text {
   color: #000000;
 }
 
-/* 未选中状态 - 根据 Figma 设计 */
-.strategy-menu-item:not(.active) .strategy-menu-text {
+/* 未选中状态 - 根据Figma设计 */
+.strategy-tab-item:not(.active) .strategy-tab-text {
   color: rgba(0, 0, 0, 0.4);
 }
 
-/* Hover 状态 */
-.strategy-menu-item:hover:not(.active) {
-  background: rgba(0, 0, 0, 0.04);
+/* 选中状态下的下划线 - 根据Figma设计精确还原 */
+.strategy-tab-line {
+  width: 100%;
+  height: 2px;
+  background: #000000;
+  border-radius: 0;
+  flex-shrink: 0;
+  align-self: stretch;
 }
 
-/* 图标容器 */
-.strategy-menu-icon {
+/* 右侧筛选器组 - 根据Figma设计 */
+.strategy-filter-group {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+/* 筛选器按钮 - 根据Figma设计精确还原 */
+.strategy-filter-button {
   display: flex;
   flex-direction: row;
   justify-content: center;
   align-items: center;
-  width: 24px;
-  height: 24px;
+  gap: 6px;
+  padding: 4px 12px;
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 16px;
+  cursor: pointer;
+  box-sizing: border-box;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-style: normal;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.4285714285714286em;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.4);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.strategy-filter-button:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* 筛选器图标 */
+.strategy-filter-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: block;
   flex-shrink: 0;
 }
 
-.strategy-menu-icon img {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  display: block;
-}
-
-/* 文本 */
-.strategy-menu-text {
-  flex: 1;
+/* 筛选器文本 */
+.strategy-filter-text {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   transition: color 0.2s ease;
 }
 
@@ -98,6 +142,7 @@
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
+  width: 100%;
 }
 
 .strategy-content-inner {
@@ -105,6 +150,7 @@
   min-height: 100%;
   box-sizing: border-box;
   padding: 20px 28px;
+  padding-top: 20px;
 }
 
 /* 策略模板选项列表 */
@@ -1277,18 +1323,23 @@
 }
 
 /* 暗色主题支持 */
-.dark-theme .strategy-menu-item.active {
-  background: rgba(237, 238, 252, 0.2);
-}
-
-.dark-theme .strategy-menu-item.active .strategy-menu-text {
+.dark-theme .strategy-tab-item.active .strategy-tab-text {
   color: #FFFFFF;
 }
 
-.dark-theme .strategy-menu-item:not(.active) .strategy-menu-text {
+.dark-theme .strategy-tab-item:not(.active) .strategy-tab-text {
   color: rgba(255, 255, 255, 0.4);
 }
 
-.dark-theme .strategy-menu-item:hover:not(.active) {
+.dark-theme .strategy-tab-line {
+  background: #FFFFFF;
+}
+
+.dark-theme .strategy-filter-button {
   background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.dark-theme .strategy-filter-button:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
