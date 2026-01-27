@@ -3,7 +3,7 @@
     "usId": 9001001,
     "uid": 10004,
     "defId": 30021,
-    "aliasName": "BTC 1m Ç÷ÊÆ²ßÂÔ£¨ÎÒµÄÊµÀý£©",
+    "aliasName": "BTC 1m ï¿½ï¿½ï¿½Æ²ï¿½ï¿½Ô£ï¿½ï¿½Òµï¿½Êµï¿½ï¿½ï¿½ï¿½",
     "description": "",
     "state": "running",
     "visibility": "private",
@@ -16,7 +16,7 @@
   "definition": {
     "defId": 30021,
     "defType": "custom",
-    "name": "ÎÒµÄ½»Ò×²ßÂÔ",
+    "name": "ï¿½ÒµÄ½ï¿½ï¿½×²ï¿½ï¿½ï¿½",
     "description": "",
     "creatorUid": 10004
   },

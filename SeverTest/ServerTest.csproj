@@ -6,6 +6,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 禁用 CET (Control-flow Enforcement Technology) 以解决 Windows 兼容性问题 -->
+    <CETCompat>false</CETCompat>
   </PropertyGroup>
 
   <ItemGroup>

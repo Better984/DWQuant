@@ -109,6 +109,12 @@ builder.Services.AddSingleton<IStrategyValueResolver, IndicatorValueResolver>();
 builder.Services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
 builder.Services.AddSingleton<StrategyJsonLoader>();
 builder.Services.AddSingleton<RealTimeStrategyEngine>();
+builder.Services.AddSingleton<StrategyPositionRepository>();
+builder.Services.AddSingleton<UserExchangeApiKeyRepository>();
+builder.Services.AddSingleton<PositionRiskConfigStore>();
+builder.Services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
+builder.Services.AddHostedService<TradeActionConsumer>();
+builder.Services.AddHostedService<PositionRiskEngine>();
 
 // 策略运行时服务（后台服务）
 builder.Services.AddHostedService<StrategyRuntimeHostedService>();
