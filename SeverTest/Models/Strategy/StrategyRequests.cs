@@ -58,6 +58,18 @@ namespace ServerTest.Models.Strategy
         public ShareCodePolicy? Policy { get; set; }
     }
 
+    public sealed class StrategyCatalogPublishRequest
+    {
+        [Required]
+        public long UsId { get; set; }
+    }
+
+    public sealed class StrategyMarketPublishRequest
+    {
+        [Required]
+        public long UsId { get; set; }
+    }
+
     public sealed class StrategyImportShareCodeRequest
     {
         [Required]

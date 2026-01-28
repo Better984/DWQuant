@@ -23,6 +23,12 @@ type StrategyListRecord = {
   versionNo: number;
   configJson?: StrategyConfig;
   updatedAt?: string;
+  officialDefId?: number | null;
+  officialVersionNo?: number | null;
+  templateDefId?: number | null;
+  templateVersionNo?: number | null;
+  marketId?: number | null;
+  marketVersionNo?: number | null;
 };
 
 const resolveStatus = (state: string | undefined): StrategyItemProps['status'] => {
@@ -82,6 +88,9 @@ const buildStrategyItem = (
     takeProfit === '-' && stopLoss === '-'
       ? '-'
       : `止盈 ${takeProfit} / 止损 ${stopLoss}`;
+  const isOfficial = Boolean(record.officialDefId);
+  const isTemplate = Boolean(record.templateDefId);
+  const catalogTag = isOfficial && isTemplate ? 'both' : isOfficial ? 'official' : isTemplate ? 'template' : undefined;
 
   return {
     usId: record.usId,
@@ -95,6 +104,7 @@ const buildStrategyItem = (
     ownerAvatar: AvatarByewind,
     status: resolveStatus(record.state),
     version: record.versionNo,
+    catalogTag,
     onViewDetail,
   };
 };
@@ -206,6 +216,46 @@ const StrategyList: React.FC = () => {
       path: `/api/strategy/instances/${usId}/state`,
       body: { state: status },
     });
+    await fetchStrategies();
+  };
+
+  const handlePublishOfficial = async (usId: number) => {
+    await client.post('/api/strategy/publish/official', { usId });
+    await fetchStrategies();
+  };
+
+  const handlePublishTemplate = async (usId: number) => {
+    await client.post('/api/strategy/publish/template', { usId });
+    await fetchStrategies();
+  };
+
+  const handlePublishMarket = async (usId: number) => {
+    await client.post('/api/strategy/market/publish', { usId });
+    await fetchStrategies();
+  };
+
+  const handleSyncOfficial = async (usId: number) => {
+    await client.post('/api/strategy/official/sync', { usId });
+    await fetchStrategies();
+  };
+
+  const handleSyncTemplate = async (usId: number) => {
+    await client.post('/api/strategy/template/sync', { usId });
+    await fetchStrategies();
+  };
+
+  const handleSyncMarket = async (usId: number) => {
+    await client.post('/api/strategy/market/sync', { usId });
+    await fetchStrategies();
+  };
+
+  const handleRemoveOfficial = async (usId: number) => {
+    await client.post('/api/strategy/official/remove', { usId });
+    await fetchStrategies();
+  };
+
+  const handleRemoveTemplate = async (usId: number) => {
+    await client.post('/api/strategy/template/remove', { usId });
     await fetchStrategies();
   };
 
@@ -420,6 +470,14 @@ const StrategyList: React.FC = () => {
             onCreateShare={handleCreateShare}
             onUpdateStatus={handleUpdateStatus}
             onDelete={handleDelete}
+            onPublishOfficial={handlePublishOfficial}
+            onPublishTemplate={handlePublishTemplate}
+            onPublishMarket={handlePublishMarket}
+            onSyncOfficial={handleSyncOfficial}
+            onSyncTemplate={handleSyncTemplate}
+            onSyncMarket={handleSyncMarket}
+            onRemoveOfficial={handleRemoveOfficial}
+            onRemoveTemplate={handleRemoveTemplate}
           />
         )}
       </Dialog>

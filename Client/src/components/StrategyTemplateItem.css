@@ -1,0 +1,79 @@
+﻿.template-strategy-item {
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.template-strategy-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: var(--border-hover, #d1d5db);
+}
+
+.template-strategy-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.template-strategy-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.template-strategy-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.template-strategy-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.template-strategy-meta {
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.template-strategy-action {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.template-strategy-action:hover:not(:disabled) {
+  background: var(--bg-hover, #f3f4f6);
+  border-color: var(--border-hover, #d1d5db);
+}
+
+.template-strategy-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .template-strategy-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .template-strategy-action {
+    width: 100%;
+  }
+}

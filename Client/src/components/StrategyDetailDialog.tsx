@@ -1,7 +1,9 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNotification } from './ui';
 import StrategyShareDialog, { type SharePolicyPayload } from './StrategyShareDialog';
 import StrategyHistoryDialog, { type StrategyHistoryVersion } from './StrategyHistoryDialog';
+import AlertDialog from './AlertDialog';
+import { getAuthProfile } from '../auth/profileStore';
 import './StrategyDetailDialog.css';
 
 export type StrategyDetailRecord = {
@@ -14,6 +16,12 @@ export type StrategyDetailRecord = {
   versionNo: number;
   configJson?: any;
   updatedAt?: string;
+  officialDefId?: number | null;
+  officialVersionNo?: number | null;
+  templateDefId?: number | null;
+  templateVersionNo?: number | null;
+  marketId?: number | null;
+  marketVersionNo?: number | null;
 };
 
 type StrategyDetailDialogProps = {
@@ -24,6 +32,14 @@ type StrategyDetailDialogProps = {
   onCreateShare: (usId: number, payload: SharePolicyPayload) => Promise<string>;
   onUpdateStatus: (usId: number, status: 'running' | 'paused' | 'paused_open_position' | 'completed') => Promise<void>;
   onDelete: (usId: number) => void;
+  onPublishOfficial: (usId: number) => Promise<void>;
+  onPublishTemplate: (usId: number) => Promise<void>;
+  onPublishMarket: (usId: number) => Promise<void>;
+  onSyncOfficial: (usId: number) => Promise<void>;
+  onSyncTemplate: (usId: number) => Promise<void>;
+  onSyncMarket: (usId: number) => Promise<void>;
+  onRemoveOfficial: (usId: number) => Promise<void>;
+  onRemoveTemplate: (usId: number) => Promise<void>;
 };
 
 type TabType = 'info' | 'share' | 'history';
@@ -36,6 +52,14 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   onCreateShare,
   onUpdateStatus,
   onDelete,
+  onPublishOfficial,
+  onPublishTemplate,
+  onPublishMarket,
+  onSyncOfficial,
+  onSyncTemplate,
+  onSyncMarket,
+  onRemoveOfficial,
+  onRemoveTemplate,
 }) => {
   const { success, error } = useNotification();
   const [activeTab, setActiveTab] = useState<TabType>('info');
@@ -46,6 +70,17 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [isShareLoading, setIsShareLoading] = useState(false);
+  const [publishTarget, setPublishTarget] = useState<'official' | 'template' | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isMarketPublishing, setIsMarketPublishing] = useState(false);
+  const [isMarketConfirmOpen, setIsMarketConfirmOpen] = useState(false);
+  const [syncTarget, setSyncTarget] = useState<'official' | 'template' | 'market' | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<'official' | 'template' | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
+
+  const profile = useMemo(() => getAuthProfile(), []);
+  const canPublish = profile?.role === 255;
 
   useEffect(() => {
     if (strategy) {
@@ -126,6 +161,92 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     }
   };
 
+  const handlePublish = async (target: 'official' | 'template') => {
+    if (!strategy || isPublishing) {
+      return;
+    }
+    setIsPublishing(true);
+    try {
+      if (target === 'official') {
+        await onPublishOfficial(strategy.usId);
+        success('已发布到官方策略库');
+      } else {
+        await onPublishTemplate(strategy.usId);
+        success('已发布到策略模板库');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '发布失败';
+      error(message);
+    } finally {
+      setIsPublishing(false);
+      setPublishTarget(null);
+    }
+  };
+
+  const handlePublishMarket = async () => {
+    if (!strategy || isMarketPublishing) {
+      return;
+    }
+    setIsMarketPublishing(true);
+    try {
+      await onPublishMarket(strategy.usId);
+      success('已公开到策略广场');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '公开失败，请稍后重试';
+      error(message);
+    } finally {
+      setIsMarketPublishing(false);
+      setIsMarketConfirmOpen(false);
+    }
+  };
+
+  const handleSync = async (target: 'official' | 'template' | 'market') => {
+    if (!strategy || isSyncing) {
+      return;
+    }
+    setIsSyncing(true);
+    try {
+      if (target === 'official') {
+        await onSyncOfficial(strategy.usId);
+        success('已发布最新版本到官方策略库');
+      } else if (target === 'template') {
+        await onSyncTemplate(strategy.usId);
+        success('已发布最新版本到策略模板库');
+      } else {
+        await onSyncMarket(strategy.usId);
+        success('已发布最新版本到策略广场');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '发布最新版本失败';
+      error(message);
+    } finally {
+      setIsSyncing(false);
+      setSyncTarget(null);
+    }
+  };
+
+  const handleRemove = async (target: 'official' | 'template') => {
+    if (!strategy || isRemoving) {
+      return;
+    }
+    setIsRemoving(true);
+    try {
+      if (target === 'official') {
+        await onRemoveOfficial(strategy.usId);
+        success('已从官方策略库移除');
+      } else {
+        await onRemoveTemplate(strategy.usId);
+        success('已从策略模板库移除');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '移除失败';
+      error(message);
+    } finally {
+      setIsRemoving(false);
+      setRemoveTarget(null);
+    }
+  };
+
   const getStatusText = (status: string) => {
     switch (status) {
       case 'running':
@@ -163,6 +284,16 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   if (!strategy) {
     return null;
   }
+
+  const officialPublished = Boolean(strategy.officialDefId);
+  const templatePublished = Boolean(strategy.templateDefId);
+  const marketPublished = Boolean(strategy.marketId);
+  const officialVersionNo = strategy.officialVersionNo ?? 0;
+  const templateVersionNo = strategy.templateVersionNo ?? 0;
+  const marketVersionNo = strategy.marketVersionNo ?? 0;
+  const officialOutdated = officialPublished && strategy.versionNo > officialVersionNo;
+  const templateOutdated = templatePublished && strategy.versionNo > templateVersionNo;
+  const marketOutdated = marketPublished && strategy.versionNo > marketVersionNo;
 
   return (
     <div className="strategy-detail-dialog">
@@ -285,6 +416,82 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                 >
                   创建新版本
                 </button>
+                {!marketPublished && (
+                  <button
+                    type="button"
+                    className="strategy-detail-action-btn"
+                    onClick={() => setIsMarketConfirmOpen(true)}
+                  >
+                    公开到策略广场
+                  </button>
+                )}
+                {marketPublished && marketOutdated && (
+                  <button
+                    type="button"
+                    className="strategy-detail-action-btn"
+                    onClick={() => setSyncTarget('market')}
+                  >
+                    发布最新版本到广场
+                  </button>
+                )}
+                {canPublish && (
+                  <>
+                    {!officialPublished && (
+                      <button
+                        type="button"
+                        className="strategy-detail-action-btn"
+                        onClick={() => setPublishTarget('official')}
+                      >
+                        发布到官方
+                      </button>
+                    )}
+                    {officialPublished && officialOutdated && (
+                      <button
+                        type="button"
+                        className="strategy-detail-action-btn"
+                        onClick={() => setSyncTarget('official')}
+                      >
+                        发布最新版本到官方
+                      </button>
+                    )}
+                    {officialPublished && (
+                      <button
+                        type="button"
+                        className="strategy-detail-action-btn strategy-detail-action-btn--danger"
+                        onClick={() => setRemoveTarget('official')}
+                      >
+                        从官方策略中移除
+                      </button>
+                    )}
+                    {!templatePublished && (
+                      <button
+                        type="button"
+                        className="strategy-detail-action-btn"
+                        onClick={() => setPublishTarget('template')}
+                      >
+                        发布到模板
+                      </button>
+                    )}
+                    {templatePublished && templateOutdated && (
+                      <button
+                        type="button"
+                        className="strategy-detail-action-btn"
+                        onClick={() => setSyncTarget('template')}
+                      >
+                        发布最新版本到模板
+                      </button>
+                    )}
+                    {templatePublished && (
+                      <button
+                        type="button"
+                        className="strategy-detail-action-btn strategy-detail-action-btn--danger"
+                        onClick={() => setRemoveTarget('template')}
+                      >
+                        从策略模板中移除
+                      </button>
+                    )}
+                  </>
+                )}
                 <button
                   type="button"
                   className="strategy-detail-action-btn strategy-detail-action-btn--danger"
@@ -321,6 +528,79 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
           </div>
         )}
       </div>
+      <AlertDialog
+        open={publishTarget !== null}
+        title={publishTarget === 'official' ? '发布到官方策略库' : '发布到策略模板库'}
+        description={publishTarget === 'official' ? '确定要发布此策略到官方策略库吗？发布后其他用户可以使用此策略。' : '确定要发布此策略到策略模板库吗？发布后其他用户可以使用此策略模板。'}
+        helperText="发布后无法撤销，请谨慎操作"
+        cancelText="取消"
+        confirmText={isPublishing ? '发布中...' : '确认发布'}
+        onCancel={() => setPublishTarget(null)}
+        onClose={() => setPublishTarget(null)}
+        onConfirm={() => {
+          if (publishTarget) {
+            handlePublish(publishTarget);
+          }
+        }}
+      />
+      <AlertDialog
+        open={syncTarget !== null}
+        title={
+          syncTarget === 'official'
+            ? '发布最新版本到官方策略库'
+            : syncTarget === 'template'
+              ? '发布最新版本到策略模板库'
+              : '发布最新版本到策略广场'
+        }
+        description={
+          syncTarget === 'official'
+            ? '确认将最新版本同步到官方策略库吗？'
+            : syncTarget === 'template'
+              ? '确认将最新版本同步到策略模板库吗？'
+              : '确认将最新版本同步到策略广场吗？'
+        }
+        helperText="同步后会覆盖公开版本，请谨慎操作"
+        cancelText="取消"
+        confirmText={isSyncing ? '发布中...' : '确认发布'}
+        onCancel={() => setSyncTarget(null)}
+        onClose={() => setSyncTarget(null)}
+        onConfirm={() => {
+          if (syncTarget) {
+            handleSync(syncTarget);
+          }
+        }}
+      />
+      <AlertDialog
+        open={removeTarget !== null}
+        title={removeTarget === 'official' ? '从官方策略中移除' : '从策略模板中移除'}
+        description={
+          removeTarget === 'official'
+            ? '确认将该策略从官方策略库移除吗？'
+            : '确认将该策略从策略模板库移除吗？'
+        }
+        helperText="移除后其他用户将无法继续使用该发布记录。"
+        cancelText="取消"
+        confirmText={isRemoving ? '移除中...' : '确认移除'}
+        danger={true}
+        onCancel={() => setRemoveTarget(null)}
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={() => {
+          if (removeTarget) {
+            handleRemove(removeTarget);
+          }
+        }}
+      />
+      <AlertDialog
+        open={isMarketConfirmOpen}
+        title="公开到策略广场"
+        description="确认将该策略公开到策略广场吗？公开后所有用户都可查看。"
+        helperText="公开后可继续更新版本。"
+        cancelText="取消"
+        confirmText={isMarketPublishing ? '公开中...' : '确认公开'}
+        onCancel={() => setIsMarketConfirmOpen(false)}
+        onClose={() => setIsMarketConfirmOpen(false)}
+        onConfirm={handlePublishMarket}
+      />
     </div>
   );
 };

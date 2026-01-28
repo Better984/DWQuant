@@ -13,6 +13,7 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
   ownerAvatar,
   status,
   version,
+  catalogTag,
   usId,
   onViewDetail,
 }) => {
@@ -56,8 +57,17 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
     }
   };
 
+  const catalogClass =
+    catalogTag === 'both'
+      ? 'strategy-item--catalog-both'
+      : catalogTag === 'official'
+        ? 'strategy-item--catalog-official'
+        : catalogTag === 'template'
+          ? 'strategy-item--catalog-template'
+          : '';
+
   return (
-    <div className="strategy-item">
+    <div className={`strategy-item ${catalogClass}`.trim()}>
       <div className="strategy-item-header">
         <div className="strategy-item-title-section">
           <h3 className="strategy-item-name">

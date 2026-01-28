@@ -40,6 +40,7 @@ namespace ServerTest.Controllers
         private const string ShareCodeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         private const int ShareCodeLength = 8;
         private const string StrategyStateLogTag = "[StrategyState]";
+        private const int SuperAdminRole = 255;
 
         private readonly DatabaseService _db;
         private readonly AuthTokenService _tokenService;
@@ -56,6 +57,35 @@ namespace ServerTest.Controllers
             public string State { get; set; } = string.Empty;
             public int VersionNo { get; set; }
             public JsonElement? ConfigJson { get; set; }
+            public DateTime UpdatedAt { get; set; }
+            public long? OfficialDefId { get; set; }
+            public int? OfficialVersionNo { get; set; }
+            public long? TemplateDefId { get; set; }
+            public int? TemplateVersionNo { get; set; }
+            public long? MarketId { get; set; }
+            public int? MarketVersionNo { get; set; }
+        }
+
+        private sealed class StrategyCatalogItem
+        {
+            public long DefId { get; set; }
+            public string Name { get; set; } = string.Empty;
+            public string Description { get; set; } = string.Empty;
+            public int VersionNo { get; set; }
+            public JsonElement? ConfigJson { get; set; }
+            public DateTime UpdatedAt { get; set; }
+        }
+
+        private sealed class StrategyMarketItem
+        {
+            public long MarketId { get; set; }
+            public long UsId { get; set; }
+            public long Uid { get; set; }
+            public string Title { get; set; } = string.Empty;
+            public string Description { get; set; } = string.Empty;
+            public int VersionNo { get; set; }
+            public JsonElement? ConfigJson { get; set; }
+            public string? AuthorName { get; set; }
             public DateTime UpdatedAt { get; set; }
         }
 
@@ -250,16 +280,34 @@ SELECT
   us.updated_at,
   sd.name AS def_name,
   sv.version_no,
-  sv.config_json
+  sv.config_json,
+  osd.def_id AS official_def_id,
+  osv.version_no AS official_version_no,
+  tsd.def_id AS template_def_id,
+  tsv.version_no AS template_version_no,
+  sm.market_id,
+  smv.version_no AS market_version_no
 FROM user_strategy us
 JOIN strategy_def sd ON sd.def_id = us.def_id
 JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
+LEFT JOIN official_strategy_def osd ON osd.source_us_id = us.us_id
+LEFT JOIN official_strategy_version osv ON osv.version_id = osd.latest_version_id
+LEFT JOIN template_strategy_def tsd ON tsd.source_us_id = us.us_id
+LEFT JOIN template_strategy_version tsv ON tsv.version_id = tsd.latest_version_id
+LEFT JOIN strategy_market sm ON sm.us_id = us.us_id
+LEFT JOIN strategy_version smv ON smv.version_id = sm.pinned_version_id
 WHERE us.uid = @uid
 ORDER BY us.updated_at DESC
 ", connection);
                 cmd.Parameters.AddWithValue("@uid", uid.Value);
 
                 using var reader = await cmd.ExecuteReaderAsync();
+                var officialDefIdOrdinal = reader.GetOrdinal("official_def_id");
+                var officialVersionOrdinal = reader.GetOrdinal("official_version_no");
+                var templateDefIdOrdinal = reader.GetOrdinal("template_def_id");
+                var templateVersionOrdinal = reader.GetOrdinal("template_version_no");
+                var marketIdOrdinal = reader.GetOrdinal("market_id");
+                var marketVersionOrdinal = reader.GetOrdinal("market_version_no");
                 var results = new List<StrategyListItem>();
                 while (await reader.ReadAsync())
                 {
@@ -274,6 +322,12 @@ ORDER BY us.updated_at DESC
                         VersionNo = reader.GetInt32("version_no"),
                         ConfigJson = ParseConfigJson(reader["config_json"]),
                         UpdatedAt = reader.GetDateTime("updated_at"),
+                        OfficialDefId = reader.IsDBNull(officialDefIdOrdinal) ? null : reader.GetInt64(officialDefIdOrdinal),
+                        OfficialVersionNo = reader.IsDBNull(officialVersionOrdinal) ? null : reader.GetInt32(officialVersionOrdinal),
+                        TemplateDefId = reader.IsDBNull(templateDefIdOrdinal) ? null : reader.GetInt64(templateDefIdOrdinal),
+                        TemplateVersionNo = reader.IsDBNull(templateVersionOrdinal) ? null : reader.GetInt32(templateVersionOrdinal),
+                        MarketId = reader.IsDBNull(marketIdOrdinal) ? null : reader.GetInt64(marketIdOrdinal),
+                        MarketVersionNo = reader.IsDBNull(marketVersionOrdinal) ? null : reader.GetInt32(marketVersionOrdinal),
                     });
                 }
 
@@ -283,6 +337,324 @@ ORDER BY us.updated_at DESC
             {
                 Logger.LogError(ex, "获取策略列表失败: uid={Uid}", uid.Value);
                 return StatusCode(500, ApiResponse<object>.Error("获取策略列表失败，请稍后重试"));
+            }
+        }
+
+        [HttpGet("official/list")]
+        public async Task<IActionResult> ListOfficial()
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+                var cmd = new MySqlCommand(@"
+SELECT
+  sd.def_id,
+  sd.name,
+  sd.description,
+  sd.updated_at,
+  sv.version_no,
+  sv.config_json
+FROM official_strategy_def sd
+LEFT JOIN official_strategy_version sv ON sv.version_id = sd.latest_version_id
+ORDER BY sd.updated_at DESC, sd.def_id DESC
+", connection);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                var results = new List<StrategyCatalogItem>();
+                var versionNoOrdinal = reader.GetOrdinal("version_no");
+                var configOrdinal = reader.GetOrdinal("config_json");
+                while (await reader.ReadAsync())
+                {
+                    results.Add(new StrategyCatalogItem
+                    {
+                        DefId = reader.GetInt64("def_id"),
+                        Name = reader.GetString("name"),
+                        Description = reader.GetString("description"),
+                        VersionNo = reader.IsDBNull(versionNoOrdinal) ? 0 : reader.GetInt32(versionNoOrdinal),
+                        ConfigJson = reader.IsDBNull(configOrdinal) ? null : ParseConfigJson(reader["config_json"]),
+                        UpdatedAt = reader.GetDateTime("updated_at"),
+                    });
+                }
+
+                return Ok(ApiResponse<List<StrategyCatalogItem>>.Ok(results));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取官方策略列表失败");
+                return StatusCode(500, ApiResponse<object>.Error("获取官方策略列表失败，请稍后重试"));
+            }
+        }
+
+        [HttpGet("official/versions")]
+        public async Task<IActionResult> OfficialVersions([FromQuery] long defId)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (defId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略定义"));
+            }
+
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+                var defCmd = new MySqlCommand(@"
+SELECT latest_version_id
+FROM official_strategy_def
+WHERE def_id = @def_id
+LIMIT 1
+", connection);
+                defCmd.Parameters.AddWithValue("@def_id", defId);
+                var latestResult = await defCmd.ExecuteScalarAsync();
+                if (latestResult == null)
+                {
+                    return NotFound(ApiResponse<object>.Error("未找到官方策略"));
+                }
+
+                var latestVersionId = latestResult == DBNull.Value ? 0 : Convert.ToInt64(latestResult);
+                var versionCmd = new MySqlCommand(@"
+SELECT version_id, version_no, config_json, changelog, created_at
+FROM official_strategy_version
+WHERE def_id = @def_id
+ORDER BY version_no ASC
+", connection);
+                versionCmd.Parameters.AddWithValue("@def_id", defId);
+
+                using var reader = await versionCmd.ExecuteReaderAsync();
+                var results = new List<StrategyVersionItem>();
+                var changelogOrdinal = reader.GetOrdinal("changelog");
+                while (await reader.ReadAsync())
+                {
+                    var versionId = reader.GetInt64("version_id");
+                    results.Add(new StrategyVersionItem
+                    {
+                        VersionId = versionId,
+                        VersionNo = reader.GetInt32("version_no"),
+                        Changelog = reader.IsDBNull(changelogOrdinal) ? string.Empty : reader.GetString(changelogOrdinal),
+                        ConfigJson = ParseConfigJson(reader["config_json"]),
+                        CreatedAt = reader.GetDateTime("created_at"),
+                        IsPinned = latestVersionId > 0 && versionId == latestVersionId,
+                    });
+                }
+
+                return Ok(ApiResponse<List<StrategyVersionItem>>.Ok(results));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取官方策略版本失败: defId={DefId}", defId);
+                return StatusCode(500, ApiResponse<object>.Error("获取官方策略版本失败，请稍后重试"));
+            }
+        }
+
+        [HttpGet("template/list")]
+        public async Task<IActionResult> ListTemplate()
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+                var cmd = new MySqlCommand(@"
+SELECT
+  sd.def_id,
+  sd.name,
+  sd.description,
+  sd.updated_at,
+  sv.version_no,
+  sv.config_json
+FROM template_strategy_def sd
+LEFT JOIN template_strategy_version sv ON sv.version_id = sd.latest_version_id
+ORDER BY sd.updated_at DESC, sd.def_id DESC
+", connection);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                var results = new List<StrategyCatalogItem>();
+                var versionNoOrdinal = reader.GetOrdinal("version_no");
+                var configOrdinal = reader.GetOrdinal("config_json");
+                while (await reader.ReadAsync())
+                {
+                    results.Add(new StrategyCatalogItem
+                    {
+                        DefId = reader.GetInt64("def_id"),
+                        Name = reader.GetString("name"),
+                        Description = reader.GetString("description"),
+                        VersionNo = reader.IsDBNull(versionNoOrdinal) ? 0 : reader.GetInt32(versionNoOrdinal),
+                        ConfigJson = reader.IsDBNull(configOrdinal) ? null : ParseConfigJson(reader["config_json"]),
+                        UpdatedAt = reader.GetDateTime("updated_at"),
+                    });
+                }
+
+                return Ok(ApiResponse<List<StrategyCatalogItem>>.Ok(results));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取策略模板列表失败");
+                return StatusCode(500, ApiResponse<object>.Error("获取策略模板列表失败，请稍后重试"));
+            }
+        }
+
+        [HttpGet("market/list")]
+        public async Task<IActionResult> ListMarket()
+        {
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+                var cmd = new MySqlCommand(@"
+SELECT
+  sm.market_id,
+  sm.us_id,
+  sm.uid,
+  sm.title,
+  sm.description,
+  sm.updated_at,
+  sv.version_no,
+  sv.config_json,
+  a.nickname AS author_name
+FROM strategy_market sm
+JOIN strategy_version sv ON sv.version_id = sm.pinned_version_id
+LEFT JOIN account a ON a.uid = sm.uid
+ORDER BY sm.updated_at DESC, sm.market_id DESC
+", connection);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                var results = new List<StrategyMarketItem>();
+                var authorOrdinal = reader.GetOrdinal("author_name");
+                var versionNoOrdinal = reader.GetOrdinal("version_no");
+                var configOrdinal = reader.GetOrdinal("config_json");
+                while (await reader.ReadAsync())
+                {
+                    results.Add(new StrategyMarketItem
+                    {
+                        MarketId = reader.GetInt64("market_id"),
+                        UsId = reader.GetInt64("us_id"),
+                        Uid = reader.GetInt64("uid"),
+                        Title = reader.GetString("title"),
+                        Description = reader.GetString("description"),
+                        VersionNo = reader.IsDBNull(versionNoOrdinal) ? 0 : reader.GetInt32(versionNoOrdinal),
+                        ConfigJson = reader.IsDBNull(configOrdinal) ? null : ParseConfigJson(reader["config_json"]),
+                        AuthorName = reader.IsDBNull(authorOrdinal) ? null : reader.GetString(authorOrdinal),
+                        UpdatedAt = reader.GetDateTime("updated_at"),
+                    });
+                }
+
+                return Ok(ApiResponse<List<StrategyMarketItem>>.Ok(results));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取策略广场列表失败");
+                return StatusCode(500, ApiResponse<object>.Error("获取策略广场列表失败，请稍后重试"));
+            }
+        }
+
+        [HttpPost("market/publish")]
+        public async Task<IActionResult> PublishMarket([FromBody] StrategyMarketPublishRequest request)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                long defId;
+                long pinnedVersionId;
+                string? aliasName;
+                string? userDescription;
+                string defName;
+                string defDescription;
+
+                var queryCmd = new MySqlCommand(@"
+SELECT
+  us.def_id,
+  us.pinned_version_id,
+  us.alias_name,
+  us.description,
+  sd.name AS def_name,
+  sd.description AS def_description
+FROM user_strategy us
+JOIN strategy_def sd ON sd.def_id = us.def_id
+WHERE us.us_id = @us_id AND us.uid = @uid
+LIMIT 1
+", connection, transaction);
+                queryCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                queryCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                await using (var reader = await queryCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                    }
+
+                    defId = reader.GetInt64("def_id");
+                    pinnedVersionId = reader.GetInt64("pinned_version_id");
+                    aliasName = reader.IsDBNull(reader.GetOrdinal("alias_name")) ? null : reader.GetString("alias_name");
+                    userDescription = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString("description");
+                    defName = reader.GetString("def_name");
+                    defDescription = reader.IsDBNull(reader.GetOrdinal("def_description")) ? string.Empty : reader.GetString("def_description");
+                }
+
+                var title = string.IsNullOrWhiteSpace(aliasName) ? defName : aliasName;
+                var description = string.IsNullOrWhiteSpace(userDescription) ? defDescription : userDescription;
+
+                var upsertCmd = new MySqlCommand(@"
+INSERT INTO strategy_market (us_id, uid, def_id, pinned_version_id, title, description, created_at, updated_at)
+VALUES (@us_id, @uid, @def_id, @pinned_version_id, @title, @description, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON DUPLICATE KEY UPDATE
+  def_id = VALUES(def_id),
+  pinned_version_id = VALUES(pinned_version_id),
+  title = VALUES(title),
+  description = VALUES(description),
+  updated_at = CURRENT_TIMESTAMP
+", connection, transaction);
+                upsertCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                upsertCmd.Parameters.AddWithValue("@uid", uid.Value);
+                upsertCmd.Parameters.AddWithValue("@def_id", defId);
+                upsertCmd.Parameters.AddWithValue("@pinned_version_id", pinnedVersionId);
+                upsertCmd.Parameters.AddWithValue("@title", title);
+                upsertCmd.Parameters.AddWithValue("@description", description ?? string.Empty);
+                await upsertCmd.ExecuteNonQueryAsync();
+
+                var updateVisibilityCmd = new MySqlCommand(@"
+UPDATE user_strategy
+SET visibility = 'public', updated_at = CURRENT_TIMESTAMP
+WHERE us_id = @us_id AND uid = @uid
+", connection, transaction);
+                updateVisibilityCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                updateVisibilityCmd.Parameters.AddWithValue("@uid", uid.Value);
+                await updateVisibilityCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+                return Ok(ApiResponse<object>.Ok(new { request.UsId }, "发布成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "发布到策略广场失败: uid={Uid} usId={UsId}", uid.Value, request.UsId);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("发布失败，请稍后重试"));
             }
         }
 
@@ -577,6 +949,152 @@ WHERE def_id = @def_id
                 Logger.LogError(ex, "发布策略失败: uid={Uid} usId={UsId}", uid.Value, request.UsId);
                 await SafeRollbackAsync(transaction);
                 return StatusCode(500, ApiResponse<object>.Error("发布失败，请稍后重试"));
+            }
+        }
+
+        [HttpPost("publish/official")]
+        public async Task<IActionResult> PublishOfficial([FromBody] StrategyCatalogPublishRequest request)
+        {
+            return await PublishToCatalogAsync(request, "official");
+        }
+
+        [HttpPost("publish/template")]
+        public async Task<IActionResult> PublishTemplate([FromBody] StrategyCatalogPublishRequest request)
+        {
+            return await PublishToCatalogAsync(request, "template");
+        }
+
+        [HttpPost("official/sync")]
+        public async Task<IActionResult> SyncOfficial([FromBody] StrategyCatalogPublishRequest request)
+        {
+            return await SyncCatalogAsync(request, "official");
+        }
+
+        [HttpPost("template/sync")]
+        public async Task<IActionResult> SyncTemplate([FromBody] StrategyCatalogPublishRequest request)
+        {
+            return await SyncCatalogAsync(request, "template");
+        }
+
+        [HttpPost("official/remove")]
+        public async Task<IActionResult> RemoveOfficial([FromBody] StrategyCatalogPublishRequest request)
+        {
+            return await RemoveFromCatalogAsync(request, "official");
+        }
+
+        [HttpPost("template/remove")]
+        public async Task<IActionResult> RemoveTemplate([FromBody] StrategyCatalogPublishRequest request)
+        {
+            return await RemoveFromCatalogAsync(request, "template");
+        }
+
+        [HttpPost("market/sync")]
+        public async Task<IActionResult> SyncMarket([FromBody] StrategyMarketPublishRequest request)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                long pinnedVersionId;
+                string? aliasName = null;
+                string? userDescription = null;
+                string? defName = null;
+                string? defDescription = null;
+
+                var queryCmd = new MySqlCommand(@"
+SELECT
+  us.pinned_version_id,
+  us.alias_name,
+  us.description,
+  sd.name AS def_name,
+  sd.description AS def_description
+FROM user_strategy us
+JOIN strategy_def sd ON sd.def_id = us.def_id
+WHERE us.us_id = @us_id AND us.uid = @uid
+LIMIT 1
+", connection, transaction);
+                queryCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                queryCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                await using (var reader = await queryCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                    }
+
+                    pinnedVersionId = reader.GetInt64("pinned_version_id");
+                    aliasName = reader.IsDBNull(reader.GetOrdinal("alias_name")) ? null : reader.GetString("alias_name");
+                    userDescription = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString("description");
+                    defName = reader.IsDBNull(reader.GetOrdinal("def_name")) ? null : reader.GetString("def_name");
+                    defDescription = reader.IsDBNull(reader.GetOrdinal("def_description")) ? string.Empty : reader.GetString("def_description");
+                }
+
+                var marketCmd = new MySqlCommand(@"
+SELECT market_id, pinned_version_id
+FROM strategy_market
+WHERE us_id = @us_id AND uid = @uid
+LIMIT 1
+", connection, transaction);
+                marketCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                marketCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                long marketId;
+                long currentVersionId;
+                await using (var reader = await marketCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("该策略尚未发布到策略广场"));
+                    }
+
+                    marketId = reader.GetInt64("market_id");
+                    currentVersionId = reader.GetInt64("pinned_version_id");
+                }
+
+                if (currentVersionId == pinnedVersionId)
+                {
+                    await transaction.CommitAsync();
+                    return Ok(ApiResponse<object>.Ok(new { request.UsId, MarketId = marketId }, "已是最新版本"));
+                }
+
+                var title = string.IsNullOrWhiteSpace(aliasName) ? (defName ?? "未命名策略") : aliasName;
+                var description = string.IsNullOrWhiteSpace(userDescription) ? (defDescription ?? string.Empty) : userDescription;
+
+                var updateCmd = new MySqlCommand(@"
+UPDATE strategy_market
+SET pinned_version_id = @pinned_version_id,
+    title = @title,
+    description = @description,
+    updated_at = CURRENT_TIMESTAMP
+WHERE market_id = @market_id
+", connection, transaction);
+                updateCmd.Parameters.AddWithValue("@pinned_version_id", pinnedVersionId);
+                updateCmd.Parameters.AddWithValue("@title", title);
+                updateCmd.Parameters.AddWithValue("@description", description);
+                updateCmd.Parameters.AddWithValue("@market_id", marketId);
+                await updateCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+                return Ok(ApiResponse<object>.Ok(new { request.UsId, MarketId = marketId }, "发布最新版本成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "同步策略广场失败: uid={Uid} usId={UsId}", uid.Value, request.UsId);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("同步失败，请稍后重试"));
             }
         }
 
@@ -1332,6 +1850,406 @@ LIMIT 1
                 || state == StrategyState.Testing;
         }
 
+        private async Task<IActionResult> PublishToCatalogAsync(StrategyCatalogPublishRequest request, string target)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            var role = await GetUserRoleAsync(uid.Value);
+            if (!role.HasValue || role.Value != SuperAdminRole)
+            {
+                return StatusCode(403, ApiResponse<object>.Error("无权限执行该操作"));
+            }
+
+            var isOfficial = string.Equals(target, "official", StringComparison.OrdinalIgnoreCase);
+            var defTable = isOfficial ? "official_strategy_def" : "template_strategy_def";
+            var versionTable = isOfficial ? "official_strategy_version" : "template_strategy_version";
+            var defType = isOfficial ? "official" : "template";
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                string? aliasName = null;
+                string? userDescription = null;
+                string? defName = null;
+                string? defDescription = null;
+                string? configJson = null;
+                var userVersionNo = 0;
+
+                var queryCmd = new MySqlCommand(@"
+SELECT
+  us.alias_name,
+  us.description,
+  sd.name AS def_name,
+  sd.description AS def_description,
+  sv.config_json,
+  sv.version_no
+FROM user_strategy us
+JOIN strategy_def sd ON sd.def_id = us.def_id
+JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
+WHERE us.us_id = @us_id AND us.uid = @uid
+LIMIT 1
+", connection, transaction);
+                queryCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                queryCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                await using (var reader = await queryCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                    }
+
+                    aliasName = reader.IsDBNull(reader.GetOrdinal("alias_name")) ? null : reader.GetString("alias_name");
+                    userDescription = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString("description");
+                    defName = reader.IsDBNull(reader.GetOrdinal("def_name")) ? null : reader.GetString("def_name");
+                    defDescription = reader.IsDBNull(reader.GetOrdinal("def_description")) ? null : reader.GetString("def_description");
+                    configJson = reader.IsDBNull(reader.GetOrdinal("config_json")) ? null : reader.GetString("config_json");
+                    userVersionNo = reader.IsDBNull(reader.GetOrdinal("version_no")) ? 0 : reader.GetInt32("version_no");
+                }
+
+                if (string.IsNullOrWhiteSpace(configJson))
+                {
+                    await SafeRollbackAsync(transaction);
+                    return StatusCode(500, ApiResponse<object>.Error("策略配置为空，无法发布"));
+                }
+
+                var name = string.IsNullOrWhiteSpace(aliasName) ? (defName ?? "未命名策略") : aliasName;
+                var description = string.IsNullOrWhiteSpace(userDescription) ? (defDescription ?? string.Empty) : userDescription;
+                var contentHash = ComputeSha256(configJson);
+
+                var existingCmd = new MySqlCommand($@"
+SELECT def_id
+FROM {defTable}
+WHERE source_us_id = @source_us_id
+LIMIT 1
+", connection, transaction);
+                existingCmd.Parameters.AddWithValue("@source_us_id", request.UsId);
+                var existingDefId = await existingCmd.ExecuteScalarAsync();
+                if (existingDefId != null)
+                {
+                    await SafeRollbackAsync(transaction);
+                    return StatusCode(409, ApiResponse<object>.Error("该策略已发布，请使用发布最新版本功能"));
+                }
+
+                var defCmd = new MySqlCommand($@"
+INSERT INTO {defTable} (creator_uid, source_us_id, def_type, name, description, latest_version_id, created_at, updated_at)
+VALUES (@creator_uid, @source_us_id, @def_type, @name, @description, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+", connection, transaction);
+                defCmd.Parameters.AddWithValue("@creator_uid", uid.Value);
+                defCmd.Parameters.AddWithValue("@source_us_id", request.UsId);
+                defCmd.Parameters.AddWithValue("@def_type", defType);
+                defCmd.Parameters.AddWithValue("@name", name);
+                defCmd.Parameters.AddWithValue("@description", description);
+                await defCmd.ExecuteNonQueryAsync();
+                var defId = defCmd.LastInsertedId;
+
+                if (defId <= 0)
+                {
+                    await SafeRollbackAsync(transaction);
+                    return StatusCode(500, ApiResponse<object>.Error("创建策略定义失败"));
+                }
+
+                var versionCmd = new MySqlCommand($@"
+INSERT INTO {versionTable} (def_id, version_no, content_hash, config_json, artifact_uri, changelog, created_by, created_at)
+VALUES (@def_id, @version_no, @content_hash, @config_json, NULL, @changelog, @created_by, CURRENT_TIMESTAMP)
+", connection, transaction);
+                versionCmd.Parameters.AddWithValue("@def_id", defId);
+                versionCmd.Parameters.AddWithValue("@version_no", userVersionNo <= 0 ? 1 : userVersionNo);
+                versionCmd.Parameters.AddWithValue("@content_hash", contentHash);
+                versionCmd.Parameters.AddWithValue("@config_json", configJson);
+                versionCmd.Parameters.AddWithValue("@changelog", "init");
+                versionCmd.Parameters.AddWithValue("@created_by", uid.Value);
+                await versionCmd.ExecuteNonQueryAsync();
+                var versionId = versionCmd.LastInsertedId;
+
+                if (versionId <= 0)
+                {
+                    await SafeRollbackAsync(transaction);
+                    return StatusCode(500, ApiResponse<object>.Error("创建策略版本失败"));
+                }
+
+                var updateDefCmd = new MySqlCommand($@"
+UPDATE {defTable}
+SET latest_version_id = @version_id, updated_at = CURRENT_TIMESTAMP
+WHERE def_id = @def_id
+", connection, transaction);
+                updateDefCmd.Parameters.AddWithValue("@version_id", versionId);
+                updateDefCmd.Parameters.AddWithValue("@def_id", defId);
+                await updateDefCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+
+                var response = new
+                {
+                    DefId = defId,
+                    VersionId = versionId
+                };
+
+                return Ok(ApiResponse<object>.Ok(response, "发布成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "发布策略到{Target}失败: uid={Uid} usId={UsId}", target, uid.Value, request.UsId);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("发布失败，请稍后重试"));
+            }
+        }
+
+        private async Task<IActionResult> SyncCatalogAsync(StrategyCatalogPublishRequest request, string target)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            var role = await GetUserRoleAsync(uid.Value);
+            if (!role.HasValue || role.Value != SuperAdminRole)
+            {
+                return StatusCode(403, ApiResponse<object>.Error("无权限执行该操作"));
+            }
+
+            var isOfficial = string.Equals(target, "official", StringComparison.OrdinalIgnoreCase);
+            var defTable = isOfficial ? "official_strategy_def" : "template_strategy_def";
+            var versionTable = isOfficial ? "official_strategy_version" : "template_strategy_version";
+            var defType = isOfficial ? "official" : "template";
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                string? aliasName = null;
+                string? userDescription = null;
+                string? defName = null;
+                string? defDescription = null;
+                string? configJson = null;
+                var userVersionNo = 0;
+
+                var queryCmd = new MySqlCommand(@"
+SELECT
+  us.alias_name,
+  us.description,
+  sd.name AS def_name,
+  sd.description AS def_description,
+  sv.config_json,
+  sv.version_no
+FROM user_strategy us
+JOIN strategy_def sd ON sd.def_id = us.def_id
+JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
+WHERE us.us_id = @us_id AND us.uid = @uid
+LIMIT 1
+", connection, transaction);
+                queryCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                queryCmd.Parameters.AddWithValue("@uid", uid.Value);
+
+                await using (var reader = await queryCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                    }
+
+                    aliasName = reader.IsDBNull(reader.GetOrdinal("alias_name")) ? null : reader.GetString("alias_name");
+                    userDescription = reader.IsDBNull(reader.GetOrdinal("description")) ? null : reader.GetString("description");
+                    defName = reader.IsDBNull(reader.GetOrdinal("def_name")) ? null : reader.GetString("def_name");
+                    defDescription = reader.IsDBNull(reader.GetOrdinal("def_description")) ? null : reader.GetString("def_description");
+                    configJson = reader.IsDBNull(reader.GetOrdinal("config_json")) ? null : reader.GetString("config_json");
+                    userVersionNo = reader.IsDBNull(reader.GetOrdinal("version_no")) ? 0 : reader.GetInt32("version_no");
+                }
+
+                if (string.IsNullOrWhiteSpace(configJson))
+                {
+                    await SafeRollbackAsync(transaction);
+                    return StatusCode(500, ApiResponse<object>.Error("策略配置为空，无法发布"));
+                }
+
+                var defCmd = new MySqlCommand($@"
+SELECT def_id, latest_version_id
+FROM {defTable}
+WHERE source_us_id = @source_us_id AND creator_uid = @creator_uid
+LIMIT 1
+", connection, transaction);
+                defCmd.Parameters.AddWithValue("@source_us_id", request.UsId);
+                defCmd.Parameters.AddWithValue("@creator_uid", uid.Value);
+
+                long defId;
+                long? latestVersionId = null;
+                await using (var reader = await defCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("该策略尚未发布到目录"));
+                    }
+
+                    defId = reader.GetInt64("def_id");
+                    latestVersionId = reader.IsDBNull(reader.GetOrdinal("latest_version_id"))
+                        ? null
+                        : reader.GetInt64("latest_version_id");
+                }
+
+                int publishedVersionNo = 0;
+                if (latestVersionId.HasValue && latestVersionId.Value > 0)
+                {
+                    var versionCmd = new MySqlCommand($@"
+SELECT version_no
+FROM {versionTable}
+WHERE version_id = @version_id
+LIMIT 1
+", connection, transaction);
+                    versionCmd.Parameters.AddWithValue("@version_id", latestVersionId.Value);
+                    var versionResult = await versionCmd.ExecuteScalarAsync();
+                    if (versionResult != null)
+                    {
+                        publishedVersionNo = Convert.ToInt32(versionResult);
+                    }
+                }
+
+                if (userVersionNo <= publishedVersionNo)
+                {
+                    await transaction.CommitAsync();
+                    return Ok(ApiResponse<object>.Ok(new { request.UsId, DefId = defId }, "已是最新版本"));
+                }
+
+                var name = string.IsNullOrWhiteSpace(aliasName) ? (defName ?? "未命名策略") : aliasName;
+                var description = string.IsNullOrWhiteSpace(userDescription) ? (defDescription ?? string.Empty) : userDescription;
+                var contentHash = ComputeSha256(configJson);
+
+                var insertCmd = new MySqlCommand($@"
+INSERT INTO {versionTable} (def_id, version_no, content_hash, config_json, artifact_uri, changelog, created_by, created_at)
+VALUES (@def_id, @version_no, @content_hash, @config_json, NULL, @changelog, @created_by, CURRENT_TIMESTAMP)
+", connection, transaction);
+                insertCmd.Parameters.AddWithValue("@def_id", defId);
+                insertCmd.Parameters.AddWithValue("@version_no", userVersionNo <= 0 ? publishedVersionNo + 1 : userVersionNo);
+                insertCmd.Parameters.AddWithValue("@content_hash", contentHash);
+                insertCmd.Parameters.AddWithValue("@config_json", configJson);
+                insertCmd.Parameters.AddWithValue("@changelog", "sync");
+                insertCmd.Parameters.AddWithValue("@created_by", uid.Value);
+                await insertCmd.ExecuteNonQueryAsync();
+                var newVersionId = insertCmd.LastInsertedId;
+
+                if (newVersionId <= 0)
+                {
+                    await SafeRollbackAsync(transaction);
+                    return StatusCode(500, ApiResponse<object>.Error("创建策略版本失败"));
+                }
+
+                var updateDefCmd = new MySqlCommand($@"
+UPDATE {defTable}
+SET latest_version_id = @version_id,
+    name = @name,
+    description = @description,
+    def_type = @def_type,
+    updated_at = CURRENT_TIMESTAMP
+WHERE def_id = @def_id
+", connection, transaction);
+                updateDefCmd.Parameters.AddWithValue("@version_id", newVersionId);
+                updateDefCmd.Parameters.AddWithValue("@def_id", defId);
+                updateDefCmd.Parameters.AddWithValue("@name", name);
+                updateDefCmd.Parameters.AddWithValue("@description", description);
+                updateDefCmd.Parameters.AddWithValue("@def_type", defType);
+                await updateDefCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+                return Ok(ApiResponse<object>.Ok(new { request.UsId, DefId = defId, VersionId = newVersionId }, "发布最新版本成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "同步{Target}策略失败: uid={Uid} usId={UsId}", target, uid.Value, request.UsId);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("同步失败，请稍后重试"));
+            }
+        }
+
+        private async Task<IActionResult> RemoveFromCatalogAsync(StrategyCatalogPublishRequest request, string target)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            var role = await GetUserRoleAsync(uid.Value);
+            if (!role.HasValue || role.Value != SuperAdminRole)
+            {
+                return StatusCode(403, ApiResponse<object>.Error("无权限执行该操作"));
+            }
+
+            var isOfficial = string.Equals(target, "official", StringComparison.OrdinalIgnoreCase);
+            var defTable = isOfficial ? "official_strategy_def" : "template_strategy_def";
+            var versionTable = isOfficial ? "official_strategy_version" : "template_strategy_version";
+
+            await using var connection = await _db.GetConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                var defCmd = new MySqlCommand($@"
+SELECT def_id
+FROM {defTable}
+WHERE source_us_id = @source_us_id AND creator_uid = @creator_uid
+LIMIT 1
+", connection, transaction);
+                defCmd.Parameters.AddWithValue("@source_us_id", request.UsId);
+                defCmd.Parameters.AddWithValue("@creator_uid", uid.Value);
+
+                long defId;
+                await using (var reader = await defCmd.ExecuteReaderAsync())
+                {
+                    if (!await reader.ReadAsync())
+                    {
+                        return NotFound(ApiResponse<object>.Error("未找到已发布的策略"));
+                    }
+
+                    defId = reader.GetInt64("def_id");
+                }
+
+                var deleteVersionsCmd = new MySqlCommand($@"
+DELETE FROM {versionTable}
+WHERE def_id = @def_id
+", connection, transaction);
+                deleteVersionsCmd.Parameters.AddWithValue("@def_id", defId);
+                await deleteVersionsCmd.ExecuteNonQueryAsync();
+
+                var deleteDefCmd = new MySqlCommand($@"
+DELETE FROM {defTable}
+WHERE def_id = @def_id
+", connection, transaction);
+                deleteDefCmd.Parameters.AddWithValue("@def_id", defId);
+                await deleteDefCmd.ExecuteNonQueryAsync();
+
+                await transaction.CommitAsync();
+                return Ok(ApiResponse<object>.Ok(new { request.UsId, DefId = defId }, "已移除发布记录"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "移除{Target}策略失败: uid={Uid} usId={UsId}", target, uid.Value, request.UsId);
+                await SafeRollbackAsync(transaction);
+                return StatusCode(500, ApiResponse<object>.Error("移除失败，请稍后重试"));
+            }
+        }
+
         private async Task<long?> GetUserIdAsync()
         {
             var token = GetBearerToken(Request.Headers.Authorization.ToString());
@@ -1344,6 +2262,27 @@ LIMIT 1
             return long.TryParse(validation.UserId, out var uid) ? uid : null;
         }
 
+        private async Task<int?> GetUserRoleAsync(long uid)
+        {
+            try
+            {
+                using var connection = await _db.GetConnectionAsync();
+                var cmd = new MySqlCommand(@"
+SELECT role
+FROM account
+WHERE uid = @uid AND deleted_at IS NULL
+LIMIT 1
+", connection);
+                cmd.Parameters.AddWithValue("@uid", uid);
+                var result = await cmd.ExecuteScalarAsync();
+                return result == null ? null : Convert.ToInt32(result);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "查询用户角色失败: uid={Uid}", uid);
+                return null;
+            }
+        }
         private static string? GetBearerToken(string? authorizationHeader)
         {
             if (string.IsNullOrWhiteSpace(authorizationHeader))

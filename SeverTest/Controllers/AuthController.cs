@@ -157,7 +157,7 @@ VALUES (@email, @password_hash, @nickname, @avatar_url, @signature, 0, 0, CURREN
                 using var connection = await _db.GetConnectionAsync();
 
                 var cmd = new MySqlCommand(@"
-SELECT uid, password_hash, status
+SELECT uid, password_hash, status, role
 FROM account
 WHERE email = @email AND deleted_at IS NULL
 LIMIT 1
@@ -205,6 +205,8 @@ LIMIT 1
 
                 _logger.LogInformation("登录成功：用户 {Email}", request.Email);
 
+                var role = reader.IsDBNull(reader.GetOrdinal("role")) ? 0 : reader.GetInt32("role");
+
                 var uidString = uid.ToString();
                 var token = _jwtService.GenerateToken(uidString, request.Email);
                 await _tokenService.StoreTokenAsync(uidString, token, TimeSpan.FromDays(30));
@@ -214,7 +216,7 @@ LIMIT 1
                 updateLoginCmd.Parameters.AddWithValue("@uid", uid);
                 await updateLoginCmd.ExecuteNonQueryAsync();
 
-                return Ok(new { status = "success", message = "登录成功", token });
+                return Ok(new { status = "success", message = "登录成功", token, role });
             }
             catch (Exception ex)
             {

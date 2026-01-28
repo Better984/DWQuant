@@ -17,6 +17,7 @@ type LoginResponse = {
   status?: string;
   message?: string;
   token?: string;
+  role?: number;
 };
 
 type RegisterResponse = {
@@ -47,6 +48,7 @@ const SignIn4: React.FC<SignIn4Props> = ({ initialMode = 'signin', onAuthenticat
 
     try {
       let token: string | undefined;
+      let role: number | undefined;
       
       if (mode === 'signup') {
         // 验证密码强度
@@ -66,6 +68,7 @@ const SignIn4: React.FC<SignIn4Props> = ({ initialMode = 'signin', onAuthenticat
         }
         // 注册接口现在返回 token，直接使用
         token = registerResponse.token;
+        role = 0;
         success('注册成功');
       } else {
         // 登录模式
@@ -78,6 +81,7 @@ const SignIn4: React.FC<SignIn4Props> = ({ initialMode = 'signin', onAuthenticat
           throw new Error(loginResponse?.message || '登录失败');
         }
         token = loginResponse.token;
+        role = loginResponse.role ?? 0;
         success('登录成功');
       }
 
@@ -88,7 +92,8 @@ const SignIn4: React.FC<SignIn4Props> = ({ initialMode = 'signin', onAuthenticat
       setToken(token);
       const profile: AuthProfile = {
         email: email.trim(),
-        nickname: email.trim(), // 使用邮箱作为昵称
+        nickname: email.trim(), // 浣穿效问问施作变始邮件作为昵称
+        role: role ?? 0,
       };
       setAuthProfile(profile);
       ensureWsConnected().catch(() => {

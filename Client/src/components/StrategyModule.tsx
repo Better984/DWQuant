@@ -8,6 +8,10 @@ import PlusIcon from '../assets/SnowUI/icon/Plus.svg';
 import FunnelIcon from '../assets/SnowUI/icon/Funnel.svg';
 import StrategyEditorFlow, { type StrategyEditorSubmitPayload } from './StrategyEditorFlow';
 import StrategyTemplateOptions from './StrategyTemplateOptions';
+import OfficialStrategyList from './OfficialStrategyList';
+import TemplateStrategyList from './TemplateStrategyList';
+import StrategyMarketList from './StrategyMarketList';
+import StrategyRecommend from './StrategyRecommend';
 import type { MenuItem } from './StrategyModule.types';
 import { HttpClient, getToken } from '../network';
 
@@ -21,6 +25,7 @@ const StrategyModule: React.FC = () => {
     { id: 'official', label: '官方策略', icon: StarIcon },
     { id: 'market', label: '策略广场', icon: StorefrontIcon },
     { id: 'template', label: '策略模板', icon: GridFourIcon },
+    { id: 'filter-template', label: '筛选器模板', icon: FunnelIcon },
     { id: 'create', label: '创建策略', icon: PlusIcon },
   ];
 
@@ -71,6 +76,15 @@ const StrategyModule: React.FC = () => {
       {/* 内容区域 */}
       <main className="strategy-content">
         <div className="strategy-content-inner">
+          {activeMenuId === 'recommend' && <StrategyRecommend />}
+          {activeMenuId === 'official' && <OfficialStrategyList />}
+          {activeMenuId === 'market' && <StrategyMarketList />}
+          {activeMenuId === 'template' && <TemplateStrategyList />}
+          {activeMenuId === 'filter-template' && (
+            <div style={{ padding: '20px', color: 'rgba(0, 0, 0, 0.4)' }}>
+              筛选器模板内容区域（待实现）
+            </div>
+          )}
           {activeMenuId === 'create' && !isStrategyEditorOpen && (
             <StrategyTemplateOptions onCustomCreate={openStrategyEditor} />
           )}
