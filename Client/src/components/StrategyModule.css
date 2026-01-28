@@ -395,6 +395,16 @@
   border-radius: 10px;
   background: var(--bg-secondary);
   border: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.strategy-indicator-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .strategy-indicator-name {
@@ -405,6 +415,88 @@
 
 .strategy-indicator-meta {
   margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.strategy-indicator-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.strategy-indicator-action {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #FFFFFF;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.strategy-indicator-action:hover {
+  border-color: rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+}
+
+.strategy-indicator-remove {
+  color: #b00020;
+  border-color: rgba(176, 0, 32, 0.2);
+  background: rgba(176, 0, 32, 0.06);
+}
+
+.strategy-indicator-remove:hover {
+  border-color: rgba(176, 0, 32, 0.4);
+}
+
+.indicator-usage-dialog .snowui-dialog__content {
+  padding-top: 4px;
+}
+
+.indicator-usage-dialog__content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.indicator-usage-dialog__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.indicator-usage-dialog__hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.indicator-usage-dialog__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.indicator-usage-dialog__item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.indicator-usage-dialog__item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.indicator-usage-dialog__item-meta {
+  margin-top: 2px;
   font-size: 12px;
   color: var(--text-secondary);
 }

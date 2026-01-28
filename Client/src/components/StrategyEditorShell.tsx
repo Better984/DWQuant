@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 import type { GeneratedIndicatorPayload } from './IndicatorGeneratorSelector';
 import type { ConditionContainer, ConditionItem } from './StrategyModule.types';
@@ -10,6 +10,8 @@ interface StrategyEditorShellProps {
   formatIndicatorName: (indicator: GeneratedIndicatorPayload) => string;
   formatIndicatorMeta: (indicator: GeneratedIndicatorPayload) => string;
   onOpenIndicatorGenerator: () => void;
+  onEditIndicator: (indicatorId: string) => void;
+  onRemoveIndicator: (indicatorId: string) => void;
   conditionContainers: ConditionContainer[];
   maxGroupsPerContainer: number;
   buildConditionPreview: (condition: ConditionItem | null) => string;
@@ -34,6 +36,8 @@ const StrategyEditorShell: React.FC<StrategyEditorShellProps> = ({
   formatIndicatorName,
   formatIndicatorMeta,
   onOpenIndicatorGenerator,
+  onEditIndicator,
+  onRemoveIndicator,
   conditionContainers,
   maxGroupsPerContainer,
   buildConditionPreview,
@@ -57,6 +61,8 @@ const StrategyEditorShell: React.FC<StrategyEditorShellProps> = ({
         <StrategyIndicatorPanel
           selectedIndicators={selectedIndicators}
           onOpenIndicatorGenerator={onOpenIndicatorGenerator}
+          onEditIndicator={onEditIndicator}
+          onRemoveIndicator={onRemoveIndicator}
           formatIndicatorName={formatIndicatorName}
           formatIndicatorMeta={formatIndicatorMeta}
         />

@@ -25,7 +25,7 @@ import type {
   TradeOption,
   ValueOption,
 } from './StrategyModule.types';
-import { useNotification } from './ui';
+import { Dialog, useNotification } from './ui';
 
 export type StrategyEditorSubmitPayload = {
   name: string;
@@ -44,6 +44,47 @@ type StrategyEditorFlowProps = {
   initialTradeConfig?: StrategyTradeConfig;
   initialConfig?: StrategyConfig;
   disableMetaFields?: boolean;
+};
+
+type IndicatorDialogMode = 'create' | 'edit';
+
+type IndicatorUsageItem = {
+  id: string;
+  containerTitle: string;
+  groupTitle: string;
+  positionLabel: string;
+  outputLabel: string;
+};
+
+type IndicatorActionState = {
+  action: 'edit' | 'remove';
+  indicator: GeneratedIndicatorPayload;
+  usages: IndicatorUsageItem[];
+};
+
+const KLINE_FIELD_DEFINITIONS = [
+  { key: 'OPEN', label: '开盘价', hint: 'Open' },
+  { key: 'HIGH', label: '最高价', hint: 'High' },
+  { key: 'LOW', label: '最低价', hint: 'Low' },
+  { key: 'CLOSE', label: '收盘价', hint: 'Close' },
+  { key: 'VOLUME', label: '成交量', hint: 'Volume' },
+  { key: 'HL2', label: '高低均价', hint: 'HL2' },
+  { key: 'HLC3', label: '高低收均价', hint: 'HLC3' },
+  { key: 'OHLC4', label: '四价均价', hint: 'OHLC4' },
+  { key: 'OC2', label: '开收均价', hint: 'OC2' },
+  { key: 'HLCC4', label: '高低收收均价', hint: 'HLCC4' },
+];
+
+const normalizeFieldKey = (raw?: string) => (raw || '').trim().toUpperCase();
+
+const buildFieldValueId = (input?: string) => {
+  const key = normalizeFieldKey(input);
+  return key ? `field:${key}` : '';
+};
+
+const buildIndicatorRefKey = (ref: StrategyValueRef) => {
+  const paramsKey = (ref.params || []).join(',');
+  return `${ref.indicator}|${ref.timeframe}|${ref.input}|${ref.output}|${paramsKey}`;
 };
 
 const createDefaultConditionContainers = (): ConditionContainer[] => ([
@@ -209,8 +250,14 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
 
         if (leftArg && typeof leftArg === 'object' && 'refType' in leftArg) {
           const ref = leftArg as StrategyValueRef;
-          const paramsKey = (ref.params || []).join(',');
-          leftValueId = `${ref.indicator}|${ref.timeframe}|${ref.input}|${ref.output}|${paramsKey}`;
+          const refType = (ref.refType || '').toLowerCase();
+          if (refType === 'field') {
+            leftValueId = buildFieldValueId(ref.input);
+          } else if (refType === 'const' || refType === 'number') {
+            leftValueId = '';
+          } else {
+            leftValueId = buildIndicatorRefKey(ref);
+          }
         }
 
         if (rightArg) {
@@ -218,10 +265,18 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
             rightValueType = 'number';
             rightNumber = rightArg;
           } else if (typeof rightArg === 'object' && 'refType' in rightArg) {
-            rightValueType = 'field';
             const ref = rightArg as StrategyValueRef;
-            const paramsKey = (ref.params || []).join(',');
-            rightValueId = `${ref.indicator}|${ref.timeframe}|${ref.input}|${ref.output}|${paramsKey}`;
+            const refType = (ref.refType || '').toLowerCase();
+            if (refType === 'const' || refType === 'number') {
+              rightValueType = 'number';
+              rightNumber = ref.input?.trim() || '';
+            } else if (refType === 'field') {
+              rightValueType = 'field';
+              rightValueId = buildFieldValueId(ref.input);
+            } else {
+              rightValueType = 'field';
+              rightValueId = buildIndicatorRefKey(ref);
+            }
           }
         }
 
@@ -270,6 +325,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   disableMetaFields = false,
 }) => {
   const [isIndicatorGeneratorOpen, setIsIndicatorGeneratorOpen] = useState(false);
+  const [indicatorDialogMode, setIndicatorDialogMode] = useState<IndicatorDialogMode>('create');
+  const [editingIndicator, setEditingIndicator] = useState<GeneratedIndicatorPayload | null>(null);
+  const [indicatorAction, setIndicatorAction] = useState<IndicatorActionState | null>(null);
   
   // 从配置中加载初始数据
   const loadedIndicators = useMemo(() => {
@@ -536,8 +594,228 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return [selected, ...rest];
   };
 
+  const getIndicatorConfig = (indicator: GeneratedIndicatorPayload) => {
+    const config = indicator.config as {
+      indicator?: string;
+      timeframe?: string;
+      input?: string;
+      params?: number[];
+      offsetRange?: number[];
+      calcMode?: string;
+      output?: string;
+    };
+    return {
+      indicatorCode: (config.indicator || indicator.code || '').trim(),
+      timeframe: (config.timeframe || '').trim(),
+      input: (config.input || '').trim(),
+      params: Array.isArray(config.params) ? config.params.map(Number) : [],
+      offsetRange: Array.isArray(config.offsetRange) ? config.offsetRange.map(Number) : [],
+      calcMode: (config.calcMode || '').trim(),
+      output: (config.output || '').trim(),
+    };
+  };
+
+  const buildIndicatorSignature = (indicator: GeneratedIndicatorPayload) => {
+    const config = getIndicatorConfig(indicator);
+    const params = config.params.length > 0 ? config.params.join(',') : '';
+    const offsetRange = config.offsetRange.length > 0 ? config.offsetRange.join(',') : '';
+    return [
+      config.indicatorCode,
+      config.timeframe.toLowerCase(),
+      config.input,
+      params,
+      offsetRange,
+      config.calcMode,
+    ].join('|');
+  };
+
+  const validateIndicator = (indicator: GeneratedIndicatorPayload, mode: IndicatorDialogMode) => {
+    const signature = buildIndicatorSignature(indicator);
+    const duplicate = selectedIndicators.some((item) => {
+      if (mode === 'edit' && item.id === indicator.id) {
+        return false;
+      }
+      return buildIndicatorSignature(item) === signature;
+    });
+    return duplicate ? '已拥有该指标，请调整参数或删除旧指标。' : null;
+  };
+
+  const collectIndicatorUsages = (indicatorId: string): IndicatorUsageItem[] => {
+    const usages: IndicatorUsageItem[] = [];
+    const prefix = `${indicatorId}:`;
+    conditionContainers.forEach((container) => {
+      container.groups.forEach((group) => {
+        group.conditions.forEach((condition) => {
+          const addUsage = (valueId: string | undefined, positionLabel: string) => {
+            if (!valueId || !valueId.startsWith(prefix)) {
+              return;
+            }
+            const option = indicatorValueMap.get(valueId);
+            const outputLabel =
+              option?.label || option?.fullLabel || valueId.slice(prefix.length) || 'Value';
+            usages.push({
+              id: `${container.id}-${group.id}-${condition.id}-${positionLabel}-${valueId}`,
+              containerTitle: container.title,
+              groupTitle: group.name,
+              positionLabel,
+              outputLabel,
+            });
+          };
+          addUsage(condition.leftValueId, '左值');
+          if (condition.rightValueType === 'field') {
+            addUsage(condition.rightValueId, '右值');
+          }
+        });
+      });
+    });
+    return usages;
+  };
+
+  const syncIndicatorReferences = (indicator: GeneratedIndicatorPayload) => {
+    const outputs = indicator.outputs || [];
+    const outputKeys = new Set(outputs.map((item) => item.key));
+    const fallbackKey = outputs[0]?.key || getIndicatorConfig(indicator).output || 'Value';
+    if (outputKeys.size === 0) {
+      outputKeys.add(fallbackKey);
+    }
+
+    setConditionContainers((prev) =>
+      prev.map((container) => ({
+        ...container,
+        groups: container.groups.map((group) => ({
+          ...group,
+          conditions: group.conditions.map((condition) => {
+            let leftValueId = condition.leftValueId;
+            let rightValueId = condition.rightValueId;
+
+            if (leftValueId?.startsWith(`${indicator.id}:`)) {
+              const outputKey = leftValueId.split(':')[1] || '';
+              if (!outputKeys.has(outputKey)) {
+                leftValueId = `${indicator.id}:${fallbackKey}`;
+              }
+            }
+
+            if (condition.rightValueType === 'field' && rightValueId?.startsWith(`${indicator.id}:`)) {
+              const outputKey = rightValueId.split(':')[1] || '';
+              if (!outputKeys.has(outputKey)) {
+                rightValueId = `${indicator.id}:${fallbackKey}`;
+              }
+            }
+
+            if (leftValueId === condition.leftValueId && rightValueId === condition.rightValueId) {
+              return condition;
+            }
+            return {
+              ...condition,
+              leftValueId,
+              rightValueId,
+            };
+          }),
+        })),
+      })),
+    );
+  };
+
   const handleAddIndicator = (indicator: GeneratedIndicatorPayload) => {
     setSelectedIndicators((prev) => [indicator, ...prev]);
+  };
+
+  const handleUpdateIndicator = (indicator: GeneratedIndicatorPayload) => {
+    setSelectedIndicators((prev) =>
+      prev.map((item) => (item.id === indicator.id ? indicator : item)),
+    );
+    syncIndicatorReferences(indicator);
+  };
+
+  const removeIndicator = (indicatorId: string) => {
+    setSelectedIndicators((prev) => prev.filter((item) => item.id !== indicatorId));
+    setConditionContainers((prev) =>
+      prev.map((container) => ({
+        ...container,
+        groups: container.groups.map((group) => ({
+          ...group,
+          conditions: group.conditions.map((condition) => {
+            let leftValueId = condition.leftValueId;
+            let rightValueId = condition.rightValueId;
+            if (leftValueId?.startsWith(`${indicatorId}:`)) {
+              leftValueId = '';
+            }
+            if (rightValueId?.startsWith(`${indicatorId}:`)) {
+              rightValueId = '';
+            }
+            if (leftValueId === condition.leftValueId && rightValueId === condition.rightValueId) {
+              return condition;
+            }
+            return {
+              ...condition,
+              leftValueId,
+              rightValueId,
+            };
+          }),
+        })),
+      })),
+    );
+  };
+
+  const openCreateIndicator = () => {
+    setIndicatorDialogMode('create');
+    setEditingIndicator(null);
+    setIsIndicatorGeneratorOpen(true);
+  };
+
+  const openIndicatorEditor = (indicator: GeneratedIndicatorPayload) => {
+    setIndicatorDialogMode('edit');
+    setEditingIndicator(indicator);
+    setIsIndicatorGeneratorOpen(true);
+  };
+
+  const closeIndicatorDialog = () => {
+    setIsIndicatorGeneratorOpen(false);
+    setEditingIndicator(null);
+    setIndicatorDialogMode('create');
+  };
+
+  const requestEditIndicator = (indicatorId: string) => {
+    const indicator = selectedIndicators.find((item) => item.id === indicatorId);
+    if (!indicator) {
+      return;
+    }
+    const usages = collectIndicatorUsages(indicatorId);
+    if (usages.length > 0) {
+      setIndicatorAction({ action: 'edit', indicator, usages });
+      return;
+    }
+    openIndicatorEditor(indicator);
+  };
+
+  const requestRemoveIndicator = (indicatorId: string) => {
+    const indicator = selectedIndicators.find((item) => item.id === indicatorId);
+    if (!indicator) {
+      return;
+    }
+    const usages = collectIndicatorUsages(indicatorId);
+    if (usages.length > 0) {
+      setIndicatorAction({ action: 'remove', indicator, usages });
+      return;
+    }
+    removeIndicator(indicatorId);
+  };
+
+  const closeIndicatorActionDialog = () => {
+    setIndicatorAction(null);
+  };
+
+  const confirmIndicatorAction = () => {
+    if (!indicatorAction) {
+      return;
+    }
+    if (indicatorAction.action === 'edit') {
+      openIndicatorEditor(indicatorAction.indicator);
+      closeIndicatorActionDialog();
+      return;
+    }
+    removeIndicator(indicatorAction.indicator.id);
+    closeIndicatorActionDialog();
   };
 
   const parseTimeframeSeconds = (raw: string | undefined) => {
@@ -742,7 +1020,26 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   }, [selectedIndicators, indicatorRefToValueIdMap, initialConfig]);
 
   const indicatorOutputGroups = useMemo<IndicatorOutputGroup[]>(() => {
-    return selectedIndicators.map((indicator) => {
+    const fieldOptions: ValueOption[] = KLINE_FIELD_DEFINITIONS.map((field) => {
+      const fieldLabel = field.hint ? `${field.label} (${field.hint})` : field.label;
+      return {
+        id: buildFieldValueId(field.key),
+        label: fieldLabel,
+        fullLabel: `K线字段 - ${fieldLabel}`,
+        ref: {
+          refType: 'Field',
+          indicator: '',
+          timeframe: '',
+          input: field.key,
+          params: [],
+          output: 'Value',
+          offsetRange: [0, 0],
+          calcMode: 'OnBarClose',
+        },
+      };
+    });
+
+    const indicatorGroups = selectedIndicators.map((indicator) => {
       const config = indicator.config as {
         indicator?: string;
         timeframe?: string;
@@ -790,6 +1087,14 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         options,
       };
     });
+
+    const fieldGroup: IndicatorOutputGroup = {
+      id: 'kline-fields',
+      label: 'K线字段',
+      options: fieldOptions,
+    };
+
+    return indicatorGroups.length > 0 ? [...indicatorGroups, fieldGroup] : [fieldGroup];
   }, [selectedIndicators]);
 
   const indicatorOutputOptions = useMemo<ValueOption[]>(() => {
@@ -834,7 +1139,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       return '未配置';
     }
     const refType = (ref.refType || '').toLowerCase();
-    if (refType === 'const') {
+    if (refType === 'const' || refType === 'number') {
       return ref.input?.trim() || '0';
     }
     if (refType === 'field') {
@@ -931,7 +1236,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return {
       refType: 'Const',
       indicator: '',
-      timeframe: fallback?.timeframe || 'm1',
+      timeframe: fallback?.timeframe ?? 'm1',
       input: (rawValue || '0').trim(),
       params: [],
       output: 'Value',
@@ -1316,7 +1621,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         selectedIndicators={selectedIndicators}
         formatIndicatorName={formatIndicatorName}
         formatIndicatorMeta={formatIndicatorMeta}
-        onOpenIndicatorGenerator={() => setIsIndicatorGeneratorOpen(true)}
+        onOpenIndicatorGenerator={openCreateIndicator}
+        onEditIndicator={requestEditIndicator}
+        onRemoveIndicator={requestRemoveIndicator}
         conditionContainers={conditionContainers}
         maxGroupsPerContainer={MAX_GROUPS_PER_CONTAINER}
         buildConditionPreview={buildConditionPreview}
@@ -1330,10 +1637,47 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         onClose={() => onClose?.()}
         onGenerateConfig={openConfigReview}
       />
+      <Dialog
+        open={Boolean(indicatorAction)}
+        onClose={closeIndicatorActionDialog}
+        title={indicatorAction?.action === 'edit' ? '修改指标确认' : '移除指标确认'}
+        cancelText="取消"
+        confirmText={indicatorAction?.action === 'edit' ? '继续修改' : '确认移除'}
+        onCancel={closeIndicatorActionDialog}
+        onConfirm={confirmIndicatorAction}
+        className="indicator-usage-dialog"
+      >
+        {indicatorAction && (
+          <div className="indicator-usage-dialog__content">
+            <div className="indicator-usage-dialog__title">
+              指标 {formatIndicatorName(indicatorAction.indicator)} 已在以下位置使用：
+            </div>
+            <div className="indicator-usage-dialog__hint">
+              修改将同步影响这些引用；移除会清空对应的引用字段。
+            </div>
+            <ul className="indicator-usage-dialog__list">
+              {indicatorAction.usages.map((usage) => (
+                <li key={usage.id} className="indicator-usage-dialog__item">
+                  <div className="indicator-usage-dialog__item-title">
+                    {usage.containerTitle} / {usage.groupTitle}
+                  </div>
+                  <div className="indicator-usage-dialog__item-meta">
+                    {usage.positionLabel} · 输出：{usage.outputLabel}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Dialog>
       <IndicatorGeneratorSelector
         open={isIndicatorGeneratorOpen}
-        onClose={() => setIsIndicatorGeneratorOpen(false)}
+        onClose={closeIndicatorDialog}
         onGenerated={handleAddIndicator}
+        onUpdated={handleUpdateIndicator}
+        mode={indicatorDialogMode}
+        initialIndicator={editingIndicator}
+        validateIndicator={validateIndicator}
         autoCloseOnGenerate={true}
       />
       <ConditionEditorDialog

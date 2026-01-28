@@ -62,7 +62,7 @@ const formatValueRef = (value?: StrategyValueRef | string | null) => {
   }
 
   const refType = (value.refType || '').toLowerCase();
-  if (refType === 'const') {
+  if (refType === 'const' || refType === 'number') {
     return value.input?.trim() || '0';
   }
   if (refType === 'field') {

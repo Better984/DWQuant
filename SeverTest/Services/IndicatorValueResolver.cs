@@ -3,6 +3,7 @@ using ServerTest.Models;
 using ServerTest.Models.Indicator;
 using ServerTest.Models.Strategy;
 using ServerTest.Strategy;
+using System.Globalization;
 
 namespace ServerTest.Services
 {
@@ -71,7 +72,46 @@ namespace ServerTest.Services
                 return TryResolveIndicator(context, reference, effectiveOffset, out value);
             }
 
+            if (refType.Equals("Const", StringComparison.OrdinalIgnoreCase) ||
+                refType.Equals("Number", StringComparison.OrdinalIgnoreCase) ||
+                refType.Equals("Constant", StringComparison.OrdinalIgnoreCase))
+            {
+                return TryResolveConstant(context, reference, out value);
+            }
+
             return TryResolveField(context, reference, effectiveOffset, out value);
+        }
+
+        private bool TryResolveConstant(
+            StrategyExecutionContext context,
+            StrategyValueRef reference,
+            out double value)
+        {
+            value = double.NaN;
+            var raw = reference?.Input?.Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                value = 0d;
+                return true;
+            }
+
+            if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+            {
+                value = parsed;
+                return true;
+            }
+
+            if (double.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed))
+            {
+                value = parsed;
+                return true;
+            }
+
+            _logger.LogInformation(
+                "常量解析失败: {Uid} input={Input}",
+                context.Strategy.UidCode,
+                reference?.Input);
+            return false;
         }
 
         private bool TryResolveField(
