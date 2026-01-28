@@ -46,11 +46,22 @@ type DiffSection = {
   id: string;
   title: string;
   groups: DiffGroup[];
+  summary: DiffSummary;
 };
 
 type GroupDisplay = {
   index: number;
   lines: string[];
+};
+
+type DiffSummary = {
+  currentCount: number;
+  previousCount: number;
+  delta: number;
+  addedIndicators: string[];
+  removedIndicators: string[];
+  addedOperators: string[];
+  removedOperators: string[];
 };
 
 const formatValueRef = (value?: StrategyValueRef | string | null) => {
@@ -92,6 +103,86 @@ const buildGroups = (branch?: StrategyLogicBranchConfig): GroupDisplay[] => {
     index,
     lines: (group.conditions || []).map(formatCondition),
   }));
+};
+
+const collectConditions = (branch?: StrategyLogicBranchConfig): StrategyMethodConfig[] => {
+  const containers = branch?.containers ?? [];
+  const conditions: StrategyMethodConfig[] = [];
+  containers.forEach((container) => {
+    const groups = container?.checks?.groups ?? [];
+    groups.forEach((group) => {
+      (group.conditions ?? []).forEach((condition) => {
+        conditions.push(condition);
+      });
+    });
+  });
+  return conditions;
+};
+
+const extractIndicators = (conditions: StrategyMethodConfig[]): Set<string> => {
+  const indicators = new Set<string>();
+  conditions.forEach((condition) => {
+    (condition.args ?? []).forEach((arg) => {
+      if (!arg || typeof arg !== 'object') {
+        return;
+      }
+      const ref = arg as StrategyValueRef;
+      const refType = (ref.refType || '').toLowerCase();
+      if (refType === 'const' || refType === 'field') {
+        return;
+      }
+      const name = (ref.indicator || ref.input || '').trim();
+      if (name) {
+        indicators.add(name);
+      }
+    });
+  });
+  return indicators;
+};
+
+const extractOperators = (conditions: StrategyMethodConfig[]): Set<string> => {
+  const operators = new Set<string>();
+  conditions.forEach((condition) => {
+    const method = (condition.method || '').trim();
+    if (method) {
+      operators.add(method);
+    }
+  });
+  return operators;
+};
+
+const diffSets = (current: Set<string>, previous: Set<string>) => {
+  const added = Array.from(current).filter((item) => !previous.has(item));
+  const removed = Array.from(previous).filter((item) => !current.has(item));
+  const sorter = (a: string, b: string) => a.localeCompare(b);
+  return {
+    added: added.sort(sorter),
+    removed: removed.sort(sorter),
+  };
+};
+
+const buildSummary = (
+  previousBranch?: StrategyLogicBranchConfig,
+  currentBranch?: StrategyLogicBranchConfig,
+): DiffSummary => {
+  const previousConditions = collectConditions(previousBranch);
+  const currentConditions = collectConditions(currentBranch);
+  const previousIndicators = extractIndicators(previousConditions);
+  const currentIndicators = extractIndicators(currentConditions);
+  const previousOperators = extractOperators(previousConditions);
+  const currentOperators = extractOperators(currentConditions);
+  const indicatorDiff = diffSets(currentIndicators, previousIndicators);
+  const operatorDiff = diffSets(currentOperators, previousOperators);
+
+  return {
+    currentCount: currentConditions.length,
+    previousCount: previousConditions.length,
+    delta: currentConditions.length - previousConditions.length,
+    addedIndicators: indicatorDiff.added,
+    removedIndicators: indicatorDiff.removed,
+    addedOperators: operatorDiff.added,
+    removedOperators: operatorDiff.removed,
+  };
 };
 
 const buildDisplayLines = (
@@ -138,6 +229,7 @@ const buildSections = (
   return sections.map((section) => {
     const leftGroups = buildGroups(section.pick(leftConfig));
     const rightGroups = buildGroups(section.pick(rightConfig));
+    const summary = buildSummary(section.pick(leftConfig), section.pick(rightConfig));
     const maxGroups = Math.max(leftGroups.length, rightGroups.length, 1);
     const groups: DiffGroup[] = [];
 
@@ -178,6 +270,7 @@ const buildSections = (
       id: section.id,
       title: section.title,
       groups,
+      summary,
     };
   });
 };
@@ -217,6 +310,32 @@ const StrategyHistoryDialog: React.FC<StrategyHistoryDialogProps> = ({
       </div>
     );
   };
+
+  const buildSummaryText = (summary: DiffSummary) => {
+    const parts: string[] = [];
+
+    if (summary.delta !== 0) {
+      const deltaText = summary.delta > 0 ? `新增${summary.delta}个条件` : `减少${Math.abs(summary.delta)}个条件`;
+      parts.push(deltaText);
+    }
+
+    if (summary.addedIndicators.length > 0) {
+      parts.push(`新增${summary.addedIndicators.length}个指标(${summary.addedIndicators.join(', ')})`);
+    }
+    if (summary.removedIndicators.length > 0) {
+      parts.push(`移除${summary.removedIndicators.length}个指标(${summary.removedIndicators.join(', ')})`);
+    }
+
+    if (summary.addedOperators.length > 0) {
+      parts.push(`新增${summary.addedOperators.length}个操作符(${summary.addedOperators.join(', ')})`);
+    }
+    if (summary.removedOperators.length > 0) {
+      parts.push(`移除${summary.removedOperators.length}个操作符(${summary.removedOperators.join(', ')})`);
+    }
+
+    return parts.length > 0 ? parts.join('  ') : '无变更';
+  };
+
 
   return (
     <div className="strategy-history-dialog">
@@ -266,6 +385,9 @@ const StrategyHistoryDialog: React.FC<StrategyHistoryDialogProps> = ({
             {sections.map((section) => (
               <div className="strategy-history-section" key={section.id}>
                 <div className="strategy-history-section-title">{section.title}</div>
+                <div className="strategy-history-section-summary">
+                  {buildSummaryText(section.summary)}
+                </div>
                 <div className="strategy-history-section-grid">
                   <div className="strategy-history-panel">
                     {section.groups.map((group) => (
