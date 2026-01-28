@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 import type { GeneratedIndicatorPayload } from './IndicatorGeneratorSelector';
 
@@ -7,6 +7,8 @@ interface StrategyIndicatorPanelProps {
   onOpenIndicatorGenerator: () => void;
   formatIndicatorName: (indicator: GeneratedIndicatorPayload) => string;
   formatIndicatorMeta: (indicator: GeneratedIndicatorPayload) => string;
+  onEditIndicator: (indicatorId: string) => void;
+  onRemoveIndicator: (indicatorId: string) => void;
 }
 
 const StrategyIndicatorPanel: React.FC<StrategyIndicatorPanelProps> = ({
@@ -14,6 +16,8 @@ const StrategyIndicatorPanel: React.FC<StrategyIndicatorPanelProps> = ({
   onOpenIndicatorGenerator,
   formatIndicatorName,
   formatIndicatorMeta,
+  onEditIndicator,
+  onRemoveIndicator,
 }) => {
   return (
     <div className="strategy-indicator-panel">
@@ -27,8 +31,26 @@ const StrategyIndicatorPanel: React.FC<StrategyIndicatorPanelProps> = ({
         <div className="strategy-indicator-list">
           {selectedIndicators.map((indicator) => (
             <div key={indicator.id} className="strategy-indicator-item">
-              <div className="strategy-indicator-name">{formatIndicatorName(indicator)}</div>
-              <div className="strategy-indicator-meta">{formatIndicatorMeta(indicator)}</div>
+              <div className="strategy-indicator-info">
+                <div className="strategy-indicator-name">{formatIndicatorName(indicator)}</div>
+                <div className="strategy-indicator-meta">{formatIndicatorMeta(indicator)}</div>
+              </div>
+              <div className="strategy-indicator-actions">
+                <button
+                  className="strategy-indicator-action strategy-indicator-edit"
+                  onClick={() => onEditIndicator(indicator.id)}
+                  type="button"
+                >
+                  编辑
+                </button>
+                <button
+                  className="strategy-indicator-action strategy-indicator-remove"
+                  onClick={() => onRemoveIndicator(indicator.id)}
+                  type="button"
+                >
+                  移除
+                </button>
+              </div>
             </div>
           ))}
         </div>

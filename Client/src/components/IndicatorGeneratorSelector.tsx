@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Dialog, SearchInput, Select, useNotification } from './ui';
+import { Button, Dialog, SearchInput, useNotification } from './ui';
 import './IndicatorGeneratorSelector.css';
 
 interface TalibEnumOption {
@@ -68,11 +68,17 @@ export interface GeneratedIndicatorPayload {
   configText: string;
 }
 
+type IndicatorDialogMode = 'create' | 'edit';
+
 interface IndicatorGeneratorSelectorProps {
   open: boolean;
   onClose: () => void;
   onGenerated?: (indicator: GeneratedIndicatorPayload) => void;
+  onUpdated?: (indicator: GeneratedIndicatorPayload) => void;
   autoCloseOnGenerate?: boolean;
+  mode?: IndicatorDialogMode;
+  initialIndicator?: GeneratedIndicatorPayload | null;
+  validateIndicator?: (indicator: GeneratedIndicatorPayload, mode: IndicatorDialogMode) => string | null;
 }
 
 const INPUT_OPTIONS = [
@@ -93,6 +99,24 @@ const CALC_MODE_OPTIONS = [
   { value: 'OnBarUpdate', label: 'OnBarUpdate (实时)' },
 ];
 
+const TIMEFRAME_OPTIONS = [
+  { value: 'm1', label: '1m' },
+  { value: 'm3', label: '3m' },
+  { value: 'm5', label: '5m' },
+  { value: 'm15', label: '15m' },
+  { value: 'm30', label: '30m' },
+  { value: 'h1', label: '1h' },
+  { value: 'h2', label: '2h' },
+  { value: 'h4', label: '4h' },
+  { value: 'h6', label: '6h' },
+  { value: 'h8', label: '8h' },
+  { value: 'h12', label: '12h' },
+  { value: 'd1', label: '1d' },
+  { value: 'd3', label: '3d' },
+  { value: 'w1', label: '1w' },
+  { value: 'mo1', label: '1mo' },
+];
+
 const OFFSET_DEFAULT = { min: '1', max: '1' };
 
 const getIndicatorName = (indicator: TalibIndicator) =>
@@ -104,11 +128,39 @@ const getIndicatorDisplayName = (indicator: TalibIndicator) =>
 const getIndicatorCategory = (indicator: TalibIndicator) =>
   indicator.indicator_type || indicator.group || 'Other';
 
+const normalizeTimeframe = (raw: string) => {
+  const value = raw.trim().toLowerCase().replace(/\s+/g, '');
+  if (!value) {
+    return '';
+  }
+  if (/^mo\d+$/.test(value)) {
+    return value;
+  }
+  if (/^\d+mo$/.test(value)) {
+    return `mo${value.slice(0, -2)}`;
+  }
+  if (/^[mhdw]\d+$/.test(value)) {
+    return value;
+  }
+  if (/^\d+[mhdw]$/.test(value)) {
+    return `${value.slice(-1)}${value.slice(0, -1)}`;
+  }
+  const match = value.match(/^([a-z]+)(\d+)$/);
+  if (match) {
+    return `${match[1]}${match[2]}`;
+  }
+  return value;
+};
+
 const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
   open,
   onClose,
   onGenerated,
+  onUpdated,
   autoCloseOnGenerate = false,
+  mode = 'create',
+  initialIndicator,
+  validateIndicator,
 }) => {
   const { success, error } = useNotification();
   const [catalog, setCatalog] = useState<TalibRoot | null>(null);
@@ -125,6 +177,14 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
   const [offsetMax, setOffsetMax] = useState(OFFSET_DEFAULT.max);
   const [paramValues, setParamValues] = useState<string[]>([]);
   const [generatedConfig, setGeneratedConfig] = useState<string | null>(null);
+  const isEditMode = mode === 'edit';
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setStep(isEditMode ? 'config' : 'select');
+  }, [open, isEditMode]);
 
   useEffect(() => {
     if (!open) {
@@ -157,6 +217,25 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
         setIsLoading(false);
       });
   }, [catalog, error, isLoading, open]);
+
+  useEffect(() => {
+    if (!open || !isEditMode || !catalog || !initialIndicator) {
+      return;
+    }
+    const config = initialIndicator.config as { indicator?: string } | undefined;
+    const indicatorCode =
+      initialIndicator.code ||
+      (config && typeof config.indicator === 'string' ? config.indicator : '');
+    if (!indicatorCode) {
+      return;
+    }
+    const matched = catalog.indicators.find((item) => item.code === indicatorCode);
+    if (!matched) {
+      error(`未找到指标：${indicatorCode}`);
+      return;
+    }
+    setActiveIndicator(matched);
+  }, [catalog, error, initialIndicator, isEditMode, open]);
 
   const filteredIndicators = useMemo(() => {
     if (!catalog?.indicators) {
@@ -245,15 +324,68 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       return;
     }
     setGeneratedConfig(null);
+    const outputs = activeIndicator.outputs || [];
+    const defaultOutput = outputs.length > 0 ? outputs[0].key : 'Value';
+    const inputSlots = Math.max(1, realInputCount);
+    if (isEditMode && initialIndicator) {
+      const config = initialIndicator.config as {
+        timeframe?: string;
+        calcMode?: string;
+        input?: string;
+        params?: number[];
+        output?: string;
+        offsetRange?: number[];
+      };
+      const rawTimeframe = (config?.timeframe || 'm1').trim() || 'm1';
+      const normalizedTimeframe = normalizeTimeframe(rawTimeframe);
+      const knownTimeframe =
+        TIMEFRAME_OPTIONS.find((option) => option.value === normalizedTimeframe)?.value || rawTimeframe;
+      const nextCalcMode = (config?.calcMode || 'OnBarClose').trim() || 'OnBarClose';
+      const nextOutput = (config?.output || defaultOutput).trim() || defaultOutput;
+      const offsetRange = Array.isArray(config?.offsetRange) ? config.offsetRange.map(Number) : [];
+      const offsetMinValue = Number(offsetRange[0] ?? OFFSET_DEFAULT.min);
+      const offsetMaxValue = Number(
+        offsetRange.length > 1 ? offsetRange[1] : offsetRange[0] ?? OFFSET_DEFAULT.max,
+      );
+      setTimeframe(knownTimeframe);
+      setCalcMode(nextCalcMode);
+      setOffsetMin(Number.isFinite(offsetMinValue) ? String(offsetMinValue) : OFFSET_DEFAULT.min);
+      setOffsetMax(Number.isFinite(offsetMaxValue) ? String(offsetMaxValue) : OFFSET_DEFAULT.max);
+      setOutputSelection(nextOutput);
+
+      const rawInput = (config?.input || '').trim();
+      const inputParts = rawInput
+        ? rawInput.split(',').map((part) => part.trim()).filter(Boolean)
+        : [];
+      const nextInputs = Array.from({ length: inputSlots }, (_, index) => {
+        if (inputParts.length > 0) {
+          return inputParts[index] || inputParts[0];
+        }
+        return 'Close';
+      });
+      setInputSelections(nextInputs);
+
+      const configParams = Array.isArray(config?.params) ? config.params.map(Number) : [];
+      const nextParams = paramDefinitions.map((param, index) => {
+        const raw = configParams[index];
+        if (raw === undefined || Number.isNaN(Number(raw))) {
+          if (param.type === 'enum') {
+            const fallback = param.defaultValue ?? param.enumOptions?.[0]?.value ?? 0;
+            return String(fallback);
+          }
+          return '';
+        }
+        return String(raw);
+      });
+      setParamValues(nextParams);
+      return;
+    }
+
     setTimeframe('m1');
     setCalcMode('OnBarClose');
     setOffsetMin(OFFSET_DEFAULT.min);
     setOffsetMax(OFFSET_DEFAULT.max);
-
-    const outputs = activeIndicator.outputs || [];
-    setOutputSelection(outputs.length > 0 ? outputs[0].key : 'Value');
-
-    const inputSlots = Math.max(1, realInputCount);
+    setOutputSelection(defaultOutput);
     setInputSelections(Array.from({ length: inputSlots }, () => 'Close'));
 
     const defaults = paramDefinitions.map((param) => {
@@ -264,7 +396,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       return '';
     });
     setParamValues(defaults);
-  }, [activeIndicator, paramDefinitions, realInputCount]);
+  }, [activeIndicator, initialIndicator, isEditMode, paramDefinitions, realInputCount]);
 
   const handleSelectIndicator = (indicator: TalibIndicator) => {
     setActiveIndicator(indicator);
@@ -345,22 +477,30 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       calcMode,
     };
     const formatted = JSON.stringify(config, null, 2);
+    const payload: GeneratedIndicatorPayload = {
+      id: isEditMode && initialIndicator ? initialIndicator.id : `${activeIndicator.code}-${Date.now()}`,
+      code: activeIndicator.code,
+      name: getIndicatorName(activeIndicator),
+      category: getIndicatorCategory(activeIndicator),
+      outputs: activeIndicator.outputs || [],
+      config: config as Record<string, unknown>,
+      configText: formatted,
+    };
+    const validationMessage = validateIndicator?.(payload, isEditMode ? 'edit' : 'create');
+    if (validationMessage) {
+      error(validationMessage);
+      return;
+    }
     setGeneratedConfig(formatted);
-    success('已生成指标配置');
+    success(isEditMode ? '已更新指标' : '已生成指标');
 
-    if (onGenerated) {
-      onGenerated({
-        id: `${activeIndicator.code}-${Date.now()}`,
-        code: activeIndicator.code,
-        name: getIndicatorName(activeIndicator),
-        category: getIndicatorCategory(activeIndicator),
-        outputs: activeIndicator.outputs || [],
-        config: config as Record<string, unknown>,
-        configText: formatted,
-      });
-      if (autoCloseOnGenerate) {
-        onClose();
-      }
+    if (isEditMode) {
+      onUpdated?.(payload);
+    } else {
+      onGenerated?.(payload);
+    }
+    if (autoCloseOnGenerate) {
+      onClose();
     }
   };
 
@@ -377,11 +517,6 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       () => error('复制失败'),
     );
   };
-
-  const outputOptions = (activeIndicator?.outputs || []).map((output) => ({
-    value: output.key,
-    label: output.hint ? `${output.key} (${output.hint})` : output.key,
-  }));
 
   return (
     <>
@@ -459,59 +594,71 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       <Dialog
         open={open && step === 'config'}
         onClose={onClose}
-        title="指标参数配置"
-        cancelText="返回"
-        confirmText="生成配置"
-        onCancel={handleBackToSelect}
+        cancelText={isEditMode ? '取消' : '返回'}
+        confirmText={isEditMode ? '确认修改' : '生成指标'}
+        onCancel={isEditMode ? onClose : handleBackToSelect}
         onConfirm={handleGenerate}
         className="indicator-generator__dialog indicator-generator__dialog--config"
       >
-        {activeIndicator && (
+        {activeIndicator ? (
           <div className="indicator-generator__config">
-            <div className="indicator-generator__summary">
-              <div>
-                <div className="indicator-generator__summary-title">
-                  {activeIndicator.code} · {getIndicatorName(activeIndicator)}
-                </div>
-                <div className="indicator-generator__summary-meta">
-                  分类：{getIndicatorCategory(activeIndicator)}
-                </div>
+            <div className="indicator-generator__headline">
+              <div className="indicator-generator__headline-title">
+                {activeIndicator.code} · {getIndicatorName(activeIndicator)}
               </div>
-              <div className="indicator-generator__summary-block">
-                <div className="indicator-generator__summary-label">输入</div>
-                <div className="indicator-generator__summary-value">
-                  {activeIndicator.inputs?.series?.length
-                    ? activeIndicator.inputs.series.join(', ')
-                    : 'Real'}
-                </div>
-              </div>
-              <div className="indicator-generator__summary-block">
-                <div className="indicator-generator__summary-label">输出</div>
-                <div className="indicator-generator__summary-value">
-                  {(activeIndicator.outputs || []).map((item) => item.key).join(', ') || 'Value'}
-                </div>
+              <div className="indicator-generator__headline-category">
+                分类：{getIndicatorCategory(activeIndicator)}
               </div>
             </div>
 
             <div className="indicator-generator__form">
               <div className="indicator-generator__field">
-                <label className="indicator-generator__label">时间周期</label>
-                <input
-                  className="indicator-generator__input"
-                  value={timeframe}
-                  onChange={(event) => setTimeframe(event.target.value)}
-                  placeholder="m1"
-                />
-              </div>
-
-              <div className="indicator-generator__field">
-                <label className="indicator-generator__label">计算模式</label>
-                <Select
-                  options={CALC_MODE_OPTIONS}
-                  value={calcMode}
-                  onChange={setCalcMode}
-                  className="indicator-generator__select"
-                />
+                <label className="indicator-generator__label">参数设置</label>
+                {paramDefinitions.length === 0 && (
+                  <div className="indicator-generator__empty">该指标无需参数。</div>
+                )}
+                {paramDefinitions.length > 0 && (
+                  <div className="indicator-generator__params">
+                    {paramDefinitions.map((param, index) => (
+                      <div key={param.id} className="indicator-generator__param-row">
+                        <div className="indicator-generator__param-info">
+                          <div className="indicator-generator__param-label">{param.label}</div>
+                          {param.description && (
+                            <div className="indicator-generator__param-desc">{param.description}</div>
+                          )}
+                        </div>
+                        {param.type === 'enum' ? (
+                          <div className="indicator-generator__option-list">
+                            {(param.enumOptions || []).map((option) => {
+                              const value = String(option.value);
+                              const label = option.name ? `${option.label} - ${option.name}` : option.label;
+                              return (
+                                <button
+                                  key={`${param.id}-${value}`}
+                                  type="button"
+                                  className={`indicator-generator__option-button ${
+                                    paramValues[index] === value ? 'is-active' : ''
+                                  }`}
+                                  onClick={() => handleParamChange(index, value)}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <input
+                            className="indicator-generator__input indicator-generator__input--small"
+                            value={paramValues[index] ?? ''}
+                            onChange={(event) => handleParamChange(index, event.target.value)}
+                            type="number"
+                            placeholder="请输入"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {realInputCount > 0 && (
@@ -521,26 +668,75 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                   </label>
                   <div className="indicator-generator__input-list">
                     {inputSelections.map((selection, index) => (
-                      <Select
-                        key={`input-${index}`}
-                        options={INPUT_OPTIONS}
-                        value={selection}
-                        onChange={(value) => handleInputChange(index, value)}
-                        className="indicator-generator__select"
-                      />
+                      <div key={`input-${index}`} className="indicator-generator__input-row">
+                        {realInputCount > 1 && (
+                          <div className="indicator-generator__input-label">
+                            输入 {index + 1}
+                          </div>
+                        )}
+                        <div className="indicator-generator__option-list">
+                          {INPUT_OPTIONS.map((option) => (
+                            <button
+                              key={`${option.value}-${index}`}
+                              type="button"
+                              className={`indicator-generator__option-button ${
+                                selection === option.value ? 'is-active' : ''
+                              }`}
+                              onClick={() => handleInputChange(index, option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
               <div className="indicator-generator__field">
-                <label className="indicator-generator__label">输出结果</label>
-                <Select
-                  options={outputOptions.length ? outputOptions : [{ value: 'Value', label: 'Value' }]}
-                  value={outputSelection}
-                  onChange={setOutputSelection}
-                  className="indicator-generator__select"
-                />
+                <label className="indicator-generator__label">计算模式</label>
+                <div className="indicator-generator__option-list">
+                  {CALC_MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`indicator-generator__option-button ${
+                        calcMode === option.value ? 'is-active' : ''
+                      }`}
+                      onClick={() => setCalcMode(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="indicator-generator__field">
+                <label className="indicator-generator__label">时间周期</label>
+                <div className="indicator-generator__option-list">
+                  {TIMEFRAME_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`indicator-generator__option-button ${
+                        timeframe === option.value ? 'is-active' : ''
+                      }`}
+                      onClick={() => setTimeframe(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                  {!TIMEFRAME_OPTIONS.some((option) => option.value === timeframe) && timeframe && (
+                    <button
+                      type="button"
+                      className="indicator-generator__option-button is-active"
+                      onClick={() => setTimeframe(timeframe)}
+                    >
+                      {timeframe}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="indicator-generator__field">
@@ -569,46 +765,6 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                 )}
               </div>
 
-              <div className="indicator-generator__field">
-                <label className="indicator-generator__label">参数设置</label>
-                {paramDefinitions.length === 0 && (
-                  <div className="indicator-generator__empty">该指标无需参数。</div>
-                )}
-                {paramDefinitions.length > 0 && (
-                  <div className="indicator-generator__params">
-                    {paramDefinitions.map((param, index) => (
-                      <div key={param.id} className="indicator-generator__param-row">
-                        <div className="indicator-generator__param-info">
-                          <div className="indicator-generator__param-label">{param.label}</div>
-                          {param.description && (
-                            <div className="indicator-generator__param-desc">{param.description}</div>
-                          )}
-                        </div>
-                        {param.type === 'enum' ? (
-                          <Select
-                            options={(param.enumOptions || []).map((option) => ({
-                              value: String(option.value),
-                              label: option.name ? `${option.label} - ${option.name}` : option.label,
-                            }))}
-                            value={paramValues[index]}
-                            onChange={(value) => handleParamChange(index, value)}
-                            className="indicator-generator__select"
-                          />
-                        ) : (
-                          <input
-                            className="indicator-generator__input indicator-generator__input--small"
-                            value={paramValues[index] ?? ''}
-                            onChange={(event) => handleParamChange(index, event.target.value)}
-                            type="number"
-                            placeholder="请输入"
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
               {!canGenerate && (
                 <div className="indicator-generator__hint">
                   请完善参数与偏移范围后再生成配置。
@@ -627,6 +783,10 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                 <pre className="indicator-generator__preview">{generatedConfig}</pre>
               </div>
             )}
+          </div>
+        ) : (
+          <div className="indicator-generator__empty">
+            {isLoading ? '正在加载指标配置...' : '未找到指标配置'}
           </div>
         )}
       </Dialog>
