@@ -10,5 +10,6 @@ export type StrategyItemProps = {
   ownerAvatar: string;
   status: 'running' | 'paused' | 'paused_open_position' | 'completed' | 'error';
   version?: string | number;
+  catalogTag?: 'official' | 'template' | 'both';
   onViewDetail?: (usId: number) => void;
 };

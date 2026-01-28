@@ -1,0 +1,71 @@
+﻿.strategy-market-item {
+  background: var(--bg-primary, #ffffff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.strategy-market-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: var(--border-hover, #d1d5db);
+}
+
+.strategy-market-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-market-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.strategy-market-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.strategy-market-sep {
+  color: var(--text-tertiary, #9ca3af);
+}
+
+.strategy-market-desc {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.4;
+}
+
+.strategy-market-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.strategy-market-author {
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.strategy-market-time {
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .strategy-market-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}

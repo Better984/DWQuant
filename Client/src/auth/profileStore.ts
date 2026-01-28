@@ -4,6 +4,7 @@ export type AuthProfile = {
   email: string;
   nickname?: string | null;
   avatarUrl?: string | null;
+  role?: number | null;
 };
 
 let inMemoryProfile: AuthProfile | null = null;

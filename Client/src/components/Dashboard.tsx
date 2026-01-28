@@ -45,6 +45,19 @@ const Dashboard: React.FC = () => {
   const rightSidebarResizeRef = useRef<{ x: number; width: number } | null>(null);
   const [userProfile] = useState(() => getAuthProfile());
   const userDisplayName = userProfile?.nickname || userProfile?.email || 'User';
+  const userRoleLabel = (() => {
+    switch (userProfile?.role) {
+      case 255:
+        return '超级管理';
+      case 40:
+        return '达人';
+      case 20:
+        return '会员';
+      case 0:
+      default:
+        return '普通用户';
+    }
+  })();
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [wsStatus, setWsStatus] = useState(getWsStatus());
   const wsNotifiedRef = useRef(false);
@@ -383,7 +396,7 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="sidebar-user-text">
               <span className="sidebar-user-name">{userDisplayName}</span>
-              <span className="sidebar-user-plan">Free</span>
+              <span className="sidebar-user-plan">{userRoleLabel}</span>
             </div>
           </div>
         </div>
