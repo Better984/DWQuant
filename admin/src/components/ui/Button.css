@@ -1,0 +1,163 @@
+/* SnowUI Button Component - 基于 Figma 设计稿 */
+
+.snowui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  user-select: none;
+  outline: none;
+}
+
+.snowui-button:focus-visible {
+  outline: 2px solid rgba(0, 0, 0, 0.1);
+  outline-offset: 2px;
+}
+
+.snowui-button__text {
+  display: inline-block;
+}
+
+.snowui-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.snowui-button__icon--left {
+  margin-right: -4px;
+}
+
+.snowui-button__icon--right {
+  margin-left: -4px;
+}
+
+/* ========== Size Variants ========== */
+
+/* Large Size */
+.snowui-button--large {
+  padding: 12px 24px;
+  border-radius: 20px;
+  font-size: 18px;
+  line-height: 1.5555555555555556em;
+}
+
+.snowui-button--large .snowui-button__icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* Medium Size */
+.snowui-button--medium {
+  padding: 8px 16px;
+  border-radius: 16px;
+  font-size: 16px;
+  line-height: 1.5em;
+}
+
+.snowui-button--medium .snowui-button__icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Small Size */
+.snowui-button--small {
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.4285714285714286em;
+  gap: 4px;
+}
+
+.snowui-button--small .snowui-button__icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* ========== Style Variants ========== */
+
+/* Borderless Style */
+.snowui-button--borderless {
+  background: transparent;
+  color: #000000;
+}
+
+.snowui-button--borderless:not(:disabled):hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.snowui-button--borderless.snowui-button--disabled {
+  opacity: 0.1;
+  cursor: not-allowed;
+}
+
+/* Gray Style */
+.snowui-button--gray {
+  background: transparent;
+  color: #000000;
+}
+
+.snowui-button--gray:not(:disabled):hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.snowui-button--gray.snowui-button--disabled {
+  opacity: 0.1;
+  cursor: not-allowed;
+}
+
+/* Outline Style */
+.snowui-button--outline {
+  background: transparent;
+  color: #000000;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.snowui-button--outline:not(:disabled):hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.snowui-button--outline.snowui-button--disabled {
+  opacity: 0.1;
+  cursor: not-allowed;
+}
+
+/* Filled Style */
+.snowui-button--filled {
+  background: #000000;
+  color: #FFFFFF;
+}
+
+.snowui-button--filled:not(:disabled):hover {
+  background: linear-gradient(0deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2)), #000000;
+}
+
+.snowui-button--filled.snowui-button--disabled {
+  background: rgba(0, 0, 0, 0.04);
+  color: #000000;
+  opacity: 0.1;
+  cursor: not-allowed;
+}
+
+/* ========== State Variants ========== */
+
+.snowui-button--disabled {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* ========== Hover State (通过 CSS :hover 实现) ========== */
+/* Hover styles are defined in each style variant above */
+
+/* ========== Active State ========== */
+.snowui-button:not(:disabled):active {
+  transform: scale(0.98);
+}

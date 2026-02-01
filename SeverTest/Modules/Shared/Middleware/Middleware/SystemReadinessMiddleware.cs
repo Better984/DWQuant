@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Options;
@@ -43,6 +43,13 @@ namespace ServerTest.Middleware
         public async Task InvokeAsync(HttpContext context)
         {
             var path = context.Request.Path.Value ?? string.Empty;
+
+            // 允许 OPTIONS 预检请求直接通过（CORS 中间件会处理）
+            if (context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+            {
+                await _next(context);
+                return;
+            }
 
             // 允许健康检查和 Swagger 访问
             if (IsAllowedPath(path))

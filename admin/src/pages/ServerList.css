@@ -1,0 +1,413 @@
+.server-list {
+  padding: 16px 24px;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--color-bg-layout, #f0f2f5);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.server-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.server-list-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-text, rgba(0, 0, 0, 0.85));
+}
+
+/* 统计信息卡片 */
+.server-stats-card {
+  background: var(--color-surface, #fff);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
+}
+
+.server-stats-card .ant-card-body {
+  padding: 12px 16px !important;
+}
+
+.server-stats-card .ant-statistic {
+  margin: 0;
+}
+
+.server-stats-card .ant-statistic-title {
+  font-size: 12px;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.65));
+  margin-bottom: 4px;
+  line-height: 1.2;
+}
+
+.server-stats-card .ant-statistic-content {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.server-stats-card .ant-statistic-content-prefix {
+  margin-right: 4px;
+}
+
+.server-stats-card .ant-row {
+  margin: 0 !important;
+}
+
+.server-stats-card .ant-col {
+  padding: 0 8px !important;
+}
+
+/* 服务器节点容器 */
+.server-nodes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 服务器节点卡片 - 优化样式 */
+.server-node-card {
+  background: var(--color-surface, #fff);
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  border: 1px solid var(--color-border, #e5e7eb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.server-node-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: var(--color-primary, #1890ff);
+  transform: translateY(-2px);
+}
+
+.server-node-card.expanded {
+  border-color: var(--color-primary, #1890ff);
+  box-shadow: 0 8px 24px rgba(24, 144, 255, 0.15);
+  transform: translateY(0);
+}
+
+.server-node-card .ant-card-body {
+  padding: 20px 24px;
+}
+
+.server-node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.server-node-title-section {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.server-node-title {
+  display: flex;
+  align-items: center;
+}
+
+.server-node-id {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text, rgba(0, 0, 0, 0.85));
+  margin-right: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.server-node-meta-compact {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 13px;
+}
+
+.server-node-meta-compact .meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.server-node-meta-compact .meta-label {
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.45));
+  font-size: 12px;
+}
+
+.server-node-meta-compact .meta-value {
+  color: var(--color-text, rgba(0, 0, 0, 0.85));
+  font-weight: 500;
+}
+
+.server-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.server-node-time {
+  text-align: right;
+  min-width: 140px;
+}
+
+.server-node-time .time-label {
+  font-size: 11px;
+  color: var(--color-text-tertiary, rgba(0, 0, 0, 0.45));
+  margin-bottom: 2px;
+}
+
+.server-node-time .time-value {
+  font-size: 12px;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.server-node-expand-icon {
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 14px;
+  transition: transform 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--color-bg-layout, #f5f5f5);
+}
+
+/* 服务器节点详情 */
+.server-node-details {
+  padding: 20px 0 0 0;
+  border-top: 1px solid var(--color-border-secondary, #f0f0f0);
+  margin-top: 20px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.server-node-details .ant-tabs {
+  margin-top: 0;
+}
+
+.server-node-details .ant-tabs-content-holder {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* 策略标签页内容 */
+.strategies-tab-content {
+  padding: 16px 0;
+}
+
+.strategies-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
+}
+
+.strategies-header strong {
+  font-size: 16px;
+  color: var(--color-text, rgba(0, 0, 0, 0.85));
+}
+
+.strategy-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
+  transition: background-color 0.2s;
+}
+
+.strategy-item:hover {
+  background-color: var(--color-bg-layout, #fafafa);
+}
+
+.strategy-item:last-child {
+  border-bottom: none;
+}
+
+.strategy-item .ant-list-item-meta-title {
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.strategy-item .ant-list-item-meta-description {
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.65));
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.strategy-item .ant-list-item-action {
+  margin-left: 16px;
+}
+
+/* 基础信息标签页内容 */
+.info-tab-content {
+  padding: 16px 0;
+}
+
+.info-section {
+  margin-bottom: 24px;
+}
+
+.info-section h3 {
+  margin-bottom: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text, rgba(0, 0, 0, 0.85));
+}
+
+.info-section .ant-descriptions {
+  background: var(--color-bg-layout, #fafafa);
+}
+
+.info-section .ant-descriptions-item-label {
+  font-weight: 500;
+  color: var(--color-text, rgba(0, 0, 0, 0.85));
+}
+
+/* 策略详情弹窗 */
+.strategy-detail-modal .ant-modal-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.strategy-detail-modal .ant-descriptions {
+  margin-bottom: 24px;
+}
+
+/* 检查记录详情全屏弹窗 */
+.check-log-detail-modal {
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.check-log-detail-modal .ant-modal-content {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.check-log-detail-modal .ant-modal-header {
+  flex-shrink: 0;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--color-border, #d9d9d9);
+}
+
+.check-log-detail-modal .ant-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.check-log-detail-modal .ant-modal-close {
+  top: 16px;
+  right: 24px;
+}
+
+.check-log-detail-content {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.check-log-detail-content .ant-descriptions {
+  background: var(--color-surface, #fff);
+}
+
+.check-log-detail-content code {
+  background: var(--color-bg-layout, #f5f5f5);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+}
+
+/* 滚动条样式 */
+.server-list::-webkit-scrollbar,
+.server-nodes-container::-webkit-scrollbar,
+.server-node-details::-webkit-scrollbar,
+.strategy-detail-modal .ant-modal-body::-webkit-scrollbar,
+.check-log-detail-modal .ant-modal-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.server-list::-webkit-scrollbar-track,
+.server-nodes-container::-webkit-scrollbar-track,
+.server-node-details::-webkit-scrollbar-track,
+.strategy-detail-modal .ant-modal-body::-webkit-scrollbar-track,
+.check-log-detail-modal .ant-modal-body::-webkit-scrollbar-track {
+  background: var(--color-bg-layout, #f0f0f0);
+  border-radius: 4px;
+}
+
+.server-list::-webkit-scrollbar-thumb,
+.server-nodes-container::-webkit-scrollbar-thumb,
+.server-node-details::-webkit-scrollbar-thumb,
+.strategy-detail-modal .ant-modal-body::-webkit-scrollbar-thumb,
+.check-log-detail-modal .ant-modal-body::-webkit-scrollbar-thumb {
+  background: var(--color-border, #d9d9d9);
+  border-radius: 4px;
+}
+
+.server-list::-webkit-scrollbar-thumb:hover,
+.server-nodes-container::-webkit-scrollbar-thumb:hover,
+.server-node-details::-webkit-scrollbar-thumb:hover,
+.strategy-detail-modal .ant-modal-body::-webkit-scrollbar-thumb:hover,
+.check-log-detail-modal .ant-modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary, rgba(0, 0, 0, 0.45));
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .server-node-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .server-node-meta {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .strategies-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .strategies-header .ant-input-search {
+    width: 100%;
+  }
+}
+
+/* 空状态样式 */
+.server-nodes-container:empty::before {
+  content: '暂无服务器节点';
+  display: block;
+  text-align: center;
+  padding: 40px;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.45));
+}

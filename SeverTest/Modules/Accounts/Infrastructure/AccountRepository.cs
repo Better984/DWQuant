@@ -243,6 +243,48 @@ WHERE uid = @uid AND deleted_at IS NULL;";
             return base.SoftDeleteAsync(uid, uow, ct);
         }
 
+        public Task<int> AdminUpdateAsync(ulong uid, IReadOnlyDictionary<string, object?> patch, IUnitOfWork? uow = null, CancellationToken ct = default)
+        {
+            if (uid == 0)
+            {
+                throw new ArgumentException("Uid is required.", nameof(uid));
+            }
+
+            if (patch == null || patch.Count == 0)
+            {
+                throw new ArgumentException("Patch dictionary cannot be empty.", nameof(patch));
+            }
+
+            // 允许管理员更新的字段
+            var allowedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "role", "status", "nickname", "avatar_url", "signature",
+                "vip_expired_at", "current_notification_platform", "strategy_ids", "updated_at"
+            };
+
+            var setParts = new List<string>();
+            var parameters = new Dictionary<string, object?> { { "uid", uid } };
+
+            foreach (var kvp in patch)
+            {
+                if (!allowedFields.Contains(kvp.Key))
+                {
+                    throw new ArgumentException($"Field '{kvp.Key}' is not allowed for admin update.");
+                }
+
+                var paramName = $"p_{kvp.Key.Replace("_", "", StringComparison.Ordinal)}";
+                setParts.Add($"{kvp.Key} = @{paramName}");
+                parameters[paramName] = kvp.Value;
+            }
+
+            var sql = $@"
+UPDATE account
+SET {string.Join(", ", setParts)}
+WHERE uid = @uid AND deleted_at IS NULL;";
+
+            return Db.ExecuteAsync(sql, parameters, uow, ct);
+        }
+
         protected override (string Sql, object Param) BuildInsertCommand(Account entity)
         {
             var sql = @"

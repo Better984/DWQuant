@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
 using ServerTest.Middleware;
 using ServerTest.Options;
@@ -21,11 +21,12 @@ namespace ServerTest.Startup
 
             app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+            // 重要：CORS 必须在系统就绪检查之前，确保 OPTIONS 预检请求能正确返回 CORS 头
+            app.UseCors();
+
             // 重要：系统就绪检查必须在其他中间件之前
             app.UseMiddleware<SystemReadinessMiddleware>();
 
-            // 开发环境：保持 HTTP，避免预检重定向
-            app.UseCors();
             app.UseAuthentication();
             app.UseAuthorization();
             app.UseMiddleware<HttpRateLimitMiddleware>();
