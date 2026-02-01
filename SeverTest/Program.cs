@@ -207,6 +207,7 @@ builder.Services.AddSingleton<StrategyRuntimeLoader>();
 builder.Services.AddSingleton<StrategyOwnershipService>();
 builder.Services.AddSingleton<StrategyRunCheckLogRepository>();
 builder.Services.AddSingleton<StrategyRunCheckService>();
+builder.Services.AddSingleton<IStrategyRunCheck, ExchangeReadyRunCheck>();
 builder.Services.AddSingleton<IStrategyRunCheck, ApiKeyRunCheck>();
 builder.Services.AddSingleton<IStrategyRunCheck, PositionModeRunCheck>();
 builder.Services.AddSingleton<IStrategyRunCheck, BalanceRunCheck>();
@@ -216,6 +217,7 @@ builder.Services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
 builder.Services.AddHostedService<TradeActionConsumer>();
 builder.Services.AddHostedService<PositionRiskEngine>();
 builder.Services.AddHostedService<StrategyEngineRunLogWriter>();
+builder.Services.AddHostedService<ConditionCacheCleanupHostedService>();
 
 // 策略运行时服务（后台服务）
 builder.Services.AddHostedService<StrategyRuntimeHostedService>();
@@ -253,6 +255,11 @@ builder.Services.AddOptions<StrategyOwnershipOptions>()
 builder.Services.AddSingleton<IValidateOptions<MarketDataQueryOptions>, MarketDataQueryOptionsValidator>();
 builder.Services.AddOptions<MarketDataQueryOptions>()
     .Bind(builder.Configuration.GetSection("MarketDataQuery"))
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<IValidateOptions<ConditionCacheOptions>, ConditionCacheOptionsValidator>();
+builder.Services.AddOptions<ConditionCacheOptions>()
+    .Bind(builder.Configuration.GetSection("ConditionCache"))
     .ValidateOnStart();
 
 builder.Services.AddSingleton<IValidateOptions<RedisKeyOptions>, RedisKeyOptionsValidator>();

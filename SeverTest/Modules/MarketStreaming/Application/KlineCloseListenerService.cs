@@ -11,6 +11,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
         private readonly MarketDataEngine _marketDataEngine;
         private readonly MarketTickerBroadcastService _broadcastService;
         private readonly ILogger<KlineCloseListenerService> _logger;
+        private readonly MarketDataTaskSubscription _subscription;
 
         public KlineCloseListenerService(
             MarketDataEngine marketDataEngine,
@@ -20,6 +21,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _broadcastService = broadcastService ?? throw new ArgumentNullException(nameof(broadcastService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _subscription = _marketDataEngine.SubscribeMarketTasks("KlineCloseListener", onlyBarClose: true);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -30,7 +32,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
             _logger.LogInformation("KlineCloseListenerService 开始监听K线收线事件...");
 
             // 持续监听MarketDataTask通道，当IsBarClose=true时立即触发推送
-            await foreach (var task in _marketDataEngine.ReadAllMarketTasksAsync(stoppingToken))
+            await foreach (var task in _subscription.ReadAllAsync(stoppingToken))
             {
                 try
                 {

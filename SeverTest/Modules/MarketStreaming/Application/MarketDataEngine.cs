@@ -1,4 +1,4 @@
-using ccxt;
+﻿using ccxt;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Models;
@@ -43,6 +43,8 @@ namespace ServerTest.Modules.MarketStreaming.Application
         // 实时行情任务通道（生产者：行情引擎；消费者：策略引擎）
         private readonly Channel<MarketDataTask> _marketTaskChannel;
         private readonly QueuePressureMonitor _queueMonitor;
+        private readonly RuntimeQueueOptions _queueOptions;
+        private readonly ConcurrentDictionary<string, MarketDataTaskSubscription> _subscriptions = new();
         private readonly MarketDataQueryOptions _queryOptions;
 
         // 限流信号量：限制并发请求数，避免触发交易所API限流
@@ -64,6 +66,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
         {
             // 初始化队列，启用有界通道与背压策略
             var options = queueOptions?.Value ?? new RuntimeQueueOptions();
+            _queueOptions = options;
             _marketTaskChannel = ChannelFactory.Create<MarketDataTask>(
                 options.MarketData,
                 "MarketDataEngine",
@@ -162,6 +165,70 @@ namespace ServerTest.Modules.MarketStreaming.Application
             {
                 await _initializationTask;
             }
+        }
+
+        /// <summary>
+        /// 订阅行情任务（为每个订阅者提供独立通道）
+        /// </summary>
+        public MarketDataTaskSubscription SubscribeMarketTasks(string subscriberName, bool onlyBarClose = false)
+        {
+            if (string.IsNullOrWhiteSpace(subscriberName))
+            {
+                throw new ArgumentException("订阅者名称不能为空", nameof(subscriberName));
+            }
+
+            var name = subscriberName.Trim();
+            if (_subscriptions.TryGetValue(name, out var existing))
+            {
+                return existing;
+            }
+
+            var queueName = $"MarketDataEngine:{name}";
+            var channel = ChannelFactory.Create<MarketDataTask>(
+                _queueOptions.MarketData,
+                queueName,
+                Logger,
+                singleReader: false,
+                singleWriter: false);
+            var monitor = new QueuePressureMonitor(queueName, _queueOptions.MarketData, Logger);
+            var subscription = new MarketDataTaskSubscription(name, channel, monitor, onlyBarClose);
+            _subscriptions[name] = subscription;
+            Logger.LogInformation("创建行情任务订阅: {Subscriber} onlyBarClose={OnlyBarClose}", name, onlyBarClose);
+            return subscription;
+        }
+
+        /// <summary>
+        /// 交易所行情是否就绪（至少有一根 1m K 线）
+        /// </summary>
+        public bool IsExchangeReady(string exchangeKey)
+        {
+            if (string.IsNullOrWhiteSpace(exchangeKey))
+            {
+                return false;
+            }
+
+            if (!_cache.TryGetValue(exchangeKey, out var symbolCaches))
+            {
+                return false;
+            }
+
+            foreach (var symbolEntry in symbolCaches.Values)
+            {
+                if (!symbolEntry.Timeframes.TryGetValue("1m", out var candles))
+                {
+                    continue;
+                }
+
+                lock (symbolEntry.Lock)
+                {
+                    if (candles.Count > 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -1200,6 +1267,10 @@ namespace ServerTest.Modules.MarketStreaming.Application
             _rateLimiter.Dispose();
             _cancellationTokenSource.Dispose();
             _marketTaskChannel.Writer.TryComplete();
+            foreach (var subscription in _subscriptions.Values)
+            {
+                subscription.Complete();
+            }
 
             Logger.LogInformation("MarketDataEngine 资源已释放");
         }
@@ -1226,6 +1297,23 @@ namespace ServerTest.Modules.MarketStreaming.Application
 
             _queueMonitor.OnEnqueueSuccess();
 
+            foreach (var subscription in _subscriptions.Values)
+            {
+                if (subscription.OnlyBarClose && !isBarClose)
+                {
+                    continue;
+                }
+
+                if (!subscription.TryWrite(task))
+                {
+                    Logger.LogWarning(
+                        "行情任务写入订阅队列失败: {Subscriber} {Exchange} {Symbol} {Timeframe}",
+                        subscription.Name,
+                        exchangeId,
+                        symbol,
+                        timeframe);
+                }
+            }
 
             // var modeText = isBarClose ? "收线" : "更新";
             // Logger.LogInformation(

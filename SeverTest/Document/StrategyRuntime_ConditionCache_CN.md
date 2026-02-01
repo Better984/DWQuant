@@ -34,6 +34,7 @@
 - 策略入实盘时，解析其全部条件 Key 并记录引用。
 - 定期清理无人引用的 Key 缓存。
 - 避免缓存无限增长。
+- 已增加后台清理服务 `ConditionCacheCleanupHostedService`，清理间隔由 `ConditionCache:CleanupIntervalSeconds` 配置。
 
 ### 4) 执行顺序
 

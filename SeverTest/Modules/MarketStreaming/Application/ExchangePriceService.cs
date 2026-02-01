@@ -1,4 +1,4 @@
-using ccxt;
+﻿using ccxt;
 using ccxt.pro;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
@@ -9,17 +9,61 @@ namespace ServerTest.Modules.MarketStreaming.Application
 {
     public class ExchangePriceService : BaseService
     {
+        private const int ExpectedExchangeCount = 3;
+
         private readonly ConcurrentDictionary<string, PriceData> _priceCache = new();
         private readonly Dictionary<string, Exchange> _exchanges = new();
         private readonly CancellationTokenSource _cancellationTokenSource = new();
+        private readonly Task _initializationTask;
+        private readonly Task _subscriptionTask;
+        private Exception? _initializationError;
 
         public ExchangePriceService(ILogger<ExchangePriceService> logger) : base(logger)
         {
-            // 初始化交易所
-            _ = Task.Run(async () => await InitializeExchangesAsync());
+            // 初始化交易所与订阅任务（失败必须可感知）
+            _initializationTask = InitializeExchangesAsync();
+            _subscriptionTask = StartPriceSubscriptionsAsync(_cancellationTokenSource.Token);
 
-            // 启动价格订阅
-            _ = Task.Run(() => StartPriceSubscriptionsAsync(_cancellationTokenSource.Token));
+            // 后台任务异常需显式记录，避免静默失败
+            _ = ObserveBackgroundTaskAsync(_initializationTask, "交易所初始化任务");
+            _ = ObserveBackgroundTaskAsync(_subscriptionTask, "价格订阅任务");
+        }
+
+        /// <summary>
+        /// 等待交易所初始化完成（失败将抛出异常）
+        /// </summary>
+        public async Task WaitForInitializationAsync()
+        {
+            await _initializationTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 等待价格订阅任务启动完成（失败将抛出异常）
+        /// </summary>
+        public async Task WaitForSubscriptionAsync()
+        {
+            await _subscriptionTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 获取初始化失败异常（若失败）
+        /// </summary>
+        public Exception? GetInitializationError()
+        {
+            return _initializationError;
+        }
+
+        private Task ObserveBackgroundTaskAsync(Task task, string taskName)
+        {
+            return task.ContinueWith(t =>
+            {
+                if (!t.IsFaulted || t.Exception == null)
+                {
+                    return;
+                }
+
+                Logger.LogError(t.Exception, "{TaskName}失败", taskName);
+            }, TaskScheduler.Default);
         }
 
         private async Task InitializeExchangesAsync()
@@ -55,20 +99,36 @@ namespace ServerTest.Modules.MarketStreaming.Application
             }
             catch (Exception ex)
             {
+                _initializationError = ex;
                 Logger.LogError(ex, "交易所初始化失败");
+                throw;
             }
         }
 
         private async Task StartPriceSubscriptionsAsync(CancellationToken cancellationToken)
         {
-            // 等待交易所初始化完成
-            while (_exchanges.Count < 3 && !cancellationToken.IsCancellationRequested)
+            try
             {
-                await Task.Delay(1000, cancellationToken);
+                // 等待交易所初始化完成，失败则直接抛出
+                await _initializationTask.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "交易所初始化失败，价格订阅不会启动");
+                throw;
             }
 
             if (cancellationToken.IsCancellationRequested)
+            {
                 return;
+            }
+
+            if (_exchanges.Count != ExpectedExchangeCount)
+            {
+                var message = $"交易所初始化数量异常，期望 {ExpectedExchangeCount} 个，实际 {_exchanges.Count} 个";
+                Logger.LogError(message);
+                throw new InvalidOperationException(message);
+            }
 
             var tasks = new List<Task>();
 

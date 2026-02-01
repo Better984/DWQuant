@@ -14,6 +14,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
     public sealed class RealTimeStrategyEngine
     {
         private readonly MarketDataEngine _marketDataEngine;
+        private readonly MarketDataTaskSubscription _marketTaskSubscription;
         private readonly ILogger<RealTimeStrategyEngine> _logger;
         private readonly IStrategyValueResolver _valueResolver;
         private readonly IStrategyActionExecutor? _actionExecutor;
@@ -40,6 +41,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             int? maxParallelism = null)
         {
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
+            _marketTaskSubscription = _marketDataEngine.SubscribeMarketTasks("StrategyEngine");
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _valueResolver = valueResolver ?? NoopStrategyValueResolver.Instance;
             _actionExecutor = actionExecutor;
@@ -193,7 +195,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         public bool TryProcessNextTask()
         {
-            if (!_marketDataEngine.TryDequeueMarketTask(out var task))
+            if (!_marketTaskSubscription.TryRead(out var task))
             {
                 return false;
             }
@@ -209,7 +211,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 MarketDataTask task;
                 try
                 {
-                    task = await _marketDataEngine.ReadMarketTaskAsync(cancellationToken).ConfigureAwait(false);
+                    task = await _marketTaskSubscription.ReadAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -317,6 +319,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var containers = branch.Containers ?? new List<ConditionContainer>();
             var passCount = 0;
             var aggregatedResults = new List<ConditionEvaluationResult>();
+            var debugEnabled = _logger.IsEnabled(LogLevel.Debug);
 
             PrecomputeRequiredConditions(context, containers, metrics);
 
@@ -330,7 +333,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                 var checkResults = new List<ConditionEvaluationResult>();
                 var stageLabel = $"{stage}[{i}]";
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "策略检查开始: {Uid} {Stage} 时间={Time}",
                     context.Strategy.UidCode,
                     stageLabel,
@@ -338,7 +341,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                 if (!EvaluateChecks(context, container.Checks, checkResults, stageLabel, metrics))
                 {
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "策略检查失败: {Uid} {Stage} 时间={Time}",
                         context.Strategy.UidCode,
                         stageLabel,
@@ -349,7 +352,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 passCount++;
                 aggregatedResults.AddRange(checkResults);
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "策略检查通过: {Uid} {Stage} 时间={Time}",
                     context.Strategy.UidCode,
                     stageLabel,
@@ -358,7 +361,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (passCount < branch.MinPassConditionContainer)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "策略容器数量不足: {Uid} {Stage} 需要={Need} 通过={Pass}",
                     context.Strategy.UidCode,
                     stage,
@@ -367,7 +370,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "策略检查通过，执行动作: {Uid} {Stage} 时间={Time}",
                 context.Strategy.UidCode,
                 stage,
@@ -455,7 +458,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     var result = _conditionEvaluator.Evaluate(context, condition);
                     metrics?.IncrementConditionEval();
                     results.Add(result);
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "条件检查: {Uid} {Stage} 组={Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                         context.Strategy.UidCode,
                         stage,
@@ -467,7 +470,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                     if (!result.Success)
                     {
-                        _logger.LogInformation(
+                        _logger.LogDebug(
                             "必需条件失败: {Uid} {Stage} 组={Group} 方法={Method}",
                             context.Strategy.UidCode,
                             stage,
@@ -503,7 +506,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     var result = _conditionEvaluator.Evaluate(context, condition);
                     metrics?.IncrementConditionEval();
                     results.Add(result);
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "条件检查: {Uid} {Stage} 组={Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                         context.Strategy.UidCode,
                         stage,
@@ -522,7 +525,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 var pass = optionalPassCount >= group.MinPassConditions;
                 if (!pass)
                 {
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "条件组数量不足: {Uid} {Stage} 组={Group} 需要={Need} 通过={Pass}",
                         context.Strategy.UidCode,
                         stage,
@@ -564,7 +567,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 metrics?.IncrementActionExec();
                 hasEnabled = true;
                 var result = ActionMethodRegistry.Run(context, action, triggerResults);
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "动作执行: {Uid} {Stage} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                     context.Strategy.UidCode,
                     stage,
@@ -581,7 +584,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                 if (action.Required && !result.Success)
                 {
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "动作失败（必需）: {Uid} {Stage} 方法={Method}",
                         context.Strategy.UidCode,
                         stage,
@@ -602,7 +605,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (optionalSuccessCount < actions.MinPassConditions)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "动作最小通过数未达到: {Uid} {Stage} 需要={Need} 通过={Pass}",
                     context.Strategy.UidCode,
                     stage,
@@ -861,7 +864,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var normalizedTask = new MarketDataTask(exchange, symbol, timeframe, task.CandleTimestamp, task.IsBarClose);
             var indicatorTask = new IndicatorTask(normalizedTask, requestMap.Values.ToList());
             var result = _indicatorEngine.ProcessTaskNow(indicatorTask);
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "指标刷新: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Total}",
                 normalizedTask.Exchange,
                 normalizedTask.Symbol,

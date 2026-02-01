@@ -191,7 +191,33 @@ await engine.WaitForInitializationAsync();
 
 ---
 
-### 2. TryDequeueMarketTask
+### 2. SubscribeMarketTasks（推荐）
+
+创建行情任务订阅，为每个消费者提供独立通道，避免多消费者竞争读取导致丢任务。
+
+```csharp
+public MarketDataTaskSubscription SubscribeMarketTasks(string subscriberName, bool onlyBarClose = false)
+```
+
+**使用场景**：策略引擎、K 线收线监听、行情推送等需要并行消费同一行情流的场景。
+
+**说明**：
+- 每个订阅拥有独立通道，互不分流。
+- `onlyBarClose=true` 可仅接收收线任务。
+
+**示例**：
+```csharp
+var subscription = engine.SubscribeMarketTasks("StrategyEngine");
+await foreach (var task in subscription.ReadAllAsync(stoppingToken))
+{
+    var mode = task.IsBarClose ? "OnBarClose" : "OnBarUpdate";
+    Console.WriteLine($"收到任务: {task.Exchange} {task.Symbol} {task.Timeframe} {mode}");
+}
+```
+
+---
+
+### 3. TryDequeueMarketTask
 
 尝试读取一条最新行情任务（非阻塞）。
 
@@ -204,6 +230,7 @@ public bool TryDequeueMarketTask(out MarketDataTask task)
 **说明**：
 - 当没有任务时返回 `false`，不会阻塞线程
 - `task.IsBarClose` 用于区分收线与更新
+- 注意：该接口为兼容保留，多消费者同时读取会分流，推荐使用 SubscribeMarketTasks
 
 **示例**：
 ```csharp
@@ -216,7 +243,7 @@ if (engine.TryDequeueMarketTask(out var task))
 
 ---
 
-### 3. ReadMarketTaskAsync
+### 4. ReadMarketTaskAsync
 
 阻塞读取一条行情任务（用于实时策略引擎）。
 
@@ -233,13 +260,25 @@ var task = await engine.ReadMarketTaskAsync(stoppingToken);
 
 ---
 
-### 4. ReadAllMarketTasksAsync
+### 5. ReadAllMarketTasksAsync
 
 持续读取行情任务流（用于后台消费）。
 
 ```csharp
 public IAsyncEnumerable<MarketDataTask> ReadAllMarketTasksAsync(CancellationToken cancellationToken)
 ```
+
+---
+
+### 6. IsExchangeReady
+
+判断交易所行情是否就绪（至少有一根 1m K 线）。
+
+```csharp
+public bool IsExchangeReady(string exchangeKey)
+```
+
+**使用场景**：策略运行前检查交易所行情是否已就绪。
 
 **示例**：
 ```csharp
@@ -252,7 +291,7 @@ await foreach (var task in engine.ReadAllMarketTasksAsync(stoppingToken))
 
 ---
 
-### 5. GetLatestKline
+### 6. GetLatestKline
 
 获取最新的 1 根 K 线数据。
 
@@ -296,7 +335,7 @@ if (latest.HasValue)
 
 ---
 
-### 6. GetHistoryKlines
+### 7. GetHistoryKlines
 
 获取历史 K 线数据。
 
@@ -356,7 +395,7 @@ var klines2 = engine.GetHistoryKlines(
 
 ---
 
-### 7. Dispose
+### 8. Dispose
 
 释放引擎资源。
 
@@ -498,7 +537,8 @@ public class StrategyTaskConsumer : BackgroundService
     {
         await _engine.WaitForInitializationAsync();
 
-        await foreach (var task in _engine.ReadAllMarketTasksAsync(stoppingToken))
+        var subscription = _engine.SubscribeMarketTasks("StrategyTaskConsumer");
+        await foreach (var task in subscription.ReadAllAsync(stoppingToken))
         {
             var mode = task.IsBarClose ? "OnBarClose" : "OnBarUpdate";
             var timeText = MarketDataEngine.FormatTimestamp(task.CandleTimestamp);

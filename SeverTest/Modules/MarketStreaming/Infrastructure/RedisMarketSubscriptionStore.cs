@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using ServerTest.Options;
 
 namespace ServerTest.Modules.MarketStreaming.Infrastructure
@@ -12,11 +13,11 @@ namespace ServerTest.Modules.MarketStreaming.Infrastructure
         private readonly IDatabase _db;
         private readonly ILogger<RedisMarketSubscriptionStore> _logger;
         private readonly RedisKeyOptions _redisKeyOptions;
-        private readonly ConcurrentDictionary<string, HashSet<string>> _cache =
+        private ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _cache =
             new(StringComparer.Ordinal);
-        private readonly object _cacheLock = new object();
         private readonly TimeSpan _cacheTtl = TimeSpan.FromSeconds(2);
-        private DateTime _lastRefreshUtc = DateTime.MinValue;
+        private long _lastRefreshTicks = DateTime.MinValue.Ticks;
+        private int _refreshing;
 
         public RedisMarketSubscriptionStore(
             IConnectionMultiplexer redis,
@@ -140,72 +141,85 @@ namespace ServerTest.Modules.MarketStreaming.Infrastructure
 
         private void EnsureCache()
         {
-            var now = DateTime.UtcNow;
-            if (now - _lastRefreshUtc <= _cacheTtl)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            var lastTicks = Interlocked.Read(ref _lastRefreshTicks);
+            if (nowTicks - lastTicks <= _cacheTtl.Ticks)
             {
                 return;
             }
 
-            lock (_cacheLock)
+            if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0)
             {
-                if (now - _lastRefreshUtc <= _cacheTtl)
+                return;
+            }
+
+            _ = RefreshCacheFromRedisAsync();
+        }
+
+        private async Task RefreshCacheFromRedisAsync()
+        {
+            try
+            {
+                var users = await _db.SetMembersAsync(_redisKeyOptions.MarketSubUserSetKey).ConfigureAwait(false);
+                if (users.Length == 0)
                 {
+                    Interlocked.Exchange(ref _cache, new ConcurrentDictionary<string, ConcurrentDictionary<string, byte>>(StringComparer.Ordinal));
                     return;
                 }
 
-                RefreshCacheFromRedis();
-                _lastRefreshUtc = DateTime.UtcNow;
-            }
-        }
-
-        private void RefreshCacheFromRedis()
-        {
-            var users = _db.SetMembers(_redisKeyOptions.MarketSubUserSetKey);
-            if (users.Length == 0)
-            {
-                _cache.Clear();
-                return;
-            }
-
-            var batch = _db.CreateBatch();
-            var tasks = new Dictionary<string, Task<RedisValue[]>>(StringComparer.Ordinal);
-            foreach (var userValue in users)
-            {
-                var userId = userValue.ToString();
-                if (string.IsNullOrWhiteSpace(userId))
+                var batch = _db.CreateBatch();
+                var tasks = new Dictionary<string, Task<RedisValue[]>>(StringComparer.Ordinal);
+                foreach (var userValue in users)
                 {
-                    continue;
+                    var userId = userValue.ToString();
+                    if (string.IsNullOrWhiteSpace(userId))
+                    {
+                        continue;
+                    }
+
+                    tasks[userId] = batch.SetMembersAsync(BuildUserKey(userId));
                 }
 
-                tasks[userId] = batch.SetMembersAsync(BuildUserKey(userId));
-            }
+                batch.Execute();
+                await Task.WhenAll(tasks.Values).ConfigureAwait(false);
 
-            batch.Execute();
-
-            var snapshot = new ConcurrentDictionary<string, HashSet<string>>(StringComparer.Ordinal);
-            foreach (var entry in tasks)
-            {
-                var members = entry.Value.GetAwaiter().GetResult();
-                if (members.Length == 0)
+                var snapshot = new ConcurrentDictionary<string, ConcurrentDictionary<string, byte>>(StringComparer.Ordinal);
+                foreach (var entry in tasks)
                 {
-                    continue;
+                    var members = await entry.Value.ConfigureAwait(false);
+                    if (members.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var symbols = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var member in members)
+                    {
+                        var symbol = member.ToString();
+                        if (string.IsNullOrWhiteSpace(symbol))
+                        {
+                            continue;
+                        }
+
+                        symbols.TryAdd(symbol, 0);
+                    }
+
+                    if (!symbols.IsEmpty)
+                    {
+                        snapshot[entry.Key] = symbols;
+                    }
                 }
 
-                var symbols = members
-                    .Select(member => member.ToString())
-                    .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                if (symbols.Count > 0)
-                {
-                    snapshot[entry.Key] = symbols;
-                }
+                Interlocked.Exchange(ref _cache, snapshot);
             }
-
-            _cache.Clear();
-            foreach (var entry in snapshot)
+            catch (Exception ex)
             {
-                _cache[entry.Key] = entry.Value;
+                _logger.LogWarning(ex, "Redis 缓存刷新失败");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _lastRefreshTicks, DateTime.UtcNow.Ticks);
+                Interlocked.Exchange(ref _refreshing, 0);
             }
         }
 
@@ -213,12 +227,12 @@ namespace ServerTest.Modules.MarketStreaming.Infrastructure
         {
             subscriptions = Array.Empty<string>();
             EnsureCache();
-            if (!_cache.TryGetValue(userId, out var symbols) || symbols.Count == 0)
+            if (!_cache.TryGetValue(userId, out var symbols) || symbols.IsEmpty)
             {
                 return false;
             }
 
-            subscriptions = symbols.ToList();
+            subscriptions = symbols.Keys.ToList();
             return true;
         }
 
@@ -227,12 +241,12 @@ namespace ServerTest.Modules.MarketStreaming.Infrastructure
             var snapshot = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
             foreach (var entry in _cache)
             {
-                if (entry.Value.Count == 0)
+                if (entry.Value.IsEmpty)
                 {
                     continue;
                 }
 
-                snapshot[entry.Key] = entry.Value.ToList();
+                snapshot[entry.Key] = entry.Value.Keys.ToList();
             }
 
             return snapshot;
@@ -241,10 +255,10 @@ namespace ServerTest.Modules.MarketStreaming.Infrastructure
         private void UpdateCacheOnSubscribe(string userId, HashSet<string> symbols)
         {
             EnsureCache();
-            var set = _cache.GetOrAdd(userId, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            var set = _cache.GetOrAdd(userId, _ => new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase));
             foreach (var symbol in symbols)
             {
-                set.Add(symbol);
+                set.TryAdd(symbol, 0);
             }
         }
 
@@ -258,10 +272,10 @@ namespace ServerTest.Modules.MarketStreaming.Infrastructure
 
             foreach (var symbol in symbols)
             {
-                set.Remove(symbol);
+                set.TryRemove(symbol, out _);
             }
 
-            if (set.Count == 0)
+            if (set.IsEmpty)
             {
                 _cache.TryRemove(userId, out _);
             }
