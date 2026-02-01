@@ -968,7 +968,7 @@ async function fetchHistory(options: {
 }): Promise<KLineData[]> {
   const endTime = options.endTime ?? Date.now();
   const startTime = options.startTime ?? endTime - options.intervalMs * (options.count - 1);
-  const query: Record<string, string | number> = {
+  const payload = {
     exchange: options.exchange,
     timeframe: options.timeframe,
     symbol: toSymbolEnum(options.symbol),
@@ -977,7 +977,12 @@ async function fetchHistory(options: {
     endTime: formatDateTime(endTime),
   };
 
-  const data = await options.http.get<OHLCV[]>("/api/MarketData/history", query, { signal: options.signal });
+  const data = await options.http.postProtocol<OHLCV[]>(
+    "/api/marketdata/history",
+    "marketdata.kline.history",
+    payload,
+    { signal: options.signal }
+  );
   return data
     .map((item) => toKLine(item))
     .filter((bar): bar is KLineData => bar !== null)

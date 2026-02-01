@@ -1,25 +1,18 @@
-export type ApiResponse<T> = {
-  success: boolean;
-  message?: string | null;
+export type ProtocolRequest<T = unknown> = {
+  type: string;
+  reqId: string;
+  ts: number;
   data?: T | null;
-  timestamp?: string | number | null;
 };
 
-export type ErrorResponse = {
-  code: string;
-  message: string;
-  traceId?: string | null;
-};
-
-export type WsError = {
-  code: string;
-  message: string;
-};
-
-export type WsEnvelope<T = unknown> = {
+export type ProtocolEnvelope<T = unknown> = {
   type: string;
   reqId?: string | null;
   ts: number;
-  payload?: T | null;
-  err?: WsError | null;
+  code: number;
+  msg?: string | null;
+  data?: T | null;
+  traceId?: string | null;
 };
+
+export type WsEnvelope<T = unknown> = ProtocolEnvelope<T>;

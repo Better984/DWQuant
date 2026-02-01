@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clearAuthProfile, getAuthProfile, setAuthProfile } from '../auth/profileStore';
-import { clearToken, disconnectWs, getToken, HttpClient, HttpError, getNetworkConfig, getWsStatus, ensureWsConnected, onWsStatusChange } from '../network';
+import { clearToken, disconnectWs, getToken, HttpClient, HttpError, getWsStatus, ensureWsConnected, onWsStatusChange } from '../network';
 import AvatarByewind from '../assets/SnowUI/head/AvatarByewind.svg';
 import PlugsConnectedIcon from '../assets/SnowUI/icon/PlugsConnected.svg';
 import NotificationIcon from '../assets/SnowUI/icon/Notification.svg';
@@ -181,24 +181,24 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     }
   }, [notifyChannelOptions, personalNotifyChannel, systemNotifyChannel]);
 
-  // 加载头像
+  // ????
   const loadAvatar = useCallback(async () => {
     try {
-      const data = await client.get<{ avatarUrl: string | null }>('/api/media/avatar');
+      const data = await client.postProtocol<{ avatarUrl: string | null }>("/api/media/avatar/get", "media.avatar.get");
       if (data?.avatarUrl) {
         setAvatarUrl(data.avatarUrl);
-        // 更新本地存储
+        // ??????
         const profile = getAuthProfile();
         if (profile) {
           setAuthProfile({ ...profile, avatarUrl: data.avatarUrl });
         }
       }
-    } catch (err) {
-      // 忽略加载错误，使用默认头像
+    } catch {
+      // ???????????????
     }
   }, [client]);
 
-  // 页面加载时获取头像
+  // ?????????
   useEffect(() => {
     if (activeNavIndex === 0) {
       void loadAvatar();
@@ -234,71 +234,56 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     }
   }, [success, showError]);
 
-  // 处理头像文件选择
+  // ????????
   const handleAvatarSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // 验证文件类型
+    // ??????
     if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      showError('不支持的图片格式，仅支持 JPG、PNG、GIF、WebP');
+      showError("???????????? JPG?PNG?GIF?WebP");
       return;
     }
 
-    // 验证文件大小
+    // ??????
     if (file.size > MAX_AVATAR_SIZE_BYTES) {
       const maxSizeMB = MAX_AVATAR_SIZE_BYTES / 1024 / 1024;
-      showError(`图片大小不能超过 ${maxSizeMB}MB`);
+      showError(`???????? ${maxSizeMB}MB`);
       return;
     }
 
     setIsUploadingAvatar(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append("file", file);
 
-      const token = getToken();
-      const { apiBaseUrl } = getNetworkConfig();
-      const response = await fetch(`${apiBaseUrl}/api/media/avatar`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.message || '上传失败');
-      }
-
-      const result = await response.json();
-      const newAvatarUrl = result?.data?.avatarUrl;
+      const result = await client.postForm<{ avatarUrl: string }>("/api/media/avatar", "media.avatar.upload", formData);
+      const newAvatarUrl = result?.avatarUrl;
 
       if (newAvatarUrl) {
         setAvatarUrl(newAvatarUrl);
-        // 更新本地存储
+        // ??????
         const profile = getAuthProfile();
         if (profile) {
           setAuthProfile({ ...profile, avatarUrl: newAvatarUrl });
         }
-        success('头像上传成功');
+        success("??????");
       } else {
-        throw new Error('未获取到头像地址');
+        throw new Error("????????");
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '上传失败，请稍后重试';
+      const message = err instanceof Error ? err.message : "??????????";
       showError(message);
     } finally {
       setIsUploadingAvatar(false);
-      // 清空文件输入，允许重复选择同一文件
+      // ?????????????????
       if (avatarInputRef.current) {
-        avatarInputRef.current.value = '';
+        avatarInputRef.current.value = "";
       }
     }
   }, [client, showError, success]);
 
-  // 点击头像区域触发文件选择
+  // ??????????
   const handleAvatarClick = useCallback(() => {
     if (!isUploadingAvatar && avatarInputRef.current) {
       avatarInputRef.current.click();
@@ -309,10 +294,10 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     setIsLoadingKeys(true);
     setLoadError(null);
     try {
-      const data = await client.get<ExchangeApiKeyItem[]>('/api/UserExchangeApiKeys');
+      const data = await client.postProtocol<ExchangeApiKeyItem[]>("/api/userexchangeapikeys/list", "exchange.api_key.list");
       setExchangeKeys(Array.isArray(data) ? data : []);
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '获取交易所API列表失败';
+      const message = err instanceof HttpError ? err.message : "?????API????";
       setLoadError(message);
       showError(message);
     } finally {
@@ -336,47 +321,47 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     const apiPassword = formApiPassword.trim();
 
     if (!label) {
-      showError('请填写备注');
+      showError("?????");
       return;
     }
 
     if (!apiKey) {
-      showError('请填写API Key');
+      showError("???API Key");
       return;
     }
 
     if (!apiSecret) {
-      showError('请填写API Secret');
+      showError("???API Secret");
       return;
     }
 
     if (selectedExchange?.requiresPassphrase && !apiPassword) {
-      showError('该交易所需要填写Passphrase');
+      showError("????????Passphrase");
       return;
     }
 
     if (selectedCount >= MAX_KEYS_PER_EXCHANGE) {
-      showError(`每个交易所最多绑定${MAX_KEYS_PER_EXCHANGE}个API`);
+      showError(`????????? ${MAX_KEYS_PER_EXCHANGE} ?API`);
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await client.post('/api/UserExchangeApiKeys', {
+      await client.postProtocol("/api/userexchangeapikeys/create", "exchange.api_key.create", {
         exchangeType,
         label,
         apiKey,
         apiSecret,
         apiPassword: selectedExchange?.requiresPassphrase ? apiPassword : undefined,
       });
-      success('交易所API绑定成功');
-      setFormLabel('');
-      setFormApiKey('');
-      setFormApiSecret('');
-      setFormApiPassword('');
+      success("???API????");
+      setFormLabel("");
+      setFormApiKey("");
+      setFormApiSecret("");
+      setFormApiPassword("");
       await loadExchangeKeys();
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '绑定失败，请稍后重试';
+      const message = err instanceof HttpError ? err.message : "??????????";
       showError(message);
     } finally {
       setIsSubmitting(false);
@@ -386,14 +371,11 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   const handleDelete = async (id: number) => {
     setDeletingId(id);
     try {
-      await client.request({
-        method: 'DELETE',
-        path: `/api/UserExchangeApiKeys/${id}`,
-      });
-      success('交易所API解绑成功');
+      await client.postProtocol("/api/userexchangeapikeys/delete", "exchange.api_key.delete", { id });
+      success("???API????");
       await loadExchangeKeys();
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '解绑失败，请稍后重试';
+      const message = err instanceof HttpError ? err.message : "??????????";
       showError(message);
     } finally {
       setDeletingId(null);
@@ -404,10 +386,10 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     setIsLoadingNotify(true);
     setNotifyError(null);
     try {
-      const data = await client.get<NotifyChannelItem[]>('/api/UserNotifyChannels');
+      const data = await client.postProtocol<NotifyChannelItem[]>("/api/usernotifychannels/list", "notify_channel.list");
       setNotifyChannels(Array.isArray(data) ? data : []);
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '获取通知渠道失败';
+      const message = err instanceof HttpError ? err.message : "????????";
       setNotifyError(message);
       showError(message);
     } finally {
@@ -419,10 +401,10 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     setIsLoadingNotifyPreference(true);
     setNotifyPreferenceError(null);
     try {
-      const data = await client.get<NotifyPreferenceResponse>('/api/user/notification-preference');
+      const data = await client.postProtocol<NotifyPreferenceResponse>("/api/user/notification-preference/get", "notification.preference.get");
       const rules = data?.rules ?? {};
       const enabled = USER_NOTIFY_CATEGORIES.some((key) => rules[key]?.enabled ?? true);
-      let channel = 'inapp';
+      let channel = "inapp";
       for (const key of USER_NOTIFY_CATEGORIES) {
         const ruleChannel = rules[key]?.channel;
         if (ruleChannel) {
@@ -436,15 +418,15 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
       const stored = localStorage.getItem(SYSTEM_NOTIFY_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as { enabled?: boolean; channel?: string };
-        if (typeof parsed.enabled === 'boolean') {
+        if (typeof parsed.enabled === "boolean") {
           setSystemNotifyEnabled(parsed.enabled);
         }
-        if (typeof parsed.channel === 'string') {
+        if (typeof parsed.channel === "string") {
           setSystemNotifyChannel(parsed.channel);
         }
       }
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '获取通知偏好失败';
+      const message = err instanceof HttpError ? err.message : "????????";
       setNotifyPreferenceError(message);
     } finally {
       setIsLoadingNotifyPreference(false);
@@ -468,19 +450,15 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
           channel: personalNotifyChannel,
         };
       });
-      await client.request({
-        method: 'PUT',
-        path: '/api/user/notification-preference',
-        body: { rules },
-      });
+      await client.postProtocol("/api/user/notification-preference/update", "notification.preference.update", { rules });
 
       localStorage.setItem(
         SYSTEM_NOTIFY_STORAGE_KEY,
         JSON.stringify({ enabled: systemNotifyEnabled, channel: systemNotifyChannel })
       );
-      success('通知偏好已保存');
+      success("???????");
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '保存通知偏好失败';
+      const message = err instanceof HttpError ? err.message : "????????";
       showError(message);
     } finally {
       setIsSavingNotifyPreference(false);
@@ -495,28 +473,28 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     const secret = notifySecret.trim();
 
     if (!address) {
-      showError('请输入通知地址');
+      showError("???????");
       return;
     }
 
     if (selectedNotifyPlatform?.requiresSecret && !secret) {
-      showError('该平台需要填写密钥');
+      showError("?????????");
       return;
     }
 
     setIsNotifySubmitting(true);
     try {
-      await client.post('/api/UserNotifyChannels', {
+      await client.postProtocol("/api/usernotifychannels/upsert", "notify_channel.upsert", {
         platform,
         address,
         secret: secret || undefined,
       });
-      success('通知渠道绑定成功');
-      setNotifyAddress('');
-      setNotifySecret('');
+      success("????????");
+      setNotifyAddress("");
+      setNotifySecret("");
       await loadNotifyChannels();
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '绑定失败，请稍后重试';
+      const message = err instanceof HttpError ? err.message : "??????????";
       showError(message);
     } finally {
       setIsNotifySubmitting(false);
@@ -526,14 +504,11 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   const handleNotifyDelete = async (platform: string) => {
     setDeletingPlatform(platform);
     try {
-      await client.request({
-        method: 'DELETE',
-        path: `/api/UserNotifyChannels/${platform}`,
-      });
-      success('通知渠道解绑成功');
+      await client.postProtocol("/api/usernotifychannels/delete", "notify_channel.delete", { platform });
+      success("????????");
       await loadNotifyChannels();
     } catch (err) {
-      const message = err instanceof HttpError ? err.message : '解绑失败，请稍后重试';
+      const message = err instanceof HttpError ? err.message : "??????????";
       showError(message);
     } finally {
       setDeletingPlatform(null);

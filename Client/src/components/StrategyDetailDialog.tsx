@@ -734,7 +734,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                 <div>
                   <div className="strategy-detail-positions-title">仓位历史</div>
                   <div className="strategy-detail-positions-hint">
-                    协议请求：GET /api/positions/by-strategy?usId={strategy.usId}&status=all
+                    协议请求：POST /api/positions/by-strategy（type=position.list.by_strategy）
                   </div>
                 </div>
                 <div className="strategy-detail-positions-actions">

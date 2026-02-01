@@ -456,7 +456,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     let isActive = true;
     const loadExchangeApiKeys = async () => {
       try {
-        const data = await client.get<ExchangeApiKeyItem[]>('/api/UserExchangeApiKeys');
+        const data = await client.postProtocol<ExchangeApiKeyItem[]>('/api/userexchangeapikeys/list', 'exchange.api_key.list');
         if (!isActive) {
           return;
         }

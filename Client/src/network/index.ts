@@ -5,4 +5,4 @@ export { ensureWsConnected, getWsStatus, onWsStatusChange, disconnectWs, getWsCl
 export { subscribeMarket } from "./marketStream";
 export { notifyAuthExpired, onAuthExpired } from "./authEvents";
 export { getToken, setToken, clearToken } from "./tokenStore";
-export type { ApiResponse, ErrorResponse, WsEnvelope, WsError } from "./types";
+export type { ProtocolEnvelope, ProtocolRequest, WsEnvelope } from "./types";

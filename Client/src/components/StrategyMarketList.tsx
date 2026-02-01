@@ -33,7 +33,7 @@ const StrategyMarketList: React.FC = () => {
   const fetchRecords = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await client.get<StrategyMarketRecord[]>('/api/strategy/market/list');
+      const data = await client.postProtocol<StrategyMarketRecord[]>('/api/strategy/market/list', 'strategy.market.list');
       setRecords(Array.isArray(data) ? data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : '获取策略广场失败';

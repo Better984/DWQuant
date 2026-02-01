@@ -36,7 +36,7 @@ const TemplateStrategyList: React.FC = () => {
   const fetchRecords = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await client.get<StrategyCatalogRecord[]>('/api/strategy/template/list');
+      const data = await client.postProtocol<StrategyCatalogRecord[]>('/api/strategy/template/list', 'strategy.template.list');
       setRecords(Array.isArray(data) ? data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : '获取策略模板失败';

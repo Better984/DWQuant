@@ -52,7 +52,7 @@ export function subscribeMarket(symbols: string[], listener: MarketListener): ()
         getWsClient().send("market.subscribe", { symbols: newlyAdded });
       })
       .catch(() => {
-        // Connection handling is centralized; ignore here.
+        // 连接处理由统一逻辑负责，此处忽略
       });
   }
 
@@ -76,14 +76,14 @@ export function subscribeMarket(symbols: string[], listener: MarketListener): ()
           getWsClient().send("market.unsubscribe", { symbols: removed });
         })
         .catch(() => {
-          // Connection handling is centralized; ignore here.
+          // 连接处理由统一逻辑负责，此处忽略
         });
     }
   };
 }
 
 function handleTick(message: WsEnvelope<unknown>): void {
-  const ticks = parseTicks(message.payload);
+  const ticks = parseTicks(message.data);
   if (ticks.length === 0) {
     return;
   }

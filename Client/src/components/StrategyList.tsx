@@ -139,7 +139,7 @@ const StrategyList: React.FC = () => {
   const fetchStrategies = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await client.get<StrategyListRecord[]>('/api/strategy/list');
+      const data = await client.postProtocol<StrategyListRecord[]>('/api/strategy/list', 'strategy.list');
       setRecords(Array.isArray(data) ? data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : '获取策略列表失败';
@@ -179,7 +179,7 @@ const StrategyList: React.FC = () => {
   };
 
   const fetchOpenPositionsCount = async (usId: number) => {
-    const data = await client.get<PositionListResponse>('/api/positions/by-strategy', {
+    const data = await client.postProtocol<PositionListResponse>('/api/positions/by-strategy', 'position.list.by_strategy', {
       usId,
       status: 'Open',
     });
@@ -188,7 +188,7 @@ const StrategyList: React.FC = () => {
   };
 
   const fetchStrategyPositions = async (usId: number) => {
-    const data = await client.get<PositionListResponse>('/api/positions/by-strategy', {
+    const data = await client.postProtocol<PositionListResponse>('/api/positions/by-strategy', 'position.list.by_strategy', {
       usId,
       status: 'all',
     });
@@ -196,7 +196,7 @@ const StrategyList: React.FC = () => {
   };
 
   const closeStrategyPositions = async (usId: number) => {
-    await client.post('/api/positions/close-by-strategy', { usId });
+    await client.postProtocol('/api/positions/close-by-strategy', 'position.close.by_strategy', { usId });
     await fetchStrategies();
   };
 
@@ -210,7 +210,7 @@ const StrategyList: React.FC = () => {
     setIsHistoryLoading(true);
 
     try {
-      const data = await client.get<StrategyHistoryVersion[]>('/api/strategy/versions', { usId });
+      const data = await client.postProtocol<StrategyHistoryVersion[]>('/api/strategy/versions', 'strategy.versions', { usId });
       const versions = Array.isArray(data) ? data : [];
       setHistoryVersions(versions);
       const pinnedVersion = versions.find((item) => item.isPinned);
@@ -239,7 +239,7 @@ const StrategyList: React.FC = () => {
   };
 
   const handleCreateShare = async (usId: number, payload: SharePolicyPayload) => {
-    const data = await client.post<{ shareCode: string }>('/api/strategy/share/create-code', {
+    const data = await client.postProtocol<{ shareCode: string }>('/api/strategy/share/create-code', 'strategy.share.create', {
       usId,
       policy: payload,
     });
@@ -250,51 +250,50 @@ const StrategyList: React.FC = () => {
     usId: number,
     status: 'running' | 'paused' | 'paused_open_position' | 'completed',
   ) => {
-    await client.request({
-      method: 'PATCH',
-      path: `/api/strategy/instances/${usId}/state`,
-      body: { state: status },
+    await client.postProtocol('/api/strategy/instances/state', 'strategy.instance.state.update', {
+      id: usId,
+      state: status,
     });
     await fetchStrategies();
   };
 
   const handlePublishOfficial = async (usId: number) => {
-    await client.post('/api/strategy/publish/official', { usId });
+    await client.postProtocol('/api/strategy/publish/official', 'strategy.official.publish', { usId });
     await fetchStrategies();
   };
 
   const handlePublishTemplate = async (usId: number) => {
-    await client.post('/api/strategy/publish/template', { usId });
+    await client.postProtocol('/api/strategy/publish/template', 'strategy.template.publish', { usId });
     await fetchStrategies();
   };
 
   const handlePublishMarket = async (usId: number) => {
-    await client.post('/api/strategy/market/publish', { usId });
+    await client.postProtocol('/api/strategy/market/publish', 'strategy.market.publish', { usId });
     await fetchStrategies();
   };
 
   const handleSyncOfficial = async (usId: number) => {
-    await client.post('/api/strategy/official/sync', { usId });
+    await client.postProtocol('/api/strategy/official/sync', 'strategy.official.sync', { usId });
     await fetchStrategies();
   };
 
   const handleSyncTemplate = async (usId: number) => {
-    await client.post('/api/strategy/template/sync', { usId });
+    await client.postProtocol('/api/strategy/template/sync', 'strategy.template.sync', { usId });
     await fetchStrategies();
   };
 
   const handleSyncMarket = async (usId: number) => {
-    await client.post('/api/strategy/market/sync', { usId });
+    await client.postProtocol('/api/strategy/market/sync', 'strategy.market.sync', { usId });
     await fetchStrategies();
   };
 
   const handleRemoveOfficial = async (usId: number) => {
-    await client.post('/api/strategy/official/remove', { usId });
+    await client.postProtocol('/api/strategy/official/remove', 'strategy.official.remove', { usId });
     await fetchStrategies();
   };
 
   const handleRemoveTemplate = async (usId: number) => {
-    await client.post('/api/strategy/template/remove', { usId });
+    await client.postProtocol('/api/strategy/template/remove', 'strategy.template.remove', { usId });
     await fetchStrategies();
   };
 
@@ -321,7 +320,7 @@ const StrategyList: React.FC = () => {
   };
 
   const handleImportShare = async (payload: { shareCode: string; aliasName?: string }) => {
-    await client.post('/api/strategy/import/share-code', payload);
+    await client.postProtocol('/api/strategy/import/share-code', 'strategy.share.import', payload);
     await fetchStrategies();
   };
 
@@ -353,7 +352,7 @@ const StrategyList: React.FC = () => {
     }
     setIsDeleting(true);
     try {
-      await client.post('/api/strategy/delete', { usId: deleteTarget.usId });
+      await client.postProtocol('/api/strategy/delete', 'strategy.delete', { usId: deleteTarget.usId });
       showSuccess('策略删除成功');
       if (historyStrategy?.usId === deleteTarget.usId) {
         closeHistory();
@@ -377,7 +376,7 @@ const StrategyList: React.FC = () => {
     if (!activeStrategy) {
       throw new Error('未选择策略');
     }
-    await client.post('/api/strategy/update', {
+    await client.postProtocol('/api/strategy/update', 'strategy.update', {
       usId: activeStrategy.usId,
       configJson: payload.configJson,
       changelog: '',
@@ -506,7 +505,7 @@ const StrategyList: React.FC = () => {
             onClose={closeDetailDialog}
             onCreateVersion={handleCreateVersion}
             onViewHistory={async (usId: number) => {
-              const data = await client.get<StrategyHistoryVersion[]>('/api/strategy/versions', { usId });
+              const data = await client.postProtocol<StrategyHistoryVersion[]>('/api/strategy/versions', 'strategy.versions', { usId });
               return Array.isArray(data) ? data : [];
             }}
             onCreateShare={handleCreateShare}

@@ -54,7 +54,7 @@ const OfficialStrategyList: React.FC = () => {
   const fetchRecords = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await client.get<StrategyCatalogRecord[]>('/api/strategy/official/list');
+      const data = await client.postProtocol<StrategyCatalogRecord[]>('/api/strategy/official/list', 'strategy.official.list');
       setRecords(Array.isArray(data) ? data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : '获取官方策略失败';
@@ -84,7 +84,7 @@ const OfficialStrategyList: React.FC = () => {
   };
 
   const handleViewHistory = async (defId: number) => {
-    const data = await client.get<StrategyHistoryVersion[]>('/api/strategy/official/versions', { defId });
+    const data = await client.postProtocol<StrategyHistoryVersion[]>('/api/strategy/official/versions', 'strategy.official.versions', { defId });
     return Array.isArray(data) ? data : [];
   };
 

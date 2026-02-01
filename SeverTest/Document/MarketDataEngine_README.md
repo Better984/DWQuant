@@ -540,7 +540,7 @@ public class StrategyTaskConsumer : BackgroundService
 
 ### 缓存配置
 
-- `CacheHistoryLength`：每个周期缓存的历史数据长度，默认 2000 根
+- `CacheHistoryLength`：每个周期缓存的历史数据长度，默认 2000 根（对应配置 `MarketDataQuery:CacheHistoryLength`）
 
 ---
 

@@ -65,7 +65,7 @@ const StrategyRecommend: React.FC = () => {
   const fetchOfficial = useCallback(async () => {
     setLoadingOfficial(true);
     try {
-      const data = await client.get<OfficialRecord[]>('/api/strategy/official/list');
+      const data = await client.postProtocol<OfficialRecord[]>('/api/strategy/official/list', 'strategy.official.list');
       setOfficial(Array.isArray(data) ? data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : '获取官方策略失败';
@@ -78,7 +78,7 @@ const StrategyRecommend: React.FC = () => {
   const fetchMarket = useCallback(async () => {
     setLoadingMarket(true);
     try {
-      const data = await client.get<MarketRecord[]>('/api/strategy/market/list');
+      const data = await client.postProtocol<MarketRecord[]>('/api/strategy/market/list', 'strategy.market.list');
       setMarket(Array.isArray(data) ? data : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : '获取策略广场失败';

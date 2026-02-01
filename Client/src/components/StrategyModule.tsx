@@ -38,7 +38,7 @@ const StrategyModule: React.FC = () => {
   };
 
   const handleCreateStrategy = async (payload: StrategyEditorSubmitPayload) => {
-    await client.post('/api/strategy/create', {
+    await client.postProtocol('/api/strategy/create', 'strategy.create', {
       name: payload.name,
       description: payload.description,
       aliasName: payload.name,

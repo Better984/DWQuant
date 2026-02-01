@@ -1,7 +1,8 @@
 import { buildWsUrl, getNetworkConfig } from "./config";
 import { clearToken } from "./tokenStore";
 import { notifyAuthExpired } from "./authEvents";
-import type { WsEnvelope } from "./types";
+import { generateReqId } from "./requestId";
+import type { ProtocolRequest, WsEnvelope } from "./types";
 
 export type WsClientOptions = {
   baseUrl?: string;
@@ -60,7 +61,7 @@ export class WsClient {
     this.pongTimeoutMs = options.pongTimeoutMs ?? 5000;
     // 固定重连间隔为 5 秒，可通过 options 覆盖
     this.reconnectDelayMs = options.reconnectDelayMs ?? 5000;
-    // 最大重连次数默认为 3 次
+    // 最大重连次数默认 3 次
     this.maxReconnectAttempts = options.reconnectMaxAttempts ?? 3;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10000;
     this.onOpen = options.onOpen;
@@ -96,19 +97,19 @@ export class WsClient {
 
         socket.addEventListener("error", (event) => {
           this.onError?.(event);
-          reject(new Error("WebSocket error"));
+          reject(new Error("WebSocket 连接错误"));
         });
 
         socket.addEventListener("close", () => {
           this.stopPing();
-          this.rejectAllPending(new Error("WebSocket closed"));
+          this.rejectAllPending(new Error("WebSocket 已关闭"));
           this.onClose?.();
           if (!this.manuallyClosed) {
             this.scheduleReconnect();
           }
         });
       } catch (error) {
-        reject(error instanceof Error ? error : new Error("WebSocket error"));
+        reject(error instanceof Error ? error : new Error("WebSocket 连接错误"));
       }
     });
   }
@@ -119,7 +120,7 @@ export class WsClient {
     this.reconnectAttempts = 0;
     this.stopPing();
     this.clearPongTimeout();
-    this.rejectAllPending(new Error("WebSocket closed"));
+    this.rejectAllPending(new Error("WebSocket 已关闭"));
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.close(1000, "client_close");
     }
@@ -132,15 +133,15 @@ export class WsClient {
 
   send(type: string, payload?: unknown, reqId?: string): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("WebSocket is not connected");
+      throw new Error("WebSocket 未连接");
     }
 
-    const envelope: WsEnvelope = {
+    const requestId = reqId ?? generateReqId();
+    const envelope: ProtocolRequest = {
       type,
-      reqId: reqId ?? null,
+      reqId: requestId,
       ts: Date.now(),
-      payload: payload ?? null,
-      err: null,
+      data: payload ?? null,
     };
 
     this.socket.send(JSON.stringify(envelope));
@@ -151,7 +152,7 @@ export class WsClient {
     return new Promise((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error("WebSocket request timeout"));
+        reject(new Error("WebSocket 请求超时"));
       }, this.requestTimeoutMs);
 
       this.pending.set(requestId, {
@@ -165,7 +166,7 @@ export class WsClient {
       } catch (error) {
         window.clearTimeout(timeoutId);
         this.pending.delete(requestId);
-        reject(error instanceof Error ? error : new Error("WebSocket send failed"));
+        reject(error instanceof Error ? error : new Error("WebSocket 发送失败"));
       }
     });
   }
@@ -218,8 +219,9 @@ export class WsClient {
     }
 
     if (message.type === "error") {
-      const code = message.err?.code;
-      if (code === "unauthorized" || code === "forbidden" || code === "token_expired") {
+      // 后端错误响应使用 code 字段（数字），根据协议文档处理鉴权相关错误
+      const code = message.code;
+      if (code === 2000 || code === 2001 || code === 2002) {
         clearToken();
         notifyAuthExpired();
         return;
@@ -231,7 +233,11 @@ export class WsClient {
       if (pending) {
         window.clearTimeout(pending.timeoutId);
         this.pending.delete(message.reqId);
-        pending.resolve(message);
+        if (message.code && message.code !== 0) {
+          pending.reject(new Error(message.msg ?? "请求失败"));
+        } else {
+          pending.resolve(message);
+        }
       }
       return;
     }
@@ -263,7 +269,7 @@ export class WsClient {
       }
       this.awaitingPong = true;
       this.schedulePongTimeout();
-      this.send("ping", null, generateReqId());
+      this.send("ping", null);
     }, this.pingIntervalMs);
   }
 
@@ -292,7 +298,7 @@ export class WsClient {
       this.reconnectTimer = null;
       this.connect()
         .then(() => {
-          // 成功逻辑在 open 事件中处理
+          // 成功逻辑已在 open 事件中处理
         })
         .catch(() => {
           this.scheduleReconnect();
@@ -341,11 +347,4 @@ function dispatchWsPopup(detail: WsPopupDetail): void {
     return;
   }
   window.dispatchEvent(new CustomEvent<WsPopupDetail>("ws-popup", { detail }));
-}
-
-function generateReqId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

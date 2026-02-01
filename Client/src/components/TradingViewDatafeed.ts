@@ -118,11 +118,11 @@ export class TradingViewDatafeed {
     onResolve: (symbolInfo: unknown) => void,
     onError: (reason: string) => void
   ): void {
-    console.info("[TV] resolveSymbol request:", symbolName);
+    console.info("[TV] 解析请求:", symbolName);
     const found = this.symbols.find((symbol) => symbol.name === symbolName || symbol.ticker === symbolName);
     if (!found) {
-      console.warn("[TV] resolveSymbol not found:", symbolName);
-      onError("Symbol not found");
+      console.warn("[TV] 未找到交易对:", symbolName);
+      onError("未找到交易对");
       return;
     }
 
@@ -145,7 +145,7 @@ export class TradingViewDatafeed {
     };
 
     setTimeout(() => {
-      console.info("[TV] resolveSymbol resolved:", symbolInfo);
+      console.info("[TV] 解析完成:", symbolInfo);
       onResolve(symbolInfo);
     }, 0);
   }
@@ -159,22 +159,22 @@ export class TradingViewDatafeed {
   ): Promise<void> {
     const parsed = parseSymbolName(symbolInfo.name);
     if (!parsed) {
-      console.warn("[TV] getBars invalid symbol:", symbolInfo.name);
+      console.warn("[TV] 获取K线失败，交易对无效:", symbolInfo.name);
       onResult([], { noData: true });
       return;
     }
 
     const timeframe = RESOLUTION_TO_TIMEFRAME[resolution];
     if (!timeframe) {
-      console.warn("[TV] getBars unsupported resolution:", resolution);
-      onError("Unsupported resolution");
+      console.warn("[TV] 获取K线失败，不支持的周期:", resolution);
+      onError("不支持的周期");
       return;
     }
 
     const startMs = periodParams.from * 1000;
     const endMs = periodParams.to * 1000;
     const count = resolveCount(startMs, endMs, resolution);
-    console.info("[TV] getBars request:", {
+    console.info("[TV] 获取K线请求:", {
       symbol: parsed.symbol,
       exchange: parsed.exchange,
       resolution,
@@ -184,7 +184,7 @@ export class TradingViewDatafeed {
       count,
     });
 
-    const query: Record<string, string | number> = {
+    const payload: Record<string, string | number> = {
       exchange: parsed.exchange,
       timeframe,
       symbol: toSymbolEnum(parsed.symbol),
@@ -192,15 +192,15 @@ export class TradingViewDatafeed {
     };
 
     if (Number.isFinite(startMs) && startMs > 0) {
-      query.startTime = formatDateTime(startMs);
+      payload.startTime = formatDateTime(startMs);
     }
     if (Number.isFinite(endMs) && endMs > 0) {
-      query.endTime = formatDateTime(endMs);
+      payload.endTime = formatDateTime(endMs);
     }
 
     try {
-      const data = await this.http.get<OHLCV[]>("/api/MarketData/history", query);
-      console.info("[TV] getBars response:", {
+      const data = await this.http.postProtocol<OHLCV[]>("/api/marketdata/history", "marketdata.kline.history", payload);
+      console.info("[TV] 获取K线响应:", {
         symbol: parsed.symbol,
         exchange: parsed.exchange,
         count: data.length,
@@ -214,11 +214,11 @@ export class TradingViewDatafeed {
         this.lastBars.set(lastBarKey, bars[bars.length - 1]);
       }
 
-      console.info("[TV] getBars onResult:", { bars: bars.length, noData: bars.length === 0 });
+      console.info("[TV] 获取K线结果:", { bars: bars.length, noData: bars.length === 0 });
       onResult(bars, { noData: bars.length === 0 });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load history";
-      console.error("[TV] getBars error:", message);
+      const message = error instanceof Error ? error.message : "历史K线加载失败";
+      console.error("[TV] 获取K线异常:", message);
       onError(message);
     }
   }
@@ -231,11 +231,11 @@ export class TradingViewDatafeed {
   ): void {
     const parsed = parseSymbolName(symbolInfo.name);
     if (!parsed) {
-      console.warn("[TV] subscribeBars invalid symbol:", symbolInfo.name);
+      console.warn("[TV] 订阅行情失败，交易对无效:", symbolInfo.name);
       return;
     }
 
-    console.info("[TV] subscribeBars:", {
+    console.info("[TV] 订阅行情:", {
       uid: subscriberUID,
       symbol: parsed.symbol,
       exchange: parsed.exchange,
@@ -243,7 +243,7 @@ export class TradingViewDatafeed {
     });
     const unsubscribe = subscribeMarket([parsed.symbol], (ticks) => {
       if (ticks.length > 0) {
-        // console.info("[TV] realtime ticks:", ticks.slice(0, 3));
+        // console.info("[TV] 实时行情:", ticks.slice(0, 3));
       }
       for (const tick of ticks) {
         if (tick.symbol !== parsed.symbol) {
@@ -251,7 +251,7 @@ export class TradingViewDatafeed {
         }
         const bar = this.updateBar(parsed.exchange, parsed.symbol, resolution, tick.price, tick.ts);
         if (bar) {
-          console.info("[TV] realtime bar:", bar);
+          console.info("[TV] 实时K线:", bar);
           onRealtimeCallback(bar);
         }
       }

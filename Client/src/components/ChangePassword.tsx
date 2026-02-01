@@ -1,28 +1,23 @@
-import React, { useState, useMemo } from 'react';
-import { HttpClient } from '../network/httpClient';
-import { getAuthProfile } from '../auth/profileStore';
-import { getToken } from '../network';
-import Button from './ui/Button';
-import { useNotification } from './ui';
-import './ChangePassword.css';
-
-type ChangePasswordResponse = {
-  status?: string;
-  message?: string;
-};
+import React, { useMemo, useState } from "react";
+import { HttpClient } from "../network/httpClient";
+import { getAuthProfile } from "../auth/profileStore";
+import { getToken } from "../network";
+import Button from "./ui/Button";
+import { useNotification } from "./ui";
+import "./ChangePassword.css";
 
 const ChangePassword: React.FC = () => {
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const client = useMemo(() => new HttpClient(), []);
+  const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
   const profile = getAuthProfile();
   const { success, error: showError } = useNotification();
 
   const validatePassword = (password: string): string | null => {
     if (password.length < 6) {
-      return '密码长度至少为6位';
+      return "密码长度至少为6位";
     }
     return null;
   };
@@ -30,54 +25,47 @@ const ChangePassword: React.FC = () => {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    // 验证输入
-    if (!oldPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
-      showError('请填写所有字段');
+    if (!profile?.email) {
+      showError("账户信息缺失，请重新登录");
       return;
     }
 
-    // 验证新密码强度
+    if (!oldPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
+      showError("请填写所有字段");
+      return;
+    }
+
     const passwordError = validatePassword(newPassword);
     if (passwordError) {
       showError(passwordError);
       return;
     }
 
-    // 验证两次新密码是否一致
     if (newPassword !== confirmPassword) {
-      showError('两次输入的新密码不一致');
+      showError("两次输入的新密码不一致");
       return;
     }
 
-    // 验证新旧密码不能相同
     if (oldPassword === newPassword) {
-      showError('新密码不能与原密码相同');
+      showError("新密码不能与原密码相同");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // 设置 token provider
-      client.setTokenProvider(() => getToken());
-
-      const response = await client.post<ChangePasswordResponse>('/api/auth/change-password', {
-        email: profile?.email || '',
-        oldPassword: oldPassword,
-        newPassword: newPassword,
+      await client.postProtocol("/api/auth/change-password", "auth.password.change", {
+        email: profile.email,
+        oldPassword,
+        newPassword,
       });
 
-      if (response?.status !== 'success') {
-        throw new Error(response?.message || '修改密码失败');
-      }
-
-      success('密码修改成功');
-      // 清空表单
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      success("密码修改成功");
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
     } catch (err) {
-      const message = err instanceof Error ? err.message : '修改密码失败，请稍后重试';
+      const message = err instanceof Error ? err.message : "修改密码失败，请稍后重试";
       showError(message);
     } finally {
       setIsSubmitting(false);
@@ -138,7 +126,7 @@ const ChangePassword: React.FC = () => {
             className="change-password-submit-btn"
             disabled={isSubmitting}
           >
-            {isSubmitting ? '修改中...' : '确认修改'}
+            {isSubmitting ? "修改中..." : "确认修改"}
           </Button>
         </form>
       </div>
