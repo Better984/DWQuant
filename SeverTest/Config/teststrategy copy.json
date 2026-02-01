@@ -3,7 +3,7 @@
     "exchange": "Bitget",
     "symbol": "BTC/USDT",
     "timeframeSec": 60,
-    "positionMode": "LongShort",
+    "positionMode": "Cross",
     "openConflictPolicy": "GiveUp",
     "sizing": {
       "orderQty": 0.001,

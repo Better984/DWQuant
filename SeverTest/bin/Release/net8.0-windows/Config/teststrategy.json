@@ -3,7 +3,7 @@
     "usId": 9001001,
     "uid": 10004,
     "defId": 30021,
-    "aliasName": "BTC 1m Ç÷ÊÆ²ßÂÔ£¨ÎÒµÄÊµÀý£©",
+    "aliasName": "BTC 1m æµ‹è¯•ç­–ç•¥ï¼Œæˆ‘çš„å®žç›˜ç­–ç•¥",
     "description": "",
     "state": "running",
     "visibility": "private",
@@ -16,7 +16,7 @@
   "definition": {
     "defId": 30021,
     "defType": "custom",
-    "name": "ÎÒµÄ½»Ò×²ßÂÔ",
+    "name": "æˆ‘çš„äº¤æ˜“ç­–ç•¥",
     "description": "",
     "creatorUid": 10004
   },
@@ -30,7 +30,7 @@
         "exchange": "Bitget",
         "symbol": "BTC/USDT",
         "timeframeSec": 60,
-        "positionMode": "LongShort",
+        "positionMode": "Cross",
         "openConflictPolicy": "GiveUp",
         "sizing": {
           "orderQty": 0.001,

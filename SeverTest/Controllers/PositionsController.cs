@@ -13,15 +13,18 @@ namespace ServerTest.Controllers
     {
         private readonly StrategyPositionRepository _positionRepository;
         private readonly AuthTokenService _tokenService;
+        private readonly StrategyPositionCloseService _closeService;
 
         public PositionsController(
             ILogger<PositionsController> logger,
             StrategyPositionRepository positionRepository,
-            AuthTokenService tokenService)
+            AuthTokenService tokenService,
+            StrategyPositionCloseService closeService)
             : base(logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
             _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
+            _closeService = closeService ?? throw new ArgumentNullException(nameof(closeService));
         }
 
         [HttpGet]
@@ -75,6 +78,27 @@ namespace ServerTest.Controllers
             };
 
             return Ok(ApiResponse<PositionListResponse>.Ok(response));
+        }
+
+        [HttpPost("close-by-strategy")]
+        public async Task<IActionResult> CloseByStrategy([FromBody] PositionCloseByStrategyRequest request)
+        {
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (request.UsId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的策略实例"));
+            }
+
+            var result = await _closeService
+                .CloseByStrategyAsync(uid.Value, request.UsId, HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
+            return Ok(ApiResponse<StrategyClosePositionsResult>.Ok(result));
         }
 
         private async Task<long?> GetUserIdAsync()
@@ -171,5 +195,10 @@ namespace ServerTest.Controllers
         public string? From { get; set; }
         public string? To { get; set; }
         public string? Status { get; set; } = "all";
+    }
+
+    public sealed class PositionCloseByStrategyRequest
+    {
+        public long UsId { get; set; }
     }
 }

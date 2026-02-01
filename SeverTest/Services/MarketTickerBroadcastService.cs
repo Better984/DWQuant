@@ -48,7 +48,7 @@ namespace ServerTest.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Market ticker broadcast loop failed");
+                    _logger.LogError(ex, "行情广播循环失败");
                 }
             }
         }
@@ -211,7 +211,7 @@ namespace ServerTest.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to send market tick to user {UserId}", connection.UserId);
+                _logger.LogWarning(ex, "发送行情数据到用户失败: {UserId}", connection.UserId);
             }
         }
     }

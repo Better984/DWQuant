@@ -26,11 +26,13 @@ import type {
   ValueOption,
 } from './StrategyModule.types';
 import { Dialog, useNotification } from './ui';
+import { HttpClient, getToken } from '../network';
 
 export type StrategyEditorSubmitPayload = {
   name: string;
   description: string;
   configJson: StrategyConfig;
+  exchangeApiKeyId?: number | null;
 };
 
 type StrategyEditorFlowProps = {
@@ -43,7 +45,9 @@ type StrategyEditorFlowProps = {
   initialDescription?: string;
   initialTradeConfig?: StrategyTradeConfig;
   initialConfig?: StrategyConfig;
+  initialExchangeApiKeyId?: number | null;
   disableMetaFields?: boolean;
+  openConfigDirectly?: boolean;
 };
 
 type IndicatorDialogMode = 'create' | 'edit';
@@ -60,6 +64,12 @@ type IndicatorActionState = {
   action: 'edit' | 'remove';
   indicator: GeneratedIndicatorPayload;
   usages: IndicatorUsageItem[];
+};
+
+type ExchangeApiKeyItem = {
+  id: number;
+  exchangeType: string;
+  label: string;
 };
 
 const KLINE_FIELD_DEFINITIONS = [
@@ -98,7 +108,7 @@ const createDefaultTradeConfig = (): StrategyTradeConfig => ({
   exchange: 'bitget',
   symbol: 'BTC/USDT',
   timeframeSec: 60,
-  positionMode: 'LongShort',
+  positionMode: 'Cross',
   openConflictPolicy: 'GiveUp',
   sizing: {
     orderQty: 0.001,
@@ -116,6 +126,23 @@ const createDefaultTradeConfig = (): StrategyTradeConfig => ({
   },
 });
 
+const normalizePositionMode = (raw?: string) => {
+  const value = (raw || '').trim().toLowerCase();
+  if (!value) {
+    return '';
+  }
+  if (value.includes('cross') || value === '全仓') {
+    return 'Cross';
+  }
+  if (value.includes('isolated') || value.includes('isolate') || value === '逐仓') {
+    return 'Isolated';
+  }
+  if (value.includes('longshort') || value.includes('hedge')) {
+    return 'Cross';
+  }
+  return raw || '';
+};
+
 const mergeTradeConfig = (initial?: StrategyTradeConfig): StrategyTradeConfig => {
   const defaults = createDefaultTradeConfig();
   if (!initial) {
@@ -125,6 +152,7 @@ const mergeTradeConfig = (initial?: StrategyTradeConfig): StrategyTradeConfig =>
   return {
     ...defaults,
     ...initial,
+    positionMode: normalizePositionMode(initial.positionMode) || defaults.positionMode,
     sizing: {
       ...defaults.sizing,
       ...initial.sizing,
@@ -322,8 +350,11 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   initialDescription,
   initialTradeConfig,
   initialConfig,
+  initialExchangeApiKeyId = null,
   disableMetaFields = false,
+  openConfigDirectly = false,
 }) => {
+  const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
   const [isIndicatorGeneratorOpen, setIsIndicatorGeneratorOpen] = useState(false);
   const [indicatorDialogMode, setIndicatorDialogMode] = useState<IndicatorDialogMode>('create');
   const [editingIndicator, setEditingIndicator] = useState<GeneratedIndicatorPayload | null>(null);
@@ -365,6 +396,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const [tradeConfig, setTradeConfig] = useState<StrategyTradeConfig>(() => 
     mergeTradeConfig(initialConfig?.trade || initialTradeConfig)
   );
+  const [exchangeApiKeys, setExchangeApiKeys] = useState<ExchangeApiKeyItem[]>([]);
+  const [selectedExchangeApiKeyId, setSelectedExchangeApiKeyId] = useState<number | null>(
+    initialExchangeApiKeyId,
+  );
+  const [showExchangeApiKeySelector, setShowExchangeApiKeySelector] = useState(false);
+  const [isApiKeyLoaded, setIsApiKeyLoaded] = useState(false);
   const [isConditionModalOpen, setIsConditionModalOpen] = useState(false);
   const [conditionDraft, setConditionDraft] = useState<ConditionItem | null>(null);
   const [conditionEditTarget, setConditionEditTarget] = useState<ConditionEditTarget | null>(null);
@@ -410,6 +447,80 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   }, [timeframeOptions]);
 
   const leverageOptions = [10, 20, 50, 100];
+  const positionModeOptions: TradeOption[] = [
+    { value: 'Cross', label: '全仓' },
+    { value: 'Isolated', label: '逐仓' },
+  ];
+
+  useEffect(() => {
+    let isActive = true;
+    const loadExchangeApiKeys = async () => {
+      try {
+        const data = await client.get<ExchangeApiKeyItem[]>('/api/UserExchangeApiKeys');
+        if (!isActive) {
+          return;
+        }
+        setExchangeApiKeys(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (isActive) {
+          error('获取交易所API失败');
+        }
+      } finally {
+        if (isActive) {
+          setIsApiKeyLoaded(true);
+        }
+      }
+    };
+
+    loadExchangeApiKeys();
+    return () => {
+      isActive = false;
+    };
+  }, [client, error]);
+
+  const exchangeApiKeyOptions = useMemo(() => {
+    const exchange = tradeConfig.exchange?.trim().toLowerCase();
+    if (!exchange) {
+      return [];
+    }
+    return exchangeApiKeys
+      .filter((item) => item.exchangeType?.trim().toLowerCase() === exchange)
+      .map((item) => ({ id: item.id, label: item.label || '未命名API' }));
+  }, [exchangeApiKeys, tradeConfig.exchange]);
+
+  const selectedExchangeApiKeyLabel = useMemo(() => {
+    if (!selectedExchangeApiKeyId) {
+      return null;
+    }
+    const match = exchangeApiKeys.find((item) => item.id === selectedExchangeApiKeyId);
+    return match?.label?.trim() ? match.label : '未命名API';
+  }, [exchangeApiKeys, selectedExchangeApiKeyId]);
+
+  useEffect(() => {
+    if (!isApiKeyLoaded) {
+      return;
+    }
+
+    const keys = exchangeApiKeyOptions;
+    if (keys.length === 1) {
+      setSelectedExchangeApiKeyId(keys[0].id);
+      setShowExchangeApiKeySelector(false);
+      return;
+    }
+
+    if (keys.length === 0) {
+      setSelectedExchangeApiKeyId(null);
+      setShowExchangeApiKeySelector(false);
+      return;
+    }
+
+    if (selectedExchangeApiKeyId && keys.some((item) => item.id === selectedExchangeApiKeyId)) {
+      return;
+    }
+
+    setSelectedExchangeApiKeyId(null);
+    setShowExchangeApiKeySelector(true);
+  }, [exchangeApiKeyOptions, isApiKeyLoaded, selectedExchangeApiKeyId]);
 
   const openConfigReview = () => {
     setIsConfigReviewOpen(true);
@@ -437,6 +548,13 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     setConfigStep(0);
   };
 
+  const handleConfigClose = () => {
+    closeConfigReview();
+    if (openConfigDirectly) {
+      onClose?.();
+    }
+  };
+
   const handleNextStep = () => {
     setConfigStep(1);
   };
@@ -448,6 +566,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const toggleLogicPreview = () => {
     setIsLogicPreviewVisible((prev) => !prev);
   };
+
+  useEffect(() => {
+    if (openConfigDirectly) {
+      openConfigReview();
+    }
+  }, [openConfigDirectly]);
 
   // 更新条件组滚动条
   useEffect(() => {
@@ -894,16 +1018,51 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const handleExchangeChange = (exchange: string) => {
+    if (isApiKeyLoaded) {
+      const keys = exchangeApiKeys.filter(
+        (item) => item.exchangeType?.trim().toLowerCase() === exchange.trim().toLowerCase(),
+      );
+      if (keys.length === 1) {
+        setSelectedExchangeApiKeyId(keys[0].id);
+        setShowExchangeApiKeySelector(false);
+      } else if (keys.length > 1) {
+        setSelectedExchangeApiKeyId(null);
+        setShowExchangeApiKeySelector(true);
+      } else {
+        setSelectedExchangeApiKeyId(null);
+        setShowExchangeApiKeySelector(false);
+      }
+    } else {
+      setSelectedExchangeApiKeyId(null);
+      setShowExchangeApiKeySelector(false);
+    }
+
     setTradeConfig((prev) => ({
       ...prev,
       exchange,
     }));
   };
 
+  const handleExchangeApiKeySelect = (id: number) => {
+    setSelectedExchangeApiKeyId(id);
+  };
+
+  const handleExchangeApiKeyBack = () => {
+    setShowExchangeApiKeySelector(false);
+    setSelectedExchangeApiKeyId(null);
+  };
+
   const handleSymbolChange = (symbol: string) => {
     setTradeConfig((prev) => ({
       ...prev,
       symbol,
+    }));
+  };
+
+  const handlePositionModeChange = (positionMode: string) => {
+    setTradeConfig((prev) => ({
+      ...prev,
+      positionMode,
     }));
   };
 
@@ -1366,12 +1525,17 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       error('请输入策略名称');
       return;
     }
+    if (exchangeApiKeyOptions.length > 1 && !selectedExchangeApiKeyId) {
+      error('请选择交易所API');
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onSubmit({
         name: trimmedName,
         description: strategyDescription.trim(),
         configJson: configPreview,
+        exchangeApiKeyId: selectedExchangeApiKeyId ?? undefined,
       });
       success(successMessage);
       window.dispatchEvent(new CustomEvent('strategy:changed'));
@@ -1617,26 +1781,28 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
   return (
     <>
-      <StrategyEditorShell
-        selectedIndicators={selectedIndicators}
-        formatIndicatorName={formatIndicatorName}
-        formatIndicatorMeta={formatIndicatorMeta}
-        onOpenIndicatorGenerator={openCreateIndicator}
-        onEditIndicator={requestEditIndicator}
-        onRemoveIndicator={requestRemoveIndicator}
-        conditionContainers={conditionContainers}
-        maxGroupsPerContainer={MAX_GROUPS_PER_CONTAINER}
-        buildConditionPreview={buildConditionPreview}
-        onAddConditionGroup={addConditionGroup}
-        onToggleGroupFlag={toggleGroupFlag}
-        onOpenConditionModal={openConditionModal}
-        onRemoveGroup={removeGroup}
-        onToggleConditionFlag={toggleConditionFlag}
-        onRemoveCondition={removeCondition}
-        renderToggle={renderToggle}
-        onClose={() => onClose?.()}
-        onGenerateConfig={openConfigReview}
-      />
+      {!openConfigDirectly && (
+        <StrategyEditorShell
+          selectedIndicators={selectedIndicators}
+          formatIndicatorName={formatIndicatorName}
+          formatIndicatorMeta={formatIndicatorMeta}
+          onOpenIndicatorGenerator={openCreateIndicator}
+          onEditIndicator={requestEditIndicator}
+          onRemoveIndicator={requestRemoveIndicator}
+          conditionContainers={conditionContainers}
+          maxGroupsPerContainer={MAX_GROUPS_PER_CONTAINER}
+          buildConditionPreview={buildConditionPreview}
+          onAddConditionGroup={addConditionGroup}
+          onToggleGroupFlag={toggleGroupFlag}
+          onOpenConditionModal={openConditionModal}
+          onRemoveGroup={removeGroup}
+          onToggleConditionFlag={toggleConditionFlag}
+          onRemoveCondition={removeCondition}
+          renderToggle={renderToggle}
+          onClose={() => onClose?.()}
+          onGenerateConfig={openConfigReview}
+        />
+      )}
       <Dialog
         open={Boolean(indicatorAction)}
         onClose={closeIndicatorActionDialog}
@@ -1695,7 +1861,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       />
       <StrategyConfigDialog
         open={isConfigReviewOpen}
-        onClose={closeConfigReview}
+        onClose={handleConfigClose}
         configStep={configStep}
         onNextStep={handleNextStep}
         onPrevStep={handlePrevStep}
@@ -1717,12 +1883,20 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         strategyDescription={strategyDescription}
         exchangeOptions={exchangeOptions}
         symbolOptions={symbolOptions}
+        positionModeOptions={positionModeOptions}
         timeframeOptions={timeframeOptions}
         leverageOptions={leverageOptions}
+        exchangeApiKeyOptions={exchangeApiKeyOptions}
+        selectedExchangeApiKeyId={selectedExchangeApiKeyId}
+        selectedExchangeApiKeyLabel={selectedExchangeApiKeyLabel}
+        showExchangeApiKeySelector={showExchangeApiKeySelector}
+        onExchangeApiKeySelect={handleExchangeApiKeySelect}
+        onExchangeApiKeyBack={handleExchangeApiKeyBack}
         onStrategyNameChange={handleStrategyNameChange}
         onStrategyDescriptionChange={handleStrategyDescriptionChange}
         onExchangeChange={handleExchangeChange}
         onSymbolChange={handleSymbolChange}
+        onPositionModeChange={handlePositionModeChange}
         onTimeframeChange={handleTimeframeChange}
         updateTradeSizing={updateTradeSizing}
         updateTradeRisk={updateTradeRisk}

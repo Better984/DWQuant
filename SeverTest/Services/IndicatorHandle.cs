@@ -83,7 +83,7 @@ namespace ServerTest.Services
                 _function ??= calculator.ResolveFunction(Key.Indicator);
                 if (_function == null)
                 {
-                    logger.LogWarning("Indicator not found: {Indicator}", Key.Indicator);
+                    logger.LogWarning("指标未找到: {Indicator}", Key.Indicator);
                     return false;
                 }
 
@@ -113,7 +113,7 @@ namespace ServerTest.Services
 
                 if (!calculator.TryCompute(Key, _function, _parameters, candles, _series.Capacity, out var points))
                 {
-                    logger.LogDebug("Indicator compute skipped: {Key}", Key.ToString());
+                    logger.LogDebug("指标计算已跳过: {Key}", Key.ToString());
                     return false;
                 }
 

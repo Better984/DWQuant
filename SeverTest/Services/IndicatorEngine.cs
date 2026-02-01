@@ -230,7 +230,7 @@ namespace ServerTest.Services
             var configPath = Path.Combine(AppContext.BaseDirectory, "Config", "talib_indicators_config.json");
             if (!File.Exists(configPath))
             {
-                _logger.LogWarning("Indicator config not found at {Path}", configPath);
+                _logger.LogWarning("指标配置未找到: {Path}", configPath);
                 return null;
             }
 
@@ -240,7 +240,7 @@ namespace ServerTest.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load indicator config");
+                _logger.LogWarning(ex, "加载指标配置失败");
                 return null;
             }
         }

@@ -25,27 +25,27 @@ namespace ServerTest.Services
         {
             if (!_options.SyncEnabled)
             {
-                _logger.LogInformation("Historical sync disabled: HistoricalData:SyncEnabled=false");
+                _logger.LogInformation("历史数据同步已禁用: HistoricalData:SyncEnabled=false");
             }
 
             try
             {
                 if (_options.SyncEnabled)
                 {
-                    _logger.LogInformation("Historical sync start: incremental backfill");
+                    _logger.LogInformation("历史数据同步开始: 增量回填");
                     await _syncService.SyncIfNeededAsync(stoppingToken);
-                    _logger.LogInformation("Historical sync done: incremental backfill complete");
+                    _logger.LogInformation("历史数据同步完成: 增量回填完成");
                 }
 
                 if (_options.PreloadEnabled)
                 {
                     var preloadStart = ResolvePreloadStartDate();
                     _logger.LogInformation(
-                        "Historical preload start: start={StartDate}, maxCacheBars={MaxCacheBars}",
+                        "历史数据预加载开始: 开始日期={StartDate}, 最大缓存K线数={MaxCacheBars}",
                         preloadStart.ToString("yyyy-MM-dd"),
                         _options.MaxCacheBars);
                     await _syncService.PreloadCacheAsync(preloadStart, stoppingToken);
-                    _logger.LogInformation("Historical preload done");
+                    _logger.LogInformation("历史数据预加载完成");
                 }
 
                 if (_options.SyncEnabled)
@@ -55,14 +55,14 @@ namespace ServerTest.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Historical sync/preload failed during startup");
+                _logger.LogWarning(ex, "启动时历史数据同步/预加载失败");
             }
         }
 
         private async Task RunPeriodicSyncAsync(CancellationToken stoppingToken)
         {
             var interval = ResolveSyncInterval();
-            _logger.LogInformation("Historical periodic sync enabled: interval={Minutes} minutes", interval.TotalMinutes);
+            _logger.LogInformation("历史数据定期同步已启用: 间隔={Minutes} 分钟", interval.TotalMinutes);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -74,9 +74,9 @@ namespace ServerTest.Services
                         break;
                     }
 
-                    _logger.LogInformation("Historical periodic sync start");
+                    _logger.LogInformation("历史数据定期同步开始");
                     await _syncService.SyncIfNeededAsync(stoppingToken);
-                    _logger.LogInformation("Historical periodic sync done");
+                    _logger.LogInformation("历史数据定期同步完成");
                 }
                 catch (OperationCanceledException)
                 {
@@ -84,7 +84,7 @@ namespace ServerTest.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Historical periodic sync failed");
+                    _logger.LogWarning(ex, "历史数据定期同步失败");
                 }
             }
         }

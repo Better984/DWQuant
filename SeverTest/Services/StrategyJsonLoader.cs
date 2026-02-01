@@ -122,6 +122,7 @@ namespace ServerTest.Services
                 Description = description ?? string.Empty,
                 State = MapState(user.State),
                 CreatorUserId = definition.CreatorUid != 0 ? definition.CreatorUid : user.Uid,
+                ExchangeApiKeyId = user.ExchangeApiKeyId,
                 Version = version.VersionNo > 0 ? version.VersionNo : 1,
                 Visibility = new StrategyVisibility
                 {

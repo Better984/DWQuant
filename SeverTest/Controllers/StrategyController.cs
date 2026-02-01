@@ -1,13 +1,16 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using MySqlConnector;
 using ServerTest.Models;
 using ServerTest.Models.Strategy;
+using ServerTest.Infrastructure.Repositories;
 using ServerTest.Services;
+using ServerTest.Services.StrategyRunCheck;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 
 namespace ServerTest.Controllers
@@ -46,6 +49,9 @@ namespace ServerTest.Controllers
         private readonly AuthTokenService _tokenService;
         private readonly StrategyJsonLoader _strategyLoader;
         private readonly RealTimeStrategyEngine _strategyEngine;
+        private readonly UserExchangeApiKeyRepository _apiKeyRepository;
+        private readonly StrategyRunCheckService _runCheckService;
+        private readonly StrategyRunCheckLogRepository _runCheckLogRepository;
 
         private sealed class StrategyListItem
         {
@@ -58,6 +64,7 @@ namespace ServerTest.Controllers
             public int VersionNo { get; set; }
             public JsonElement? ConfigJson { get; set; }
             public DateTime UpdatedAt { get; set; }
+            public long? ExchangeApiKeyId { get; set; }
             public long? OfficialDefId { get; set; }
             public int? OfficialVersionNo { get; set; }
             public long? TemplateDefId { get; set; }
@@ -110,13 +117,19 @@ namespace ServerTest.Controllers
             DatabaseService db,
             AuthTokenService tokenService,
             StrategyJsonLoader strategyLoader,
-            RealTimeStrategyEngine strategyEngine)
+            RealTimeStrategyEngine strategyEngine,
+            UserExchangeApiKeyRepository apiKeyRepository,
+            StrategyRunCheckService runCheckService,
+            StrategyRunCheckLogRepository runCheckLogRepository)
             : base(logger)
         {
             _db = db;
             _tokenService = tokenService;
             _strategyLoader = strategyLoader;
             _strategyEngine = strategyEngine;
+            _apiKeyRepository = apiKeyRepository ?? throw new ArgumentNullException(nameof(apiKeyRepository));
+            _runCheckService = runCheckService ?? throw new ArgumentNullException(nameof(runCheckService));
+            _runCheckLogRepository = runCheckLogRepository ?? throw new ArgumentNullException(nameof(runCheckLogRepository));
         }
 
         [HttpPost("create")]
@@ -207,9 +220,9 @@ VALUES (@def_id, @version_no, @content_hash, @config_json, NULL, @changelog, @cr
 
                 var userCmd = new MySqlCommand(@"
 INSERT INTO user_strategy
-  (uid, def_id, pinned_version_id, alias_name, description, state, visibility, share_code, price_usdt, source_type, source_ref, created_at, updated_at)
+  (uid, def_id, pinned_version_id, alias_name, description, state, visibility, share_code, price_usdt, source_type, source_ref, exchange_api_key_id, created_at, updated_at)
 VALUES
-  (@uid, @def_id, @pinned_version_id, @alias_name, @description, @state, @visibility, NULL, @price_usdt, @source_type, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  (@uid, @def_id, @pinned_version_id, @alias_name, @description, @state, @visibility, NULL, @price_usdt, @source_type, NULL, @exchange_api_key_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ", connection, transaction);
                 userCmd.Parameters.AddWithValue("@uid", uid.Value);
                 userCmd.Parameters.AddWithValue("@def_id", defId);
@@ -220,6 +233,7 @@ VALUES
                 userCmd.Parameters.AddWithValue("@visibility", "private");
                 userCmd.Parameters.AddWithValue("@price_usdt", 0);
                 userCmd.Parameters.AddWithValue("@source_type", "custom");
+                userCmd.Parameters.AddWithValue("@exchange_api_key_id", request.ExchangeApiKeyId.HasValue ? request.ExchangeApiKeyId.Value : DBNull.Value);
                 await userCmd.ExecuteNonQueryAsync();
                 var usId = userCmd.LastInsertedId;
 
@@ -277,6 +291,7 @@ SELECT
   us.alias_name,
   us.description,
   us.state,
+  us.exchange_api_key_id,
   us.updated_at,
   sd.name AS def_name,
   sv.version_no,
@@ -308,6 +323,7 @@ ORDER BY us.updated_at DESC
                 var templateVersionOrdinal = reader.GetOrdinal("template_version_no");
                 var marketIdOrdinal = reader.GetOrdinal("market_id");
                 var marketVersionOrdinal = reader.GetOrdinal("market_version_no");
+                var exchangeApiKeyIdOrdinal = reader.GetOrdinal("exchange_api_key_id");
                 var results = new List<StrategyListItem>();
                 while (await reader.ReadAsync())
                 {
@@ -322,6 +338,7 @@ ORDER BY us.updated_at DESC
                         VersionNo = reader.GetInt32("version_no"),
                         ConfigJson = ParseConfigJson(reader["config_json"]),
                         UpdatedAt = reader.GetDateTime("updated_at"),
+                        ExchangeApiKeyId = reader.IsDBNull(exchangeApiKeyIdOrdinal) ? null : reader.GetInt64(exchangeApiKeyIdOrdinal),
                         OfficialDefId = reader.IsDBNull(officialDefIdOrdinal) ? null : reader.GetInt64(officialDefIdOrdinal),
                         OfficialVersionNo = reader.IsDBNull(officialVersionOrdinal) ? null : reader.GetInt32(officialVersionOrdinal),
                         TemplateDefId = reader.IsDBNull(templateDefIdOrdinal) ? null : reader.GetInt64(templateDefIdOrdinal),
@@ -737,14 +754,28 @@ VALUES (@def_id, @version_no, @content_hash, @config_json, NULL, @changelog, @cr
                     return StatusCode(500, ApiResponse<object>.Error("保存策略失败，请稍后重试"));
                 }
 
-                var updateUsCmd = new MySqlCommand(@"
+                var updateUsSql = request.ExchangeApiKeyId.HasValue
+                    ? @"
+UPDATE user_strategy
+SET pinned_version_id = @version_id,
+    exchange_api_key_id = @exchange_api_key_id,
+    updated_at = CURRENT_TIMESTAMP
+WHERE us_id = @us_id AND uid = @uid
+"
+                    : @"
 UPDATE user_strategy
 SET pinned_version_id = @version_id, updated_at = CURRENT_TIMESTAMP
 WHERE us_id = @us_id AND uid = @uid
-", connection, transaction);
+";
+
+                var updateUsCmd = new MySqlCommand(updateUsSql, connection, transaction);
                 updateUsCmd.Parameters.AddWithValue("@version_id", newVersionId);
                 updateUsCmd.Parameters.AddWithValue("@us_id", request.UsId);
                 updateUsCmd.Parameters.AddWithValue("@uid", uid.Value);
+                if (request.ExchangeApiKeyId.HasValue)
+                {
+                    updateUsCmd.Parameters.AddWithValue("@exchange_api_key_id", request.ExchangeApiKeyId.Value);
+                }
                 await updateUsCmd.ExecuteNonQueryAsync();
 
                 var shouldUpdateDef = false;
@@ -1551,6 +1582,8 @@ WHERE us_id = @us_id AND uid = @uid
                 return BadRequest(ApiResponse<object>.Error("不支持的策略状态"));
             }
 
+            var ct = HttpContext.RequestAborted;
+
             StrategyModel? runtimeStrategy = null;
             var runtimeState = MapInstanceState(nextState);
 
@@ -1568,6 +1601,7 @@ WHERE us_id = @us_id AND uid = @uid
                 decimal priceUsdt;
                 string sourceType;
                 string? sourceRef;
+                long? exchangeApiKeyId;
                 string defName;
                 string defDescription;
                 string defType;
@@ -1587,6 +1621,7 @@ SELECT
   us.price_usdt,
   us.source_type,
   us.source_ref,
+  us.exchange_api_key_id,
   sd.name AS def_name,
   sd.description AS def_description,
   sd.def_type,
@@ -1619,6 +1654,7 @@ LIMIT 1
                     priceUsdt = reader.GetDecimal("price_usdt");
                     sourceType = reader.GetString("source_type");
                     sourceRef = reader.IsDBNull(reader.GetOrdinal("source_ref")) ? null : reader.GetString("source_ref");
+                    exchangeApiKeyId = reader.IsDBNull(reader.GetOrdinal("exchange_api_key_id")) ? null : reader.GetInt64("exchange_api_key_id");
                     defName = reader.GetString("def_name");
                     defDescription = reader.IsDBNull(reader.GetOrdinal("def_description")) ? string.Empty : reader.GetString("def_description");
                     defType = reader.GetString("def_type");
@@ -1628,9 +1664,212 @@ LIMIT 1
                     configJson = reader.IsDBNull(reader.GetOrdinal("config_json")) ? null : reader.GetString("config_json");
                 }
 
+                var ensureApiKey = request.ExchangeApiKeyId.HasValue || RequiresExchangeApiKey(runtimeState);
+                var effectiveExchangeApiKeyId = exchangeApiKeyId;
+                StrategyConfig? config = null;
+                var normalizedStrategyExchange = string.Empty;
+
+                if (ensureApiKey || ShouldRegisterRuntime(runtimeState))
+                {
+                    config = _strategyLoader.ParseConfig(configJson);
+                    if (config == null)
+                    {
+                        await SafeRollbackAsync(transaction);
+                        return StatusCode(500, ApiResponse<object>.Error("策略配置解析失败"));
+                    }
+
+                    normalizedStrategyExchange = MarketDataKeyNormalizer.NormalizeExchange(config.Trade?.Exchange ?? string.Empty);
+                    if (ensureApiKey && string.IsNullOrWhiteSpace(normalizedStrategyExchange))
+                    {
+                        await SafeRollbackAsync(transaction);
+                        return StatusCode(500, ApiResponse<object>.Error("策略交易所配置无效"));
+                    }
+                }
+
+                if (ensureApiKey)
+                {
+                    var requestApiKeyId = request.ExchangeApiKeyId.GetValueOrDefault();
+                    string? apiKeyExchangeType = null;
+
+                    if (request.ExchangeApiKeyId.HasValue && requestApiKeyId > 0)
+                    {
+                        var apiKey = await GetApiKeyByIdAsync(connection, transaction, uid.Value, requestApiKeyId);
+                        if (apiKey == null)
+                        {
+                            await TryWriteRunCheckLogAsync(
+                                BuildRunCheckFailureResult("api_key", "交易所API校验", "无效的交易所API"),
+                                uid.Value,
+                                id,
+                                nextState,
+                                normalizedStrategyExchange,
+                                config?.Trade?.Symbol ?? string.Empty,
+                                ct).ConfigureAwait(false);
+                            await SafeRollbackAsync(transaction);
+                            return BadRequest(ApiResponse<object>.Error("无效的交易所API"));
+                        }
+
+                        effectiveExchangeApiKeyId = apiKey.Id;
+                        apiKeyExchangeType = apiKey.ExchangeType;
+                    }
+                    else if (effectiveExchangeApiKeyId.HasValue && effectiveExchangeApiKeyId.Value > 0)
+                    {
+                        var apiKey = await GetApiKeyByIdAsync(connection, transaction, uid.Value, effectiveExchangeApiKeyId.Value);
+                        if (apiKey != null)
+                        {
+                            apiKeyExchangeType = apiKey.ExchangeType;
+                        }
+                        else
+                        {
+                            effectiveExchangeApiKeyId = null;
+                        }
+                    }
+
+                    if (!effectiveExchangeApiKeyId.HasValue)
+                    {
+                        var apiKey = await GetLatestApiKeyAsync(connection, transaction, uid.Value, normalizedStrategyExchange);
+                        if (apiKey != null)
+                        {
+                            effectiveExchangeApiKeyId = apiKey.Id;
+                            apiKeyExchangeType = apiKey.ExchangeType;
+                        }
+                    }
+
+                    if (!effectiveExchangeApiKeyId.HasValue)
+                    {
+                        await SafeRollbackAsync(transaction);
+                        return BadRequest(ApiResponse<object>.Error("未绑定该交易所API"));
+                    }
+
+                    if (string.IsNullOrWhiteSpace(apiKeyExchangeType))
+                    {
+                        var apiKey = await GetApiKeyByIdAsync(connection, transaction, uid.Value, effectiveExchangeApiKeyId.Value);
+                        if (apiKey != null)
+                        {
+                            apiKeyExchangeType = apiKey.ExchangeType;
+                        }
+                    }
+
+                    var normalizedApiKeyExchange = MarketDataKeyNormalizer.NormalizeExchange(apiKeyExchangeType ?? string.Empty);
+                    if (!string.IsNullOrWhiteSpace(normalizedApiKeyExchange)
+                        && !string.Equals(normalizedApiKeyExchange, normalizedStrategyExchange, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var updatedConfigJson = UpdateConfigExchange(configJson, normalizedApiKeyExchange);
+                        var contentHash = ComputeSha256(updatedConfigJson);
+
+                        var versionNoCmd = new MySqlCommand(@"
+SELECT IFNULL(MAX(version_no), 0)
+FROM strategy_version
+WHERE def_id = @def_id
+", connection, transaction);
+                        versionNoCmd.Parameters.AddWithValue("@def_id", defId);
+                        var nextVersionNo = Convert.ToInt32(await versionNoCmd.ExecuteScalarAsync()) + 1;
+
+                        var versionCmd = new MySqlCommand(@"
+INSERT INTO strategy_version (def_id, version_no, content_hash, config_json, artifact_uri, changelog, created_by, created_at)
+VALUES (@def_id, @version_no, @content_hash, @config_json, NULL, @changelog, @created_by, CURRENT_TIMESTAMP)
+", connection, transaction);
+                        versionCmd.Parameters.AddWithValue("@def_id", defId);
+                        versionCmd.Parameters.AddWithValue("@version_no", nextVersionNo);
+                        versionCmd.Parameters.AddWithValue("@content_hash", contentHash);
+                        versionCmd.Parameters.AddWithValue("@config_json", updatedConfigJson);
+                        versionCmd.Parameters.AddWithValue("@changelog", "exchange-sync");
+                        versionCmd.Parameters.AddWithValue("@created_by", uid.Value);
+                        await versionCmd.ExecuteNonQueryAsync();
+                        var newVersionId = versionCmd.LastInsertedId;
+
+                        if (newVersionId <= 0)
+                        {
+                            await SafeRollbackAsync(transaction);
+                            return StatusCode(500, ApiResponse<object>.Error("策略版本更新失败"));
+                        }
+
+                        pinnedVersionId = newVersionId;
+                        versionId = newVersionId;
+                        versionNo = nextVersionNo;
+                        configJson = updatedConfigJson;
+                        normalizedStrategyExchange = normalizedApiKeyExchange;
+
+                        if (config != null)
+                        {
+                            config.Trade ??= new TradeConfig();
+                            config.Trade.Exchange = normalizedApiKeyExchange;
+                        }
+
+                        if (creatorUid == uid.Value && string.Equals(defType, "custom", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var updateDefCmd = new MySqlCommand(@"
+UPDATE strategy_def
+SET latest_version_id = @version_id, updated_at = CURRENT_TIMESTAMP
+WHERE def_id = @def_id
+", connection, transaction);
+                            updateDefCmd.Parameters.AddWithValue("@version_id", newVersionId);
+                            updateDefCmd.Parameters.AddWithValue("@def_id", defId);
+                            await updateDefCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+                }
+
+                if (ensureApiKey)
+                {
+                    if (!effectiveExchangeApiKeyId.HasValue)
+                    {
+                        await TryWriteRunCheckLogAsync(
+                            BuildRunCheckFailureResult("api_key", "交易所API校验", "未绑定该交易所API"),
+                            uid.Value,
+                            id,
+                            nextState,
+                            normalizedStrategyExchange,
+                            config?.Trade?.Symbol ?? string.Empty,
+                            ct).ConfigureAwait(false);
+                        await SafeRollbackAsync(transaction);
+                        return BadRequest(ApiResponse<object>.Error("未绑定该交易所API"));
+                    }
+
+                    var apiKeyRecord = await _apiKeyRepository.GetByIdAsync(
+                        effectiveExchangeApiKeyId.Value,
+                        uid.Value,
+                        ct).ConfigureAwait(false);
+                    if (apiKeyRecord == null)
+                    {
+                        await SafeRollbackAsync(transaction);
+                        return BadRequest(ApiResponse<object>.Error("无效的交易所API"));
+                    }
+
+                    if (config == null)
+                    {
+                        await SafeRollbackAsync(transaction);
+                        return StatusCode(500, ApiResponse<object>.Error("策略配置解析失败"));
+                    }
+
+                    var tradeConfig = config.Trade ?? new TradeConfig();
+                    var runCheckContext = new StrategyRunCheckContext
+                    {
+                        Uid = uid.Value,
+                        UsId = id,
+                        Exchange = normalizedStrategyExchange,
+                        Symbol = tradeConfig.Symbol ?? string.Empty,
+                        PositionMode = tradeConfig.PositionMode ?? string.Empty,
+                        Leverage = tradeConfig.Sizing?.Leverage ?? 0,
+                        OrderQty = tradeConfig.Sizing?.OrderQty ?? 0,
+                        RequireBalanceCheck = runtimeState == StrategyState.Running,
+                        RequirePositionModeCheck = runtimeState == StrategyState.Running,
+                        ApiKey = apiKeyRecord
+                    };
+
+                    var runCheckResult = await _runCheckService.RunAsync(runCheckContext, ct).ConfigureAwait(false);
+                    await TryWriteRunCheckLogAsync(runCheckResult, uid.Value, id, nextState, normalizedStrategyExchange, tradeConfig.Symbol ?? string.Empty, ct)
+                        .ConfigureAwait(false);
+
+                    if (!runCheckResult.Passed)
+                    {
+                        await SafeRollbackAsync(transaction);
+                        var message = runCheckResult.FirstFailure?.Message ?? "运行前检查未通过";
+                        return BadRequest(ApiResponse<object>.Error(message));
+                    }
+                }
+
                 if (ShouldRegisterRuntime(runtimeState))
                 {
-                    var config = _strategyLoader.ParseConfig(configJson);
                     if (config == null)
                     {
                         await SafeRollbackAsync(transaction);
@@ -1656,6 +1895,7 @@ LIMIT 1
                                 Ref = sourceRef
                             },
                             PinnedVersionId = pinnedVersionId,
+                            ExchangeApiKeyId = effectiveExchangeApiKeyId,
                             UpdatedAt = DateTimeOffset.UtcNow
                         },
                         Definition = new StrategyDefinition
@@ -1684,10 +1924,15 @@ LIMIT 1
 
                 var updateCmd = new MySqlCommand(@"
 UPDATE user_strategy
-SET state = @state, updated_at = CURRENT_TIMESTAMP
+SET state = @state,
+    pinned_version_id = @pinned_version_id,
+    exchange_api_key_id = @exchange_api_key_id,
+    updated_at = CURRENT_TIMESTAMP
 WHERE us_id = @us_id AND uid = @uid
 ", connection, transaction);
                 updateCmd.Parameters.AddWithValue("@state", nextState);
+                updateCmd.Parameters.AddWithValue("@pinned_version_id", pinnedVersionId);
+                updateCmd.Parameters.AddWithValue("@exchange_api_key_id", effectiveExchangeApiKeyId.HasValue ? effectiveExchangeApiKeyId.Value : DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@us_id", id);
                 updateCmd.Parameters.AddWithValue("@uid", uid.Value);
                 await updateCmd.ExecuteNonQueryAsync();
@@ -1706,7 +1951,7 @@ WHERE us_id = @us_id AND uid = @uid
 
                 Logger.LogInformation("{Tag} uid={Uid} usId={UsId} state={State}", StrategyStateLogTag, uid.Value, id, nextState);
 
-                var response = new { UsId = id, State = nextState };
+                var response = new { UsId = id, State = nextState, ExchangeApiKeyId = effectiveExchangeApiKeyId };
                 return Ok(ApiResponse<object>.Ok(response, "状态更新成功"));
             }
             catch (Exception ex)
@@ -1848,6 +2093,150 @@ LIMIT 1
             return state == StrategyState.Running
                 || state == StrategyState.PausedOpenPosition
                 || state == StrategyState.Testing;
+        }
+
+        private static bool RequiresExchangeApiKey(StrategyState state)
+        {
+            return state == StrategyState.Running
+                || state == StrategyState.PausedOpenPosition;
+        }
+
+        private sealed class ExchangeApiKeySnapshot
+        {
+            public long Id { get; set; }
+            public string ExchangeType { get; set; } = string.Empty;
+        }
+
+        private static async Task<ExchangeApiKeySnapshot?> GetApiKeyByIdAsync(
+            MySqlConnection connection,
+            MySqlTransaction transaction,
+            long uid,
+            long apiKeyId)
+        {
+            var cmd = new MySqlCommand(@"
+SELECT id, exchange_type
+FROM user_exchange_api_keys
+WHERE id = @id AND uid = @uid
+LIMIT 1
+", connection, transaction);
+            cmd.Parameters.AddWithValue("@id", apiKeyId);
+            cmd.Parameters.AddWithValue("@uid", uid);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                return null;
+            }
+
+            return new ExchangeApiKeySnapshot
+            {
+                Id = reader.GetInt64("id"),
+                ExchangeType = reader.GetString("exchange_type")
+            };
+        }
+
+        private static async Task<ExchangeApiKeySnapshot?> GetLatestApiKeyAsync(
+            MySqlConnection connection,
+            MySqlTransaction transaction,
+            long uid,
+            string exchangeType)
+        {
+            var cmd = new MySqlCommand(@"
+SELECT id, exchange_type
+FROM user_exchange_api_keys
+WHERE uid = @uid AND exchange_type = @exchange_type
+ORDER BY updated_at DESC, id DESC
+LIMIT 1
+", connection, transaction);
+            cmd.Parameters.AddWithValue("@uid", uid);
+            cmd.Parameters.AddWithValue("@exchange_type", exchangeType);
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                return null;
+            }
+
+            return new ExchangeApiKeySnapshot
+            {
+                Id = reader.GetInt64("id"),
+                ExchangeType = reader.GetString("exchange_type")
+            };
+        }
+
+        private static string UpdateConfigExchange(string? configJson, string exchange)
+        {
+            if (string.IsNullOrWhiteSpace(configJson))
+            {
+                var root = new JsonObject
+                {
+                    ["trade"] = new JsonObject
+                    {
+                        ["exchange"] = exchange
+                    }
+                };
+
+                return root.ToJsonString();
+            }
+
+            var rootNode = JsonNode.Parse(configJson) as JsonObject ?? new JsonObject();
+            var tradeNode = rootNode["trade"] as JsonObject ?? new JsonObject();
+            tradeNode["exchange"] = exchange;
+            rootNode["trade"] = tradeNode;
+            return rootNode.ToJsonString();
+        }
+
+        private async Task TryWriteRunCheckLogAsync(
+            StrategyRunCheckResult result,
+            long uid,
+            long usId,
+            string state,
+            string exchange,
+            string symbol,
+            CancellationToken ct)
+        {
+            try
+            {
+                var detailJson = JsonSerializer.Serialize(result, CamelCaseSerializerOptions);
+                var reason = result.FirstFailure?.Message ?? (result.Passed ? "ok" : "运行前检查未通过");
+                var log = new StrategyRunCheckLog
+                {
+                    Uid = uid,
+                    UsId = usId,
+                    State = state,
+                    Exchange = exchange ?? string.Empty,
+                    Symbol = symbol ?? string.Empty,
+                    Success = result.Passed,
+                    Reason = reason,
+                    DetailJson = detailJson,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _runCheckLogRepository.InsertAsync(log, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "写入运行前检查日志失败: uid={Uid} usId={UsId}", uid, usId);
+            }
+        }
+
+        private static StrategyRunCheckResult BuildRunCheckFailureResult(string code, string name, string message)
+        {
+            return new StrategyRunCheckResult
+            {
+                Passed = false,
+                Items = new List<StrategyRunCheckItem>
+                {
+                    new StrategyRunCheckItem
+                    {
+                        Code = code,
+                        Name = name,
+                        Passed = false,
+                        Blocker = true,
+                        Message = message
+                    }
+                }
+            };
         }
 
         private async Task<IActionResult> PublishToCatalogAsync(StrategyCatalogPublishRequest request, string target)

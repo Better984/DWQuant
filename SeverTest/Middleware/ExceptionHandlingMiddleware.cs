@@ -25,7 +25,7 @@ namespace ServerTest.Middleware
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled exception");
+                _logger.LogError(ex, "未处理的异常");
                 await HandleExceptionAsync(context, ex);
             }
         }

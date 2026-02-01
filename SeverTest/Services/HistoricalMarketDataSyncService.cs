@@ -37,7 +37,7 @@ namespace ServerTest.Services
             try
             {
                 var throttler = new SemaphoreSlim(_options.SyncMaxParallel, _options.SyncMaxParallel);
-                var tasks = new List<Task>();
+                var tasks = new List<Task<SyncResult>>();
 
                 foreach (var exchangeEnum in Enum.GetValues<MarketDataConfig.ExchangeEnum>())
                 {
@@ -60,7 +60,28 @@ namespace ServerTest.Services
                     }
                 }
 
-                await Task.WhenAll(tasks);
+                var results = await Task.WhenAll(tasks);
+                
+                // 统计并输出所有结果
+                var successCount = results.Count(r => r.Status == SyncStatus.Success);
+                var skippedCount = results.Count(r => r.Status == SyncStatus.Skipped);
+                var failedCount = results.Count(r => r.Status == SyncStatus.Failed);
+                
+                Logger.LogInformation(
+                    "历史行情同步完成：成功={Success} 跳过={Skipped} 失败={Failed} 总计={Total}",
+                    successCount, skippedCount, failedCount, results.Length);
+                
+                // 输出失败详情
+                var failedResults = results.Where(r => r.Status == SyncStatus.Failed).ToList();
+                if (failedResults.Any())
+                {
+                    foreach (var result in failedResults)
+                    {
+                        Logger.LogWarning(
+                            "历史行情同步失败: {Exchange} {Symbol} {Timeframe} - {Error}",
+                            result.Exchange, result.Symbol, result.Timeframe, result.ErrorMessage);
+                    }
+                }
             }
             finally
             {
@@ -74,7 +95,7 @@ namespace ServerTest.Services
             }
         }
 
-        private async Task SyncSingleAsync(
+        private async Task<SyncResult> SyncSingleAsync(
             Exchange exchange,
             MarketDataConfig.ExchangeEnum exchangeEnum,
             MarketDataConfig.SymbolEnum symbolEnum,
@@ -90,8 +111,14 @@ namespace ServerTest.Services
                 var tableName = BuildTableName(exchangeEnum, symbolEnum, timeframeEnum);
                 if (!await TableExistsAsync(tableName, ct))
                 {
-                    Logger.LogWarning("跳过同步，表不存在: {Table}", tableName);
-                    return;
+                    return new SyncResult
+                    {
+                        Exchange = exchangeEnum.ToString(),
+                        Symbol = symbolEnum.ToString(),
+                        Timeframe = timeframeEnum.ToString(),
+                        Status = SyncStatus.Skipped,
+                        ErrorMessage = $"表不存在: {tableName}"
+                    };
                 }
 
                 // 从最后一根K线时间开始增量补齐
@@ -105,13 +132,14 @@ namespace ServerTest.Services
                 {
                     if (nowMs - lastOpenTime.Value < minGapMs)
                     {
-                        Logger.LogInformation(
-                            "历史行情无需同步：{Exchange} {Symbol} {Timeframe} 距离最新不足 {GapMinutes} 分钟",
-                            exchangeEnum,
-                            symbolEnum,
-                            timeframeEnum,
-                            _options.SyncMinGapMinutes);
-                        return;
+                        return new SyncResult
+                        {
+                            Exchange = exchangeEnum.ToString(),
+                            Symbol = symbolEnum.ToString(),
+                            Timeframe = timeframeEnum.ToString(),
+                            Status = SyncStatus.Skipped,
+                            ErrorMessage = $"距离最新不足 {_options.SyncMinGapMinutes} 分钟"
+                        };
                     }
 
                     startMs = lastOpenTime.Value + timeframeMs;
@@ -123,36 +151,53 @@ namespace ServerTest.Services
 
                 if (startMs <= 0 || startMs >= nowMs)
                 {
-                    return;
+                    return new SyncResult
+                    {
+                        Exchange = exchangeEnum.ToString(),
+                        Symbol = symbolEnum.ToString(),
+                        Timeframe = timeframeEnum.ToString(),
+                        Status = SyncStatus.Skipped,
+                        ErrorMessage = "时间范围无效"
+                    };
                 }
 
                 var endMs = nowMs - timeframeMs;
                 if (endMs <= startMs)
                 {
-                    return;
+                    return new SyncResult
+                    {
+                        Exchange = exchangeEnum.ToString(),
+                        Symbol = symbolEnum.ToString(),
+                        Timeframe = timeframeEnum.ToString(),
+                        Status = SyncStatus.Skipped,
+                        ErrorMessage = "结束时间小于等于开始时间"
+                    };
                 }
 
                 var futuresSymbol = FindFuturesSymbol(exchange, symbol);
                 // 拉取并写入数据库
-                Logger.LogInformation(
-                    "历史行情开始同步：{Exchange} {Symbol} {Timeframe} 起始={Start} 结束={End}",
-                    exchangeEnum,
-                    symbolEnum,
-                    timeframeEnum,
-                    DateTimeOffset.FromUnixTimeMilliseconds(startMs).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    DateTimeOffset.FromUnixTimeMilliseconds(endMs).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"));
                 await FetchAndInsertAsync(exchange, futuresSymbol, timeframe, timeframeMs, tableName, startMs, endMs, ct);
-                Logger.LogInformation(
-                    "历史行情同步完成：{Exchange} {Symbol} {Timeframe}",
-                    exchangeEnum,
-                    symbolEnum,
-                    timeframeEnum);
 
                 _cache.InvalidateCache(exchangeEnum, timeframeEnum, symbolEnum);
+
+                return new SyncResult
+                {
+                    Exchange = exchangeEnum.ToString(),
+                    Symbol = symbolEnum.ToString(),
+                    Timeframe = timeframeEnum.ToString(),
+                    Status = SyncStatus.Success
+                };
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "历史行情同步失败: {Exchange} {Symbol} {Timeframe}", exchangeEnum, symbolEnum, timeframeEnum);
+                return new SyncResult
+                {
+                    Exchange = exchangeEnum.ToString(),
+                    Symbol = symbolEnum.ToString(),
+                    Timeframe = timeframeEnum.ToString(),
+                    Status = SyncStatus.Failed,
+                    ErrorMessage = ex.Message
+                };
             }
             finally
             {
@@ -363,6 +408,22 @@ LIMIT 1;";
             public decimal? Close { get; set; }
             public decimal? Volume { get; set; }
             public long CloseTime { get; set; }
+        }
+
+        private enum SyncStatus
+        {
+            Success,
+            Skipped,
+            Failed
+        }
+
+        private sealed class SyncResult
+        {
+            public string Exchange { get; set; } = string.Empty;
+            public string Symbol { get; set; } = string.Empty;
+            public string Timeframe { get; set; } = string.Empty;
+            public SyncStatus Status { get; set; }
+            public string? ErrorMessage { get; set; }
         }
     }
 }

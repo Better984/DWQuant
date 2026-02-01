@@ -13,6 +13,8 @@ namespace ServerTest.Models.Strategy
         public string? AliasName { get; set; }
 
         public JsonElement ConfigJson { get; set; }
+
+        public long? ExchangeApiKeyId { get; set; }
     }
 
     public sealed class StrategyUpdateRequest
@@ -23,6 +25,8 @@ namespace ServerTest.Models.Strategy
         public JsonElement ConfigJson { get; set; }
 
         public string? Changelog { get; set; }
+
+        public long? ExchangeApiKeyId { get; set; }
     }
 
     public sealed class StrategyPublishRequest
@@ -48,6 +52,8 @@ namespace ServerTest.Models.Strategy
     {
         [Required]
         public string State { get; set; } = string.Empty;
+
+        public long? ExchangeApiKeyId { get; set; }
     }
 
     public sealed class StrategyShareCreateRequest

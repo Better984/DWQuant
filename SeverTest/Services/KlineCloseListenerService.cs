@@ -44,9 +44,9 @@ namespace ServerTest.Services
                     // 立即触发行情推送，不受间隔限制
                     await _broadcastService.BroadcastImmediatelyAsync(stoppingToken).ConfigureAwait(false);
 
-                    _logger.LogDebug(
-                        "K线收线触发立即推送: {Exchange} {Symbol} {Timeframe} time={Timestamp}",
-                        task.Exchange, task.Symbol, task.Timeframe, task.CandleTimestamp);
+                    // _logger.LogDebug(
+                    //    "K线收线触发立即推送: {Exchange} {Symbol} {Timeframe} time={Timestamp}",
+                    //    task.Exchange, task.Symbol, task.Timeframe, task.CandleTimestamp);
                 }
                 catch (OperationCanceledException)
                 {

@@ -119,15 +119,18 @@ namespace ServerTest.Services
                 {
                     if (markets.ContainsKey(symbol))
                     {
-                        dynamic market = markets[symbol];
-                        // 检查是否是合约市场
-                        bool isSwap = market.swap == true;
-                        bool isFuture = market.future == true;
-                        bool isContract = market.contract == true;
-
-                        if (isSwap || isFuture || isContract)
+                        var market = markets[symbol];
+                        if (market is Dictionary<string, object> marketDict)
                         {
-                            return symbol;
+                            // 检查是否是合约市场
+                            var isSwap = marketDict.ContainsKey("swap") && marketDict["swap"] is bool swap && swap;
+                            var isFuture = marketDict.ContainsKey("future") && marketDict["future"] is bool future && future;
+                            var isContract = marketDict.ContainsKey("contract") && marketDict["contract"] is bool contract && contract;
+
+                            if (isSwap || isFuture || isContract)
+                            {
+                                return symbol;
+                            }
                         }
                     }
                 }
@@ -135,19 +138,28 @@ namespace ServerTest.Services
                 // 如果直接查找失败，遍历所有市场查找 BTC 相关的合约
                 foreach (var marketEntry in markets)
                 {
-                    dynamic market = marketEntry.Value;
-                    string? baseId = market.baseId;
-                    bool isSwap = market.swap == true;
-                    bool isFuture = market.future == true;
-                    bool isContract = market.contract == true;
-                    string? quote = market.quote;
-                    string? quoteId = market.quoteId;
-
-                    if (baseId == baseAsset && (isSwap || isFuture || isContract))
+                    if (marketEntry.Value is Dictionary<string, object> marketDict)
                     {
-                        if (quote == "USDT" || quoteId == "USDT")
+                        marketDict.TryGetValue("baseId", out var baseIdObj);
+                        string? baseId = baseIdObj as string;
+                        
+                        var isSwap = marketDict.ContainsKey("swap") && marketDict["swap"] is bool swap && swap;
+                        var isFuture = marketDict.ContainsKey("future") && marketDict["future"] is bool future && future;
+                        var isContract = marketDict.ContainsKey("contract") && marketDict["contract"] is bool contract && contract;
+                        
+                        marketDict.TryGetValue("quote", out var quoteObj);
+                        string? quote = quoteObj as string;
+                        
+                        marketDict.TryGetValue("quoteId", out var quoteIdObj);
+                        string? quoteId = quoteIdObj as string;
+
+                        if (baseId == baseAsset && (isSwap || isFuture || isContract))
                         {
-                            return market.symbol;
+                            if (quote == "USDT" || quoteId == "USDT")
+                            {
+                                marketDict.TryGetValue("symbol", out var symbolObj);
+                                return symbolObj as string ?? baseSymbol + ":USDT";
+                            }
                         }
                     }
                 }

@@ -236,7 +236,7 @@ namespace ServerTest.Services
             var request = IndicatorKeyFactory.BuildRequest(trade, reference);
             if (request == null)
             {
-                _logger.LogDebug("Invalid indicator reference for strategy {Uid}", context.Strategy.UidCode);
+                _logger.LogDebug("策略 {Uid} 的指标引用无效", context.Strategy.UidCode);
                 return false;
             }
 

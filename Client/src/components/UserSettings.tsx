@@ -57,6 +57,15 @@ type NotifyPlatformOption = {
   requiresSecret?: boolean;
 };
 
+type NotifyPreferenceRule = {
+  enabled: boolean;
+  channel: string;
+};
+
+type NotifyPreferenceResponse = {
+  rules: Record<string, NotifyPreferenceRule>;
+};
+
 const EXCHANGE_OPTIONS: ExchangeOption[] = [
   { id: 'binance', label: '币安', requiresPassphrase: false },
   { id: 'okx', label: '欧易', requiresPassphrase: true },
@@ -98,6 +107,9 @@ const NOTIFY_PLATFORM_OPTIONS: NotifyPlatformOption[] = [
   },
 ];
 
+const USER_NOTIFY_CATEGORIES = ['Trade', 'Risk', 'Strategy', 'Security', 'Subscription'] as const;
+const SYSTEM_NOTIFY_STORAGE_KEY = 'dwquant.systemNotifyPreference';
+
 const MAX_KEYS_PER_EXCHANGE = 5;
 
 const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
@@ -132,6 +144,13 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   const [notifySecret, setNotifySecret] = useState('');
   const [isNotifySubmitting, setIsNotifySubmitting] = useState(false);
   const [deletingPlatform, setDeletingPlatform] = useState<string | null>(null);
+  const [isLoadingNotifyPreference, setIsLoadingNotifyPreference] = useState(false);
+  const [notifyPreferenceError, setNotifyPreferenceError] = useState<string | null>(null);
+  const [isSavingNotifyPreference, setIsSavingNotifyPreference] = useState(false);
+  const [personalNotifyEnabled, setPersonalNotifyEnabled] = useState(true);
+  const [personalNotifyChannel, setPersonalNotifyChannel] = useState('inapp');
+  const [systemNotifyEnabled, setSystemNotifyEnabled] = useState(true);
+  const [systemNotifyChannel, setSystemNotifyChannel] = useState('inapp');
   
   // WebSocket状态管理
   const [wsStatus, setWsStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>(getWsStatus());
@@ -142,6 +161,25 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
   const selectedNotifyPlatform = NOTIFY_PLATFORM_OPTIONS.find((option) => option.id === notifyPlatform)
     ?? NOTIFY_PLATFORM_OPTIONS[0];
   const selectedNotifyBinding = notifyChannels.find((item) => item.platform === notifyPlatform);
+  const notifyChannelOptions = useMemo(() => {
+    const bound = new Set(notifyChannels.map((item) => item.platform));
+    const options = [{ id: 'inapp', label: '站内通知' }];
+    NOTIFY_PLATFORM_OPTIONS.forEach((platform) => {
+      if (bound.has(platform.id)) {
+        options.push({ id: platform.id, label: platform.label });
+      }
+    });
+    return options;
+  }, [notifyChannels]);
+
+  useEffect(() => {
+    if (!notifyChannelOptions.find((option) => option.id === personalNotifyChannel)) {
+      setPersonalNotifyChannel('inapp');
+    }
+    if (!notifyChannelOptions.find((option) => option.id === systemNotifyChannel)) {
+      setSystemNotifyChannel('inapp');
+    }
+  }, [notifyChannelOptions, personalNotifyChannel, systemNotifyChannel]);
 
   // 加载头像
   const loadAvatar = useCallback(async () => {
@@ -377,11 +415,77 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
     }
   }, [client, showError]);
 
+  const loadNotifyPreference = useCallback(async () => {
+    setIsLoadingNotifyPreference(true);
+    setNotifyPreferenceError(null);
+    try {
+      const data = await client.get<NotifyPreferenceResponse>('/api/user/notification-preference');
+      const rules = data?.rules ?? {};
+      const enabled = USER_NOTIFY_CATEGORIES.some((key) => rules[key]?.enabled ?? true);
+      let channel = 'inapp';
+      for (const key of USER_NOTIFY_CATEGORIES) {
+        const ruleChannel = rules[key]?.channel;
+        if (ruleChannel) {
+          channel = ruleChannel;
+          break;
+        }
+      }
+      setPersonalNotifyEnabled(enabled);
+      setPersonalNotifyChannel(channel);
+
+      const stored = localStorage.getItem(SYSTEM_NOTIFY_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { enabled?: boolean; channel?: string };
+        if (typeof parsed.enabled === 'boolean') {
+          setSystemNotifyEnabled(parsed.enabled);
+        }
+        if (typeof parsed.channel === 'string') {
+          setSystemNotifyChannel(parsed.channel);
+        }
+      }
+    } catch (err) {
+      const message = err instanceof HttpError ? err.message : '获取通知偏好失败';
+      setNotifyPreferenceError(message);
+    } finally {
+      setIsLoadingNotifyPreference(false);
+    }
+  }, [client]);
+
   useEffect(() => {
     if (activeNavIndex === 2) {
       void loadNotifyChannels();
+      void loadNotifyPreference();
     }
-  }, [activeNavIndex, loadNotifyChannels]);
+  }, [activeNavIndex, loadNotifyChannels, loadNotifyPreference]);
+
+  const handleSaveNotifyPreference = async () => {
+    setIsSavingNotifyPreference(true);
+    try {
+      const rules: Record<string, NotifyPreferenceRule> = {};
+      USER_NOTIFY_CATEGORIES.forEach((key) => {
+        rules[key] = {
+          enabled: personalNotifyEnabled,
+          channel: personalNotifyChannel,
+        };
+      });
+      await client.request({
+        method: 'PUT',
+        path: '/api/user/notification-preference',
+        body: { rules },
+      });
+
+      localStorage.setItem(
+        SYSTEM_NOTIFY_STORAGE_KEY,
+        JSON.stringify({ enabled: systemNotifyEnabled, channel: systemNotifyChannel })
+      );
+      success('通知偏好已保存');
+    } catch (err) {
+      const message = err instanceof HttpError ? err.message : '保存通知偏好失败';
+      showError(message);
+    } finally {
+      setIsSavingNotifyPreference(false);
+    }
+  };
 
   const handleNotifySubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -731,6 +835,80 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
                 <div className="user-settings-notify-panel">
                   <div className="user-settings-notify-summary">
                     支持 钉钉 / 企业微信 / 邮箱 / Telegram，每个平台仅可绑定一个。
+                  </div>
+
+                  <div className="user-settings-notify-preference">
+                    <div className="user-settings-notify-preference-title">通知偏好</div>
+                    {isLoadingNotifyPreference && (
+                      <div className="user-settings-notify-state">正在加载通知偏好...</div>
+                    )}
+                    {notifyPreferenceError && (
+                      <div className="user-settings-notify-state user-settings-notify-state-error">
+                        {notifyPreferenceError}
+                      </div>
+                    )}
+                    <div className="user-settings-notify-preference-row">
+                      <div className="user-settings-notify-preference-label">个人通知</div>
+                      <label className="user-settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={personalNotifyEnabled}
+                          onChange={(event) => setPersonalNotifyEnabled(event.target.checked)}
+                          disabled={isSavingNotifyPreference}
+                        />
+                        <span className="user-settings-switch-slider" />
+                      </label>
+                      <select
+                        className="user-settings-select user-settings-notify-preference-select"
+                        value={personalNotifyChannel}
+                        onChange={(event) => setPersonalNotifyChannel(event.target.value)}
+                        disabled={!personalNotifyEnabled || notifyChannelOptions.length <= 1 || isSavingNotifyPreference}
+                      >
+                        {notifyChannelOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="user-settings-notify-preference-row">
+                      <div className="user-settings-notify-preference-label">系统通知</div>
+                      <label className="user-settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={systemNotifyEnabled}
+                          onChange={(event) => setSystemNotifyEnabled(event.target.checked)}
+                          disabled={isSavingNotifyPreference}
+                        />
+                        <span className="user-settings-switch-slider" />
+                      </label>
+                      <select
+                        className="user-settings-select user-settings-notify-preference-select"
+                        value={systemNotifyChannel}
+                        onChange={(event) => setSystemNotifyChannel(event.target.value)}
+                        disabled={!systemNotifyEnabled || notifyChannelOptions.length <= 1 || isSavingNotifyPreference}
+                      >
+                        {notifyChannelOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="user-settings-notify-preference-hint">
+                      系统通知默认站内可见，外发需要管理员开启；未绑定的平台无法选择。
+                    </div>
+                    <div className="user-settings-notify-preference-actions">
+                      <button
+                        type="button"
+                        className="user-settings-action-button user-settings-action-button--primary"
+                        onClick={handleSaveNotifyPreference}
+                        disabled={isSavingNotifyPreference || isLoadingNotifyPreference}
+                      >
+                        {isSavingNotifyPreference ? '保存中...' : '保存通知偏好'}
+                      </button>
+                    </div>
                   </div>
 
                   {isLoadingNotify && (

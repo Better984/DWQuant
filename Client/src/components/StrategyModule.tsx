@@ -43,6 +43,7 @@ const StrategyModule: React.FC = () => {
       description: payload.description,
       aliasName: payload.name,
       configJson: payload.configJson,
+      exchangeApiKeyId: payload.exchangeApiKeyId,
     });
   };
 

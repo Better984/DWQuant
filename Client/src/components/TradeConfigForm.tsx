@@ -8,13 +8,21 @@ interface TradeConfigFormProps {
   strategyName: string;
   strategyDescription: string;
   exchangeOptions: TradeOption[];
+  exchangeApiKeyOptions: { id: number; label: string }[];
+  selectedExchangeApiKeyId: number | null;
+  selectedExchangeApiKeyLabel: string | null;
+  showExchangeApiKeySelector: boolean;
+  onExchangeApiKeySelect: (id: number) => void;
+  onExchangeApiKeyBack: () => void;
   symbolOptions: TradeOption[];
+  positionModeOptions: TradeOption[];
   timeframeOptions: TimeframeOption[];
   leverageOptions: number[];
   onStrategyNameChange: (value: string) => void;
   onStrategyDescriptionChange: (value: string) => void;
   onExchangeChange: (value: string) => void;
   onSymbolChange: (value: string) => void;
+  onPositionModeChange: (value: string) => void;
   onTimeframeChange: (value: number) => void;
   updateTradeSizing: (key: keyof StrategyTradeConfig['sizing'], value: number) => void;
   updateTradeRisk: (key: keyof StrategyTradeConfig['risk'], value: number) => void;
@@ -61,18 +69,26 @@ const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
   strategyDescription,
   exchangeOptions,
   symbolOptions,
+  positionModeOptions,
   timeframeOptions,
   leverageOptions,
   onStrategyNameChange,
   onStrategyDescriptionChange,
   onExchangeChange,
   onSymbolChange,
+  onPositionModeChange,
   onTimeframeChange,
   updateTradeSizing,
   updateTradeRisk,
   updateTrailingRisk,
   tradeConfigRef,
   disableMetaFields = false,
+  exchangeApiKeyOptions,
+  selectedExchangeApiKeyId,
+  selectedExchangeApiKeyLabel,
+  showExchangeApiKeySelector,
+  onExchangeApiKeySelect,
+  onExchangeApiKeyBack,
 }) => {
   return (
     <div
@@ -106,11 +122,38 @@ const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
           </div>
           <div className="trade-form-section">
             <div className="trade-form-label">目标交易所</div>
-            <TradeOptionGrid
-              options={exchangeOptions}
-              selectedValue={tradeConfig.exchange}
-              onSelect={onExchangeChange}
-            />
+            {showExchangeApiKeySelector ? (
+              <div className="trade-api-key-panel">
+                <button
+                  type="button"
+                  className="trade-api-key-back"
+                  onClick={onExchangeApiKeyBack}
+                >
+                  返回选择交易所
+                </button>
+                <div className="trade-api-key-list">
+                  {exchangeApiKeyOptions.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`trade-api-key-item ${selectedExchangeApiKeyId === item.id ? 'active' : ''}`}
+                      onClick={() => onExchangeApiKeySelect(item.id)}
+                    >
+                      {item.label || '未命名API'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <TradeOptionGrid
+                options={exchangeOptions}
+                selectedValue={tradeConfig.exchange}
+                onSelect={onExchangeChange}
+              />
+            )}
+            {selectedExchangeApiKeyLabel && (
+              <div className="trade-api-key-summary">已选择API：{selectedExchangeApiKeyLabel}</div>
+            )}
           </div>
           <div className="trade-form-section">
             <div className="trade-form-label">交易对</div>
@@ -181,6 +224,21 @@ const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
                   onClick={() => updateTradeSizing('leverage', value)}
                 >
                   {value}x
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="trade-form-section">
+            <div className="trade-form-label">仓位模式</div>
+            <div className="trade-chip-group">
+              {positionModeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`trade-chip ${tradeConfig.positionMode === option.value ? 'active' : ''}`}
+                  onClick={() => onPositionModeChange(option.value)}
+                >
+                  {option.label}
                 </button>
               ))}
             </div>

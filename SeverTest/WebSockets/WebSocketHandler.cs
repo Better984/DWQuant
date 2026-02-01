@@ -69,7 +69,7 @@ namespace ServerTest.WebSockets
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to send kicked message for {UserId}", connection.UserId);
+                _logger.LogWarning(ex, "发送踢出消息失败: {UserId}", connection.UserId);
             }
 
             try
@@ -78,7 +78,7 @@ namespace ServerTest.WebSockets
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to close kicked connection for {UserId}", connection.UserId);
+                _logger.LogWarning(ex, "关闭被踢出连接失败: {UserId}", connection.UserId);
             }
         }
 
@@ -132,7 +132,7 @@ namespace ServerTest.WebSockets
 
                 if (!_rateLimiter.Allow(connection.UserId, Protocol.Ws))
                 {
-                    _logger.LogWarning("WS rate limit hit for user {UserId}", connection.UserId);
+                    _logger.LogWarning("WebSocket速率限制触发: 用户 {UserId}", connection.UserId);
                     await SendAsync(connection, WsMessageEnvelope.Error(envelope.ReqId, "rate_limit", "WebSocket rate limit exceeded"), cancellationToken);
                     continue;
                 }
@@ -156,7 +156,7 @@ namespace ServerTest.WebSockets
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "WS handler failed for type {Type}", envelope.Type);
+                    _logger.LogError(ex, "WebSocket处理器失败: 类型 {Type}", envelope.Type);
                     await SendAsync(connection, WsMessageEnvelope.Error(envelope.ReqId, "internal_error", "Handler error"), cancellationToken);
                 }
             }

@@ -4,6 +4,8 @@ using ServerTest.Models.Indicator;
 using ServerTest.Models.Strategy;
 using ServerTest.Strategy;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Text;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 
 namespace ServerTest.Services
@@ -14,10 +16,12 @@ namespace ServerTest.Services
         private readonly ILogger<RealTimeStrategyEngine> _logger;
         private readonly IStrategyValueResolver _valueResolver;
         private readonly IStrategyActionExecutor? _actionExecutor;
+        private readonly StrategyEngineRunLogQueue? _runLogQueue;
         private readonly int _maxParallelism;
         private readonly IndicatorEngine? _indicatorEngine;
         private readonly ConditionEvaluator _conditionEvaluator;
         private readonly ConditionUsageTracker _conditionUsageTracker;
+        private readonly string _engineInstanceId;
 
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, StrategyModel>> _strategiesByKey = new();
         private readonly ConcurrentDictionary<string, string> _strategyKeyByUid = new();
@@ -28,6 +32,7 @@ namespace ServerTest.Services
             ILogger<RealTimeStrategyEngine> logger,
             IStrategyValueResolver? valueResolver = null,
             IStrategyActionExecutor? actionExecutor = null,
+            StrategyEngineRunLogQueue? runLogQueue = null,
             IndicatorEngine? indicatorEngine = null,
             ConditionEvaluator? conditionEvaluator = null,
             ConditionUsageTracker? conditionUsageTracker = null,
@@ -37,10 +42,12 @@ namespace ServerTest.Services
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _valueResolver = valueResolver ?? NoopStrategyValueResolver.Instance;
             _actionExecutor = actionExecutor;
+            _runLogQueue = runLogQueue;
             _indicatorEngine = indicatorEngine;
             _conditionEvaluator = conditionEvaluator ?? throw new ArgumentNullException(nameof(conditionEvaluator));
             _conditionUsageTracker = conditionUsageTracker ?? throw new ArgumentNullException(nameof(conditionUsageTracker));
             _maxParallelism = maxParallelism ?? Environment.ProcessorCount;
+            _engineInstanceId = $"{Environment.MachineName}:{Environment.ProcessId}";
         }
 
         public void UpsertStrategy(StrategyModel strategy)
@@ -53,7 +60,7 @@ namespace ServerTest.Services
             var trade = strategy.StrategyConfig?.Trade;
             if (trade == null)
             {
-                _logger.LogWarning("Strategy {Uid} missing trade config", strategy.UidCode);
+                _logger.LogWarning("策略 {Uid} 缺少交易配置", strategy.UidCode);
                 return;
             }
 
@@ -71,7 +78,7 @@ namespace ServerTest.Services
             {
                 var indicators = string.Join("\n", indicatorRequests.Select(request => request.Key.ToString()));
                 _logger.LogInformation(
-                    "Strategy registered: {Uid} exchange={Exchange} symbol={Symbol} timeframe={TimeframeSec}s indicators={Count}\n{Indicators}",
+                    "策略已注册: {Uid} 交易所={Exchange} 交易对={Symbol} 周期={TimeframeSec}秒 指标数={Count}\n{Indicators}",
                     strategy.UidCode,
                     trade.Exchange,
                     trade.Symbol,
@@ -82,7 +89,7 @@ namespace ServerTest.Services
             else
             {
                 _logger.LogInformation(
-                    "Strategy registered: {Uid} exchange={Exchange} symbol={Symbol} timeframe={TimeframeSec}s no indicators",
+                    "策略已注册: {Uid} 交易所={Exchange} 交易对={Symbol} 周期={TimeframeSec}秒 无指标",
                     strategy.UidCode,
                     trade.Exchange,
                     trade.Symbol,
@@ -122,6 +129,62 @@ namespace ServerTest.Services
             foreach (var bucket in _strategiesByKey.Values)
             {
                 total += bucket.Count;
+            }
+
+            return total;
+        }
+
+        public void GetStateCounts(out int running, out int pausedOpenPosition, out int testing, out int total)
+        {
+            running = 0;
+            pausedOpenPosition = 0;
+            testing = 0;
+            total = 0;
+
+            foreach (var bucket in _strategiesByKey.Values)
+            {
+                foreach (var strategy in bucket.Values)
+                {
+                    total++;
+                    switch (strategy.State)
+                    {
+                        case StrategyState.Running:
+                            running++;
+                            break;
+                        case StrategyState.PausedOpenPosition:
+                            pausedOpenPosition++;
+                            break;
+                        case StrategyState.Testing:
+                            testing++;
+                            break;
+                    }
+                }
+            }
+        }
+
+        public int GetRunnableStrategyCountForTimeframes(IReadOnlyCollection<int> timeframeSecs)
+        {
+            if (timeframeSecs == null || timeframeSecs.Count == 0)
+            {
+                return 0;
+            }
+
+            var total = 0;
+            foreach (var bucket in _strategiesByKey.Values)
+            {
+                foreach (var strategy in bucket.Values)
+                {
+                    var trade = strategy.StrategyConfig?.Trade;
+                    if (trade == null || !timeframeSecs.Contains(trade.TimeframeSec))
+                    {
+                        continue;
+                    }
+
+                    if (IsRunnableState(strategy.State))
+                    {
+                        total++;
+                    }
+                }
             }
 
             return total;
@@ -174,54 +237,52 @@ namespace ServerTest.Services
 
         private void HandleTask(MarketDataTask task)
         {
+            var stopwatch = Stopwatch.StartNew();
             var key = BuildIndexKey(task.Exchange, task.Symbol, task.TimeframeSec);
             _strategiesByKey.TryGetValue(key, out var strategies);
             var matchedCount = strategies?.Count ?? 0;
             var modeText = task.IsBarClose ? "close" : "update";
+            var metrics = new StrategyRunMetrics();
 
-            _logger.LogInformation(
-                "Strategy engine task ({Mode}): {Exchange} {Symbol} {Timeframe} time={Time} matched={Count}",
-                modeText,
-                task.Exchange,
-                task.Symbol,
-                task.Timeframe,
-                FormatTimestamp(task.CandleTimestamp),
-                matchedCount);
+
+            // _logger.LogInformation(
+            //     "Strategy engine task ({Mode}): {Exchange} {Symbol} {Timeframe} time={Time} matched={Count}",
+            //     modeText,
+            //     task.Exchange,
+            //     task.Symbol,
+            //     task.Timeframe,
+            //     FormatTimestamp(task.CandleTimestamp),
+            //     matchedCount);
 
             if (strategies == null || strategies.IsEmpty)
             {
+                stopwatch.Stop();
+                LogStrategyRun(task, matchedCount, metrics, stopwatch.ElapsedMilliseconds);
                 return;
             }
 
             UpdateIndicatorsBeforeExecute(strategies.Values, task);
 
             var options = new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism };
-            var executed = 0;
             Parallel.ForEach(strategies.Values, options, strategy =>
             {
                 if (!IsRunnableState(strategy.State))
                 {
+                    Interlocked.Increment(ref metrics.SkippedCount);
                     return;
                 }
 
                 var context = new StrategyExecutionContext(strategy, task, _valueResolver, _actionExecutor);
-                ExecuteLogic(context);
-                Interlocked.Increment(ref executed);
+                ExecuteLogic(context, metrics);
+                metrics.AddExecutedStrategy(strategy.UidCode);
+                Interlocked.Increment(ref metrics.ExecutedCount);
             });
 
-            if (executed > 0)
-            {
-                _logger.LogInformation(
-                    "Strategy engine completed: {Exchange} {Symbol} {Timeframe} time={Time} executed={Count}",
-                    task.Exchange,
-                    task.Symbol,
-                    task.Timeframe,
-                    FormatTimestamp(task.CandleTimestamp),
-                    executed);
-            }
+            stopwatch.Stop();
+            LogStrategyRun(task, matchedCount, metrics, stopwatch.ElapsedMilliseconds);
         }
 
-        private void ExecuteLogic(StrategyExecutionContext context)
+        private void ExecuteLogic(StrategyExecutionContext context, StrategyRunMetrics? metrics)
         {
             var logic = context.StrategyConfig.Logic;
             if (logic == null)
@@ -229,7 +290,7 @@ namespace ServerTest.Services
                 return;
             }
 
-            ExecuteBranch(context, logic.Exit.Long, "Exit.Long");
+            ExecuteBranch(context, logic.Exit.Long, "Exit.Long", metrics);
             //ExecuteBranch(context, logic.Exit.Short, "Exit.Short");
 
             if (context.Strategy.State == StrategyState.PausedOpenPosition)
@@ -237,14 +298,15 @@ namespace ServerTest.Services
                 return;
             }
 
-            ExecuteBranch(context, logic.Entry.Long, "Entry.Long");
+            ExecuteBranch(context, logic.Entry.Long, "Entry.Long", metrics);
             //ExecuteBranch(context, logic.Entry.Short, "Entry.Short");
         }
 
         private void ExecuteBranch(
             StrategyExecutionContext context,
             StrategyLogicBranch branch,
-            string stage)
+            string stage,
+            StrategyRunMetrics? metrics)
         {
             if (branch == null || !branch.Enabled)
             {
@@ -255,7 +317,7 @@ namespace ServerTest.Services
             var passCount = 0;
             var aggregatedResults = new List<ConditionEvaluationResult>();
 
-            PrecomputeRequiredConditions(context, containers);
+            PrecomputeRequiredConditions(context, containers, metrics);
 
             for (var i = 0; i < containers.Count; i++)
             {
@@ -268,15 +330,15 @@ namespace ServerTest.Services
                 var checkResults = new List<ConditionEvaluationResult>();
                 var stageLabel = $"{stage}[{i}]";
                 _logger.LogInformation(
-                    "Strategy checks start: {Uid} {Stage} time={Time}",
+                    "策略检查开始: {Uid} {Stage} 时间={Time}",
                     context.Strategy.UidCode,
                     stageLabel,
                     FormatTimestamp(context.Task.CandleTimestamp));
 
-                if (!EvaluateChecks(context, container.Checks, checkResults, stageLabel))
+                if (!EvaluateChecks(context, container.Checks, checkResults, stageLabel, metrics))
                 {
                     _logger.LogInformation(
-                        "Strategy checks failed: {Uid} {Stage} time={Time}",
+                        "策略检查失败: {Uid} {Stage} 时间={Time}",
                         context.Strategy.UidCode,
                         stageLabel,
                         FormatTimestamp(context.Task.CandleTimestamp));
@@ -287,7 +349,7 @@ namespace ServerTest.Services
                 aggregatedResults.AddRange(checkResults);
 
                 _logger.LogInformation(
-                    "Strategy checks passed: {Uid} {Stage} time={Time}",
+                    "策略检查通过: {Uid} {Stage} 时间={Time}",
                     context.Strategy.UidCode,
                     stageLabel,
                     FormatTimestamp(context.Task.CandleTimestamp));
@@ -296,7 +358,7 @@ namespace ServerTest.Services
             if (passCount < branch.MinPassConditionContainer)
             {
                 _logger.LogInformation(
-                    "Strategy containers not enough: {Uid} {Stage} Need={Need} Pass={Pass}",
+                    "策略容器数量不足: {Uid} {Stage} 需要={Need} 通过={Pass}",
                     context.Strategy.UidCode,
                     stage,
                     branch.MinPassConditionContainer,
@@ -305,17 +367,18 @@ namespace ServerTest.Services
             }
 
             _logger.LogInformation(
-                "Strategy checks passed, executing actions: {Uid} {Stage} time={Time}",
+                "策略检查通过，执行动作: {Uid} {Stage} 时间={Time}",
                 context.Strategy.UidCode,
                 stage,
                 FormatTimestamp(context.Task.CandleTimestamp));
 
-            ExecuteActions(context, branch.OnPass, aggregatedResults, stage);
+            ExecuteActions(context, branch.OnPass, aggregatedResults, stage, metrics);
         }
 
         private void PrecomputeRequiredConditions(
             StrategyExecutionContext context,
-            IReadOnlyList<ConditionContainer> containers)
+            IReadOnlyList<ConditionContainer> containers,
+            StrategyRunMetrics? metrics)
         {
             if (containers == null || containers.Count == 0)
             {
@@ -344,6 +407,7 @@ namespace ServerTest.Services
                         }
 
                         _conditionEvaluator.Evaluate(context, condition);
+                        metrics?.IncrementConditionEval();
                     }
                 }
             }
@@ -353,7 +417,8 @@ namespace ServerTest.Services
             StrategyExecutionContext context,
             ConditionGroupSet checks,
             List<ConditionEvaluationResult> results,
-            string stage)
+            string stage,
+            StrategyRunMetrics? metrics)
         {
             if (checks == null || !checks.Enabled)
             {
@@ -387,9 +452,10 @@ namespace ServerTest.Services
                     }
 
                     var result = _conditionEvaluator.Evaluate(context, condition);
+                    metrics?.IncrementConditionEval();
                     results.Add(result);
                     _logger.LogInformation(
-                        "Condition check: {Uid} {Stage} Group={Group} Method={Method} Required={Required} Result={Result} Msg={Msg}",
+                        "条件检查: {Uid} {Stage} 组={Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                         context.Strategy.UidCode,
                         stage,
                         groupIndex,
@@ -401,7 +467,7 @@ namespace ServerTest.Services
                     if (!result.Success)
                     {
                         _logger.LogInformation(
-                            "Condition required failed: {Uid} {Stage} Group={Group} Method={Method}",
+                            "必需条件失败: {Uid} {Stage} 组={Group} 方法={Method}",
                             context.Strategy.UidCode,
                             stage,
                             groupIndex,
@@ -434,9 +500,10 @@ namespace ServerTest.Services
                     }
 
                     var result = _conditionEvaluator.Evaluate(context, condition);
+                    metrics?.IncrementConditionEval();
                     results.Add(result);
                     _logger.LogInformation(
-                        "Condition check: {Uid} {Stage} Group={Group} Method={Method} Required={Required} Result={Result} Msg={Msg}",
+                        "条件检查: {Uid} {Stage} 组={Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                         context.Strategy.UidCode,
                         stage,
                         groupIndex,
@@ -455,7 +522,7 @@ namespace ServerTest.Services
                 if (!pass)
                 {
                     _logger.LogInformation(
-                        "Condition group not enough: {Uid} {Stage} Group={Group} Need={Need} Pass={Pass}",
+                        "条件组数量不足: {Uid} {Stage} 组={Group} 需要={Need} 通过={Pass}",
                         context.Strategy.UidCode,
                         stage,
                         groupIndex,
@@ -475,7 +542,8 @@ namespace ServerTest.Services
             StrategyExecutionContext context,
             ActionSet actions,
             IReadOnlyList<ConditionEvaluationResult> triggerResults,
-            string stage)
+            string stage,
+            StrategyRunMetrics? metrics)
         {
             if (actions == null || !actions.Enabled)
             {
@@ -492,10 +560,11 @@ namespace ServerTest.Services
                     continue;
                 }
 
+                metrics?.IncrementActionExec();
                 hasEnabled = true;
                 var result = ActionMethodRegistry.Run(context, action, triggerResults);
                 _logger.LogInformation(
-                    "Action execute: {Uid} {Stage} Method={Method} Required={Required} Result={Result} Msg={Msg}",
+                    "动作执行: {Uid} {Stage} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                     context.Strategy.UidCode,
                     stage,
                     action.Method,
@@ -503,10 +572,16 @@ namespace ServerTest.Services
                     result.Success,
                     result.Message.ToString());
 
+                if (result.Success && IsOpenAction(action))
+                {
+                    metrics?.AddOpenTaskStrategy(context.Strategy.UidCode);
+                    metrics?.IncrementOpenTask();
+                }
+
                 if (action.Required && !result.Success)
                 {
                     _logger.LogInformation(
-                        "Action failed (Required): {Uid} {Stage} Method={Method}",
+                        "动作失败（必需）: {Uid} {Stage} 方法={Method}",
                         context.Strategy.UidCode,
                         stage,
                         action.Method);
@@ -527,7 +602,7 @@ namespace ServerTest.Services
             if (optionalSuccessCount < actions.MinPassConditions)
             {
                 _logger.LogInformation(
-                    "Action min pass not reached: {Uid} {Stage} Need={Need} Pass={Pass}",
+                    "动作最小通过数未达到: {Uid} {Stage} 需要={Need} 通过={Pass}",
                     context.Strategy.UidCode,
                     stage,
                     actions.MinPassConditions,
@@ -538,6 +613,177 @@ namespace ServerTest.Services
         private static string BuildIndexKey(string exchange, string symbol, int timeframeSec)
         {
             return $"{exchange}|{symbol}|{timeframeSec}";
+        }
+
+        private void LogStrategyRun(MarketDataTask task, int matchedCount, StrategyRunMetrics metrics, long durationMs)
+        {
+            var executedIds = BuildDelimitedIds(metrics.ExecutedStrategyIds.Keys);
+            var openIds = BuildDelimitedIds(metrics.OpenTaskStrategyIds.Keys);
+            var modeText = task.IsBarClose ? "close" : "update";
+
+            if (metrics.ExecutedCount > 0)
+            {
+                _logger.LogInformation(
+                    "[策略运行] 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 模式={Mode} 时间={Time} 耗时={Duration}毫秒 匹配={Matched} 执行={Executed} 跳过={Skipped} 条件={Conditions} 动作={Actions} 开放任务={OpenTasks} 执行ID={ExecIds} 开放ID={OpenIds}",
+                    task.Exchange,
+                    task.Symbol,
+                    task.Timeframe,
+                    modeText,
+                    FormatTimestampIso(task.CandleTimestamp),
+                    durationMs,
+                    matchedCount,
+                    metrics.ExecutedCount,
+                    metrics.SkippedCount,
+                    metrics.ConditionEvalCount,
+                    metrics.ActionExecCount,
+                    metrics.OpenTaskCount,
+                    executedIds,
+                    openIds);
+            }
+
+            if (_runLogQueue == null)
+            {
+                return;
+            }
+
+            var log = new StrategyEngineRunLog
+            {
+                RunAt = DateTime.UtcNow,
+                Exchange = task.Exchange,
+                Symbol = task.Symbol,
+                Timeframe = task.Timeframe,
+                CandleTimestamp = task.CandleTimestamp,
+                IsBarClose = task.IsBarClose,
+                DurationMs = (int)Math.Min(durationMs, int.MaxValue),
+                MatchedCount = matchedCount,
+                ExecutedCount = metrics.ExecutedCount,
+                SkippedCount = metrics.SkippedCount,
+                ConditionEvalCount = metrics.ConditionEvalCount,
+                ActionExecCount = metrics.ActionExecCount,
+                OpenTaskCount = metrics.OpenTaskCount,
+                ExecutedStrategyIds = string.IsNullOrWhiteSpace(executedIds) ? null : executedIds,
+                OpenTaskStrategyIds = string.IsNullOrWhiteSpace(openIds) ? null : openIds,
+                ExtraJson = null,
+                EngineInstance = _engineInstanceId
+            };
+
+            if (!_runLogQueue.TryEnqueue(log))
+            {
+                _logger.LogWarning("策略运行日志入队失败");
+            }
+        }
+
+        private static bool IsOpenAction(StrategyMethod action)
+        {
+            if (action == null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(action.Method, "MakeTrade", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (action.Param == null || action.Param.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var param in action.Param)
+            {
+                if (string.Equals(param, "Long", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(param, "Short", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string BuildDelimitedIds(IEnumerable<string> ids)
+        {
+            if (ids == null)
+            {
+                return string.Empty;
+            }
+
+            var builder = new StringBuilder();
+            foreach (var id in ids)
+            {
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.Append('|');
+                }
+
+                builder.Append(id);
+            }
+
+            return builder.ToString();
+        }
+
+        private static string FormatTimestampIso(long timestamp)
+        {
+            if (timestamp <= 0)
+            {
+                return "N/A";
+            }
+
+            return DateTimeOffset.FromUnixTimeMilliseconds(timestamp)
+                .ToLocalTime()
+                .ToString("yyyy-MM-ddTHH:mm:ss");
+        }
+
+        private sealed class StrategyRunMetrics
+        {
+            public readonly ConcurrentDictionary<string, byte> ExecutedStrategyIds = new(StringComparer.Ordinal);
+            public readonly ConcurrentDictionary<string, byte> OpenTaskStrategyIds = new(StringComparer.Ordinal);
+            public int ExecutedCount;
+            public int SkippedCount;
+            public int ConditionEvalCount;
+            public int ActionExecCount;
+            public int OpenTaskCount;
+
+            public void AddExecutedStrategy(string uid)
+            {
+                if (string.IsNullOrWhiteSpace(uid))
+                {
+                    return;
+                }
+
+                ExecutedStrategyIds.TryAdd(uid, 0);
+            }
+
+            public void AddOpenTaskStrategy(string uid)
+            {
+                if (string.IsNullOrWhiteSpace(uid))
+                {
+                    return;
+                }
+
+                OpenTaskStrategyIds.TryAdd(uid, 0);
+            }
+
+            public void IncrementConditionEval()
+            {
+                Interlocked.Increment(ref ConditionEvalCount);
+            }
+
+            public void IncrementActionExec()
+            {
+                Interlocked.Increment(ref ActionExecCount);
+            }
+
+            public void IncrementOpenTask()
+            {
+                Interlocked.Increment(ref OpenTaskCount);
+            }
         }
 
         private static bool IsRunnableState(StrategyState state)
@@ -615,7 +861,7 @@ namespace ServerTest.Services
             var indicatorTask = new IndicatorTask(normalizedTask, requestMap.Values.ToList());
             var result = _indicatorEngine.ProcessTaskNow(indicatorTask);
             _logger.LogInformation(
-                "Indicator refresh: {Exchange} {Symbol} {Timeframe} time={Time} success={Success}/{Total}",
+                "指标刷新: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Total}",
                 normalizedTask.Exchange,
                 normalizedTask.Symbol,
                 normalizedTask.Timeframe,

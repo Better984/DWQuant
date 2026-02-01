@@ -3,31 +3,37 @@
 
 # ignore Visual Studio files
 SeverTest/.vs/
-SeverTest/obj/Debug/
-SeverTest/obj/Debug/net8.0/
-SeverTest/obj/Debug/net8.0-windows/
+SeverTest/obj/
 SeverTest/bin/
-SeverTest/.vs/ServerTest/v18/.suo
-SeverTest/.vs/ServerTest/v18/DocumentLayout.backup.json
-SeverTest/.vs/ServerTest/v18/DocumentLayout.json
-SeverTest/bin/Debug/net8.0-windows/ServerTest.dll
-SeverTest/bin/Debug/net8.0-windows/ServerTest.exe
-SeverTest/bin/Debug/net8.0-windows/ServerTest.pdb
-SeverTest/obj/Debug/net8.0-windows/ServerTest.AssemblyInfo.cs
-SeverTest/obj/Debug/net8.0-windows/ServerTest.AssemblyInfoInputs.cache
-SeverTest/obj/Debug/net8.0-windows/ServerTest.dll
-SeverTest/obj/Debug/net8.0-windows/ServerTest.pdb
-SeverTest/obj/Debug/net8.0-windows/ServerTest.sourcelink.json
-SeverTest/obj/Debug/net8.0-windows/apphost.exe
-SeverTest/obj/Debug/net8.0-windows/ref/ServerTest.dll
-SeverTest/obj/Debug/net8.0-windows/refint/ServerTest.dll
-SeverTest/obj/project.nuget.cache
-SeverTest/.vs/ServerTest/DesignTimeBuild/.dtbcache.v2
-SeverTest/obj/Debug/net8.0-windows/ServerTest.assets.cache
-SeverTest/obj/Debug/net8.0-windows/ServerTest.csproj.FileListAbsolute.txt
-SeverTest/obj/ServerTest.csproj.nuget.dgspec.json
-SeverTest/obj/ServerTest.csproj.nuget.g.props
-SeverTest/obj/project.assets.json
-SeverTest/.vs/ProjectEvaluation/servertest.metadata.v10.bin
-SeverTest/.vs/ProjectEvaluation/servertest.projects.v10.bin
-SeverTest/.vs/ProjectEvaluation/servertest.strings.v10.bin
+*.dll
+*.exe
+*.pdb
+*.cache
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio cache/options directory
+.vs/
+
+# NuGet Packages
+*.nupkg
+*.snupkg
+**/packages/*

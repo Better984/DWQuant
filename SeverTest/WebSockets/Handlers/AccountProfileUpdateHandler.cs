@@ -35,7 +35,7 @@ namespace ServerTest.WebSockets.Handlers
             var updated = await _accountService.UpdateProfileAsync(uid, payload.Nickname, null, payload.Signature, ct).ConfigureAwait(false);
             if (!updated)
             {
-                _logger.LogWarning("Profile update failed for user {UserId}", connection.UserId);
+                _logger.LogWarning("用户 {UserId} 的 profile 更新失败", connection.UserId);
                 return WsMessageEnvelope.Error(envelope.ReqId, "not_found", "Account not found");
             }
 

@@ -46,7 +46,7 @@ namespace ServerTest.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Position risk loop failed.");
+                    _logger.LogError(ex, "仓位风险循环失败");
                 }
 
                 await Task.Delay(LoopDelay, stoppingToken).ConfigureAwait(false);
@@ -104,7 +104,7 @@ namespace ServerTest.Services
 
             if (!orderResult.Success)
             {
-                _logger.LogWarning("Risk close order failed: positionId={PositionId} err={Error}", position.PositionId, orderResult.ErrorMessage);
+                _logger.LogWarning("风险平仓订单失败: positionId={PositionId} 错误={Error}", position.PositionId, orderResult.ErrorMessage);
                 return;
             }
 
@@ -112,7 +112,7 @@ namespace ServerTest.Services
                 .ConfigureAwait(false);
             _riskConfigStore.Remove(position.PositionId);
 
-            _logger.LogInformation("Position closed by risk: id={PositionId} uid={Uid} usId={UsId}", position.PositionId, position.Uid, position.UsId);
+            _logger.LogInformation("仓位因风险平仓: id={PositionId} uid={Uid} usId={UsId}", position.PositionId, position.Uid, position.UsId);
         }
 
         private static bool CheckStopLoss(StrategyPosition position, decimal high, decimal low, string side)

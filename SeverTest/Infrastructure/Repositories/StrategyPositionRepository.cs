@@ -23,6 +23,7 @@ INSERT INTO strategy_position
 (
     uid,
     us_id,
+    exchange_api_key_id,
     exchange,
     symbol,
     side,
@@ -41,6 +42,7 @@ VALUES
 (
     @Uid,
     @UsId,
+    @ExchangeApiKeyId,
     @Exchange,
     @Symbol,
     @Side,
@@ -142,17 +144,23 @@ WHERE position_id = @positionId AND status = 'Open';";
 
         public Task<int> CloseAsync(long positionId, bool trailingTriggered, DateTime closedAt, CancellationToken ct = default)
         {
+            return CloseAsync(positionId, trailingTriggered, closedAt, null, ct);
+        }
+
+        public Task<int> CloseAsync(long positionId, bool trailingTriggered, DateTime closedAt, string? closeReason, CancellationToken ct = default)
+        {
             var sql = @"
 UPDATE strategy_position
 SET status = 'Closed',
     closed_at = @closedAt,
     trailing_triggered = @trailingTriggered,
+    close_reason = COALESCE(@closeReason, close_reason),
     trailing_stop_price = trailing_stop_price,
     stop_loss_price = stop_loss_price,
     take_profit_price = take_profit_price
 WHERE position_id = @positionId AND status = 'Open';";
 
-            return _db.ExecuteAsync(sql, new { positionId, closedAt, trailingTriggered }, null, ct);
+            return _db.ExecuteAsync(sql, new { positionId, closedAt, trailingTriggered, closeReason }, null, ct);
         }
 
         private static (string Sql, object Param) BuildQuerySql(

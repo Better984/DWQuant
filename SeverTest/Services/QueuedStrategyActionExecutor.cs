@@ -33,10 +33,12 @@ namespace ServerTest.Services
                 StrategyUid = context.Strategy.UidCode,
                 Uid = context.Strategy.CreatorUserId,
                 UsId = context.Strategy.Id,
+                ExchangeApiKeyId = context.Strategy.ExchangeApiKeyId,
                 Exchange = context.StrategyConfig?.Trade?.Exchange ?? string.Empty,
                 Symbol = context.StrategyConfig?.Trade?.Symbol ?? string.Empty,
                 TimeframeSec = context.StrategyConfig?.Trade?.TimeframeSec ?? 0,
                 OrderQty = context.StrategyConfig?.Trade?.Sizing?.OrderQty ?? 0m,
+                Leverage = context.StrategyConfig?.Trade?.Sizing?.Leverage ?? 1,
                 TakeProfitPct = context.StrategyConfig?.Trade?.Risk?.TakeProfitPct,
                 StopLossPct = context.StrategyConfig?.Trade?.Risk?.StopLossPct,
                 TrailingEnabled = context.StrategyConfig?.Trade?.Risk?.Trailing?.Enabled ?? false,
@@ -53,7 +55,7 @@ namespace ServerTest.Services
 
             if (!_queue.TryEnqueue(task))
             {
-                _logger.LogWarning("Action task enqueue failed: {Uid} Method={Method}", context.Strategy.UidCode, method.Method);
+                _logger.LogWarning("动作任务入队失败: {Uid} 方法={Method}", context.Strategy.UidCode, method.Method);
                 return BuildResult(method.Method ?? "Unknown", false, "Action task enqueue failed");
             }
 

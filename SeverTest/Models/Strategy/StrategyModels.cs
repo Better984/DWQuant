@@ -19,6 +19,7 @@ namespace ServerTest.Models.Strategy
         public string Description { get; set; } = string.Empty;
         public StrategyState State { get; set; } = StrategyState.Draft;
         public long CreatorUserId { get; set; }
+        public long? ExchangeApiKeyId { get; set; }
         public int Version { get; set; } = 1;
 
         public StrategyVisibility Visibility { get; set; } = new();
@@ -52,6 +53,7 @@ namespace ServerTest.Models.Strategy
         public decimal PriceUsdt { get; set; }
         public StrategySourceRef Source { get; set; } = new();
         public long PinnedVersionId { get; set; }
+        public long? ExchangeApiKeyId { get; set; }
         public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     }
 
@@ -112,7 +114,7 @@ namespace ServerTest.Models.Strategy
         public string Symbol { get; set; } = string.Empty;
         public int TimeframeSec { get; set; }
 
-        public string PositionMode { get; set; } = "LongShort";
+        public string PositionMode { get; set; } = "Cross";
         public string OpenConflictPolicy { get; set; } = "GiveUp";
 
         public TradeSizing Sizing { get; set; } = new();

@@ -39,3 +39,4 @@ D:\UGit\DWQuant\SeverTest\obj\Release\net8.0-windows\refint\ServerTest.dll
 D:\UGit\DWQuant\SeverTest\obj\Release\net8.0-windows\ServerTest.pdb
 D:\UGit\DWQuant\SeverTest\obj\Release\net8.0-windows\ServerTest.genruntimeconfig.cache
 D:\UGit\DWQuant\SeverTest\obj\Release\net8.0-windows\ref\ServerTest.dll
+D:\UGit\DWQuant\SeverTest\bin\Release\net8.0-windows\Aliyun.OSS.Core.dll

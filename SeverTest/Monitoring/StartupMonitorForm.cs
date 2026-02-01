@@ -54,11 +54,16 @@ namespace ServerTest.Monitoring
         private Button _tradingDetailButton = null!;
         private Button _tradingStatsButton = null!;
         private readonly RealTimeStrategyEngine _strategyEngine;
+        private readonly MarketDataEngine _marketDataEngine;
         private readonly List<StartupMonitorLogEntry> _tradingLogEntries = new();
         private const int MaxTradingLogItems = 300;
         private const string StrategyStateLogTag = "[StrategyState]";
+        private const string StrategyRunLogTag = "[StrategyRun]";
         private static readonly Regex StrategyStateLogRegex = new(
             @"uid=(\d+)\s+usId=(\d+)\s+state=([a-z_]+)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex StrategyRunLogRegex = new(
+            @"exchange=(\S+)\s+symbol=(\S+)\s+timeframe=(\S+)\s+mode=(\S+)\s+time=(\S+)\s+durationMs=(\d+)\s+matched=(\d+)\s+executed=(\d+)\s+skipped=(\d+)\s+conditions=(\d+)\s+actions=(\d+)\s+openTasks=(\d+)\s+execIds=([^\s]*)\s+openIds=([^\s]*)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private readonly Dictionary<SystemModule, ListViewItem> _statusItems = new();
@@ -80,6 +85,7 @@ namespace ServerTest.Monitoring
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
             _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _strategyEngine = serviceProvider.GetRequiredService<RealTimeStrategyEngine>();
+            _marketDataEngine = serviceProvider.GetRequiredService<MarketDataEngine>();
 
             Text = "DWQuant Server Monitor";
             StartPosition = FormStartPosition.CenterScreen;
@@ -195,8 +201,10 @@ namespace ServerTest.Monitoring
                 _logList.EnsureVisible(_logList.Items.Count - 1);
             }
 
-            if (!string.IsNullOrWhiteSpace(entry.Message) &&
-                entry.Message.Contains(StrategyStateLogTag, StringComparison.OrdinalIgnoreCase))
+            var message = entry.Message ?? string.Empty;
+            var isStateLog = message.Contains(StrategyStateLogTag, StringComparison.OrdinalIgnoreCase);
+            var isRunLog = message.Contains(StrategyRunLogTag, StringComparison.OrdinalIgnoreCase);
+            if (isStateLog || isRunLog)
             {
                 _tradingLogEntries.Add(entry);
                 if (_tradingLogEntries.Count > MaxTradingLogItems)
@@ -204,7 +212,7 @@ namespace ServerTest.Monitoring
                     _tradingLogEntries.RemoveAt(0);
                 }
 
-                AppendTradingLog(entry);
+                AppendTradingLog(entry, isStateLog);
             }
         }
 
@@ -1515,11 +1523,33 @@ private Panel BuildNetworkPanel()
                 return;
             }
 
-            var count = _strategyEngine?.GetRegisteredStrategyCount() ?? 0;
-            _tradingSummaryLabel.Text = $"\u8fd0\u884c\u4e2d\u7b56\u7565: {count}";
+            _strategyEngine.GetStateCounts(out var running, out var pausedOpen, out var testing, out var total);
+
+            var tickInfo = _marketDataEngine.GetNextTickInfo();
+            var nextSeconds = tickInfo.Next1mCloseInSeconds.HasValue ? $"{tickInfo.Next1mCloseInSeconds.Value}s" : "-";
+            var updateTfText = tickInfo.UpdateTimeframes.Count == 0 ? "-" : string.Join(",", tickInfo.UpdateTimeframes);
+            var closeTfText = tickInfo.ClosingTimeframes.Count == 0 ? "-" : string.Join(",", tickInfo.ClosingTimeframes);
+
+            var timeframeSecs = new HashSet<int>();
+            timeframeSecs.Add(60);
+            foreach (var tf in tickInfo.UpdateTimeframes)
+            {
+                var ms = MarketDataConfig.TimeframeToMs(tf);
+                if (ms > 0)
+                {
+                    timeframeSecs.Add((int)(ms / 1000));
+                }
+            }
+
+            var nextCheckCount = _strategyEngine.GetRunnableStrategyCountForTimeframes(timeframeSecs);
+
+            _tradingSummaryLabel.Text =
+                $"运行中: {running} | 暂停开新仓: {pausedOpen} | 测试: {testing} | 总数: {total}\n" +
+                $"下一次1m收线: {nextSeconds} | OnBarUpdate周期: {updateTfText}\n" +
+                $"即将收线周期: {closeTfText} | 下次检查策略数: {nextCheckCount}";
         }
 
-        private void AppendTradingLog(StartupMonitorLogEntry entry)
+        private void AppendTradingLog(StartupMonitorLogEntry entry, bool isStateLog)
         {
             if (_tradingLogList == null)
             {
@@ -1530,20 +1560,55 @@ private Panel BuildNetworkPanel()
             var uidText = "-";
             var usIdText = "-";
             var stateText = "-";
+            var contentText = message
+                .Replace(StrategyStateLogTag, string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace(StrategyRunLogTag, string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim();
 
-            var match = StrategyStateLogRegex.Match(message);
-            if (match.Success)
+            if (isStateLog)
             {
-                uidText = match.Groups[1].Value;
-                usIdText = match.Groups[2].Value;
-                stateText = match.Groups[3].Value;
+                var match = StrategyStateLogRegex.Match(message);
+                if (match.Success)
+                {
+                    uidText = match.Groups[1].Value;
+                    usIdText = match.Groups[2].Value;
+                    stateText = ToChineseState(match.Groups[3].Value);
+                    contentText = $"用户={uidText} 策略实例={usIdText} 状态={stateText}";
+                }
+            }
+            else
+            {
+                var match = StrategyRunLogRegex.Match(message);
+                if (!match.Success)
+                {
+                    return;
+                }
+
+                var executedCount = TryParseInt(match.Groups[8].Value);
+                if (executedCount <= 0)
+                {
+                    return;
+                }
+
+                var modeText = ToChineseMode(match.Groups[4].Value);
+                var timeText = match.Groups[5].Value.Replace('T', ' ');
+                var execIds = match.Groups[13].Value;
+                var openIds = match.Groups[14].Value;
+
+                stateText = modeText;
+                contentText =
+                    $"交易所={match.Groups[1].Value} 币对={match.Groups[2].Value} 周期={match.Groups[3].Value} " +
+                    $"模式={modeText} 时间={timeText} 耗时={match.Groups[6].Value}ms " +
+                    $"命中={match.Groups[7].Value} 执行={match.Groups[8].Value} 跳过={match.Groups[9].Value} " +
+                    $"条件={match.Groups[10].Value} 动作={match.Groups[11].Value} 开仓={match.Groups[12].Value} " +
+                    $"执行策略={FormatIdList(execIds)} 开仓策略={FormatIdList(openIds)}";
             }
 
             var item = new ListViewItem(entry.Timestamp.ToString("HH:mm:ss"));
             item.SubItems.Add(uidText);
             item.SubItems.Add(usIdText);
             item.SubItems.Add(stateText);
-            item.SubItems.Add(message.Replace(StrategyStateLogTag, string.Empty).Trim());
+            item.SubItems.Add(contentText);
 
             _tradingLogList.Items.Add(item);
             if (_tradingLogList.Items.Count > MaxTradingLogItems)
@@ -1552,6 +1617,40 @@ private Panel BuildNetworkPanel()
             }
 
             _tradingLogList.EnsureVisible(_tradingLogList.Items.Count - 1);
+        }
+
+        private static string ToChineseState(string state)
+        {
+            return state?.Trim().ToLowerInvariant() switch
+            {
+                "running" => "运行中",
+                "paused" => "已暂停",
+                "paused_open_position" => "暂停开新仓",
+                "completed" => "完成",
+                "testing" => "测试",
+                "error" => "错误",
+                _ => state ?? "-"
+            };
+        }
+
+        private static string ToChineseMode(string mode)
+        {
+            return mode?.Trim().ToLowerInvariant() switch
+            {
+                "close" => "收线",
+                "update" => "更新",
+                _ => mode ?? "-"
+            };
+        }
+
+        private static int TryParseInt(string value)
+        {
+            return int.TryParse(value, out var result) ? result : 0;
+        }
+
+        private static string FormatIdList(string ids)
+        {
+            return string.IsNullOrWhiteSpace(ids) ? "-" : ids;
         }
 
         private async Task StartDownloadAsync()
@@ -2460,9 +2559,3 @@ WHERE open_time >= @GapStartMs AND open_time < @GapEndMs;";
         }
     }
 }
-
-
-
-
-
-

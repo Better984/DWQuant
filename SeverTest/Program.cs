@@ -12,8 +12,13 @@ using ServerTest.Middleware;
 using ServerTest.Models;
 using ServerTest.Monitoring;
 using ServerTest.Options;
+using ServerTest.Notifications.Application;
+using ServerTest.Notifications.Infrastructure;
+using ServerTest.Notifications.Infrastructure.Delivery;
 using ServerTest.RateLimit;
 using ServerTest.Services;
+using ServerTest.Services.StrategyRunCheck;
+using ServerTest.Services.StrategyRunCheck.Checks;
 using ServerTest.Strategy;
 using ServerTest.WebSockets;
 using StackExchange.Redis;
@@ -69,7 +74,20 @@ builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<RedisCacheService>();
 builder.Services.AddScoped<AuthTokenService>();
 builder.Services.AddScoped<VerificationCodeService>();
-builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection("Notification"));
+builder.Services.AddSingleton<NotificationRepository>();
+builder.Services.AddSingleton<NotificationPreferenceRepository>();
+builder.Services.AddSingleton<UserNotifyChannelRepository>();
+builder.Services.AddSingleton<INotificationTemplateRenderer, NotificationTemplateRenderer>();
+builder.Services.AddSingleton<INotificationPreferenceResolver, NotificationPreferenceResolver>();
+builder.Services.AddSingleton<NotificationPreferenceService>();
+builder.Services.AddSingleton<INotificationPublisher, NotificationPublisher>();
+builder.Services.AddSingleton<INotificationSender, EmailNotificationSender>();
+builder.Services.AddSingleton<INotificationSender, DingTalkNotificationSender>();
+builder.Services.AddSingleton<INotificationSender, WeComNotificationSender>();
+builder.Services.AddSingleton<INotificationSender, TelegramNotificationSender>();
+builder.Services.AddHostedService<NotificationDeliveryWorker>();
 builder.Services.AddDbInfrastructure(builder.Configuration);
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<AccountService>();
@@ -87,8 +105,7 @@ builder.Services.AddSingleton<IRateLimiter, RedisRateLimiter>();
 builder.Services.AddSingleton<IConnectionManager, RedisConnectionManager>();
 
 // ============================================================================
-// 第四阶段：实盘交易系统服务注册
-// ============================================================================
+// 第四阶段：实盘交易系统服务注�?// ============================================================================
 // 行情数据引擎
 builder.Services.AddSingleton<MarketDataEngine>();
 
@@ -108,13 +125,23 @@ builder.Services.AddSingleton<StrategyActionTaskQueue>();
 builder.Services.AddSingleton<IStrategyValueResolver, IndicatorValueResolver>();
 builder.Services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
 builder.Services.AddSingleton<StrategyJsonLoader>();
+builder.Services.AddSingleton<StrategyEngineRunLogQueue>();
+builder.Services.AddSingleton<StrategyEngineRunLogRepository>();
 builder.Services.AddSingleton<RealTimeStrategyEngine>();
 builder.Services.AddSingleton<StrategyPositionRepository>();
+builder.Services.AddSingleton<StrategyPositionCloseService>();
 builder.Services.AddSingleton<UserExchangeApiKeyRepository>();
+builder.Services.AddSingleton<StrategyRunCheckLogRepository>();
+builder.Services.AddSingleton<StrategyRunCheckService>();
+builder.Services.AddSingleton<IStrategyRunCheck, ApiKeyRunCheck>();
+builder.Services.AddSingleton<IStrategyRunCheck, PositionModeRunCheck>();
+builder.Services.AddSingleton<IStrategyRunCheck, BalanceRunCheck>();
 builder.Services.AddSingleton<PositionRiskConfigStore>();
 builder.Services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
+builder.Services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
 builder.Services.AddHostedService<TradeActionConsumer>();
 builder.Services.AddHostedService<PositionRiskEngine>();
+builder.Services.AddHostedService<StrategyEngineRunLogWriter>();
 
 // 策略运行时服务（后台服务）
 builder.Services.AddHostedService<StrategyRuntimeHostedService>();
@@ -135,6 +162,7 @@ builder.Services.AddHostedService<KlineCloseListenerService>();
 // 配置选项
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection("RateLimit"));
 builder.Services.Configure<Microsoft.AspNetCore.Builder.WebSocketOptions>(builder.Configuration.GetSection("WebSocket"));
+builder.Services.Configure<TradingOptions>(builder.Configuration.GetSection("Trading"));
 
 // ============================================================================
 // 构建应用
@@ -142,8 +170,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.WebSocketOptions>(builde
 var app = builder.Build();
 
 // ============================================================================
-// 第六阶段：系统启动流程
-// ============================================================================
+// 第六阶段：系统启动流�?// ============================================================================
 var startupManager = app.Services.GetRequiredService<SystemStartupManager>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var startupMonitorHost = app.Services.GetRequiredService<StartupMonitorHost>();
@@ -151,9 +178,9 @@ startupMonitorHost.Start(startupManager);
 var wsConfig = app.Services.GetRequiredService<IOptions<ServerTest.Options.WebSocketOptions>>().Value;
 
 logger.LogInformation("");
-logger.LogInformation("╔═══════════════════════════════════════════════════════════╗");
-logger.LogInformation("║          DWQuant 量化交易系统启动流程                    ║");
-logger.LogInformation("╚═══════════════════════════════════════════════════════════╝");
+logger.LogInformation("╔═══════════════════════════════════════════════════════════�?");
+logger.LogInformation("�?         DWQuant 量化交易系统启动流程                    �?");
+logger.LogInformation("╚═══════════════════════════════════════════════════════════�?");
 logger.LogInformation("");
 
 try
@@ -186,9 +213,8 @@ try
     }
 
     // ========================================================================
-    // 步骤 2：启动行情数据引擎
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.MarketDataEngine, "行情数据引擎（WebSocket 订阅）");
+    // 步骤 2：启动行情数据引�?    // ========================================================================
+    startupManager.MarkStarting(SystemModule.MarketDataEngine, "行情数据引擎（WebSocket 订阅�?");
 
     var marketDataEngine = app.Services.GetRequiredService<MarketDataEngine>();
 
@@ -199,48 +225,42 @@ try
     try
     {
         await marketDataEngine.WaitForInitializationAsync();
-        startupManager.MarkReady(SystemModule.MarketDataEngine, "行情数据引擎已就绪");
+        startupManager.MarkReady(SystemModule.MarketDataEngine, "行情数据引擎已就�?");
     }
     catch (Exception ex)
     {
-        startupManager.MarkFailed(SystemModule.MarketDataEngine, $"行情引擎初始化失败: {ex.Message}");
-        logger.LogError(ex, "行情引擎初始化失败");
+        startupManager.MarkFailed(SystemModule.MarketDataEngine, $"行情引擎初始化失�? {ex.Message}");
+        logger.LogError(ex, "行情引擎初始化失�?");
         throw;
     }
 
     // ========================================================================
-    // 步骤 3：启动指标引擎
-    // ========================================================================
+    // 步骤 3：启动指标引�?    // ========================================================================
     startupManager.MarkStarting(SystemModule.IndicatorEngine, "指标计算引擎");
 
     var indicatorEngine = app.Services.GetRequiredService<IndicatorEngine>();
-    // 指标引擎在 StrategyRuntimeHostedService 中启动，这里只标记
-    startupManager.MarkReady(SystemModule.IndicatorEngine, "指标引擎已注册");
+    // 指标引擎�?StrategyRuntimeHostedService 中启动，这里只标�?    startupManager.MarkReady(SystemModule.IndicatorEngine, "指标引擎已注�?");
 
     // ========================================================================
-    // 步骤 4：启动策略引擎
-    // ========================================================================
+    // 步骤 4：启动策略引�?    // ========================================================================
     startupManager.MarkStarting(SystemModule.StrategyEngine, "实时策略执行引擎");
 
     var strategyEngine = app.Services.GetRequiredService<RealTimeStrategyEngine>();
-    // 策略引擎在 StrategyRuntimeHostedService 中启动，这里只标记
-    startupManager.MarkReady(SystemModule.StrategyEngine, "策略引擎已注册");
+    // 策略引擎�?StrategyRuntimeHostedService 中启动，这里只标�?    startupManager.MarkReady(SystemModule.StrategyEngine, "策略引擎已注�?");
 
     // ========================================================================
-    // 步骤 5：启动实盘交易系统（整体）
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.TradingSystem, "实盘交易系统（行情+指标+策略）");
+    // 步骤 5：启动实盘交易系统（整体�?    // ========================================================================
+    startupManager.MarkStarting(SystemModule.TradingSystem, "实盘交易系统（行�?指标+策略�?");
 
     // 等待策略运行时服务启动（通过检查策略引擎是否有策略注册来判断）
-    logger.LogInformation("等待策略运行时服务启动...");
-    await Task.Delay(2000); // 给 StrategyRuntimeHostedService 一些启动时间
-
-    startupManager.MarkReady(SystemModule.TradingSystem, "实盘交易系统已就绪");
+    logger.LogInformation("等待策略运行时服务启�?..");
+    await Task.Delay(2000); // �?StrategyRuntimeHostedService 一些启动时�?
+    startupManager.MarkReady(SystemModule.TradingSystem, "实盘交易系统已就�?");
 
     // ========================================================================
     // 步骤 6：启动网络层
     // ========================================================================
-    startupManager.MarkStarting(SystemModule.Network, "网络层（HTTP API + WebSocket）");
+    startupManager.MarkStarting(SystemModule.Network, "网络层（HTTP API + WebSocket�?");
 
     // HTTP 管道配置
     if (app.Environment.IsDevelopment())
@@ -269,25 +289,23 @@ try
     startupManager.MarkReady(SystemModule.Network, "网络层已就绪");
 
     // ========================================================================
-    // 启动完成，打印状态摘要
-    // ========================================================================
+    // 启动完成，打印状态摘�?    // ========================================================================
     startupManager.PrintStatusSummary();
 
-    logger.LogInformation("╔═══════════════════════════════════════════════════════════╗");
-    logger.LogInformation("║          ✅ 系统启动完成，开始监听请求                    ║");
-    logger.LogInformation("╚═══════════════════════════════════════════════════════════╝");
+    logger.LogInformation("╔═══════════════════════════════════════════════════════════�?");
+    logger.LogInformation("�?         �?系统启动完成，开始监听请�?                   �?");
+    logger.LogInformation("╚═══════════════════════════════════════════════════════════�?");
     logger.LogInformation("");
 }
 catch (Exception ex)
 {
-    logger.LogCritical(ex, "❌ 系统启动失败，应用将退出");
+    logger.LogCritical(ex, "�?系统启动失败，应用将退�?");
     startupManager.PrintStatusSummary();
     throw;
 }
 
 // ============================================================================
-// 第七阶段：路由配置
-// ============================================================================
+// 第七阶段：路由配�?// ============================================================================
 // WebSocket 路由
 app.Map(wsConfig.Path, wsApp =>
 {
@@ -303,7 +321,7 @@ app.Map(wsConfig.Path, wsApp =>
         var system = context.Request.Query["system"].ToString();
         if (string.IsNullOrWhiteSpace(system))
         {
-            logger.LogWarning("WS missing system parameter");
+            logger.LogWarning("WebSocket缺少system参数");
             await WriteErrorAsync(context, StatusCodes.Status400BadRequest, "bad_request", "Missing system");
             return;
         }
@@ -311,7 +329,7 @@ app.Map(wsConfig.Path, wsApp =>
         var token = GetWebSocketToken(context);
         if (string.IsNullOrWhiteSpace(token))
         {
-            logger.LogWarning("WS missing token");
+            logger.LogWarning("WebSocket缺少token");
             await WriteErrorAsync(context, StatusCodes.Status401Unauthorized, "unauthorized", "Missing token");
             return;
         }
@@ -320,7 +338,7 @@ app.Map(wsConfig.Path, wsApp =>
         var tokenValidation = await tokenService.ValidateTokenAsync(token);
         if (!tokenValidation.IsValid)
         {
-            logger.LogWarning("WS invalid token");
+            logger.LogWarning("WebSocket token无效");
             await WriteErrorAsync(context, StatusCodes.Status401Unauthorized, "unauthorized", "Invalid token");
             return;
         }
@@ -328,7 +346,7 @@ app.Map(wsConfig.Path, wsApp =>
         var userId = tokenValidation.UserId;
         if (string.IsNullOrWhiteSpace(userId))
         {
-            logger.LogWarning("WS missing user id claim");
+            logger.LogWarning("WebSocket缺少用户ID声明");
             await WriteErrorAsync(context, StatusCodes.Status403Forbidden, "forbidden", "Missing user id");
             return;
         }
@@ -367,7 +385,7 @@ app.Map(wsConfig.Path, wsApp =>
 
             if (!kicked || !reserved)
             {
-                logger.LogWarning("WS connection limit reached for user {UserId} system {System}", userId, system);
+                logger.LogWarning("WebSocket连接数达到上�? 用户 {UserId} 系统 {System}", userId, system);
                 await WriteErrorAsync(context, StatusCodes.Status403Forbidden, "connection_limit", "Too many connections for this system");
                 return;
             }
@@ -387,7 +405,7 @@ app.Map(wsConfig.Path, wsApp =>
             throw;
         }
 
-        logger.LogInformation("WS connected: user {UserId} system {System} connection {ConnectionId}", userId, system, connection.ConnectionId);
+        logger.LogInformation("WebSocket已连�? 用户 {UserId} 系统 {System} 连接 {ConnectionId}", userId, system, connection.ConnectionId);
 
         try
         {
@@ -395,7 +413,7 @@ app.Map(wsConfig.Path, wsApp =>
         }
         finally
         {
-            logger.LogInformation("WS disconnected: user {UserId} system {System} connection {ConnectionId}", userId, system, connection.ConnectionId);
+            logger.LogInformation("WebSocket已断开: 用户 {UserId} 系统 {System} 连接 {ConnectionId}", userId, system, connection.ConnectionId);
         }
     });
 });
@@ -404,13 +422,12 @@ app.Map(wsConfig.Path, wsApp =>
 app.MapControllers();
 
 // ============================================================================
-// 第八阶段：启动 HTTP 服务器
-// ============================================================================
+// 第八阶段：启�?HTTP 服务�?// ============================================================================
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
-startupLogger.LogInformation("🌐 HTTP 服务器启动");
+startupLogger.LogInformation("🌐 HTTP 服务器启�?");
 startupLogger.LogInformation("📍 监听地址: http://localhost:9635");
 startupLogger.LogInformation("📖 Swagger UI: http://localhost:9635/swagger");
-startupLogger.LogInformation("❤️  健康检查: http://localhost:9635/api/health");
+startupLogger.LogInformation("❤️  健康检�? http://localhost:9635/api/health");
 startupLogger.LogInformation("");
 
 app.Run();

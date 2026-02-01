@@ -651,6 +651,98 @@
   color: rgba(0, 0, 0, 0.45);
 }
 
+.user-settings-notify-preference {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.user-settings-notify-preference-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.user-settings-notify-preference-row {
+  display: grid;
+  grid-template-columns: 90px 60px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-settings-notify-preference-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.user-settings-notify-preference-select {
+  min-width: 160px;
+}
+
+.user-settings-notify-preference-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.user-settings-notify-preference-hint {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.user-settings-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 46px;
+  height: 24px;
+}
+
+.user-settings-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.user-settings-switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.15);
+  transition: 0.2s;
+  border-radius: 999px;
+}
+
+.user-settings-switch-slider::before {
+  position: absolute;
+  content: '';
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: 0.2s;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.user-settings-switch input:checked + .user-settings-switch-slider {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.user-settings-switch input:checked + .user-settings-switch-slider::before {
+  transform: translateX(22px);
+}
+
 .user-settings-notify-state {
   padding: 8px 12px;
   border-radius: 12px;
@@ -976,8 +1068,14 @@
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+.dark-theme .user-settings-notify-preference {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 .dark-theme .user-settings-notify-title,
-.dark-theme .user-settings-notify-form-title {
+.dark-theme .user-settings-notify-form-title,
+.dark-theme .user-settings-notify-preference-title {
   color: #ffffff;
 }
 
@@ -985,7 +1083,9 @@
 .dark-theme .user-settings-notify-line,
 .dark-theme .user-settings-notify-empty,
 .dark-theme .user-settings-notify-hint,
-.dark-theme .user-settings-notify-limit {
+.dark-theme .user-settings-notify-limit,
+.dark-theme .user-settings-notify-preference-hint,
+.dark-theme .user-settings-notify-preference-label {
   color: rgba(255, 255, 255, 0.5);
 }
 

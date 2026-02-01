@@ -138,12 +138,12 @@ namespace ServerTest.Infrastructure.Db
 
             if (metrics.ElapsedMilliseconds >= _options.SlowQueryThresholdMs)
             {
-                _logger.LogWarning("Slow SQL ({ElapsedMs}ms, rows {Rows}): {Sql}", metrics.ElapsedMilliseconds, metrics.RowsAffected, metrics.Sql);
+                _logger.LogWarning("慢SQL查询 ({ElapsedMs}毫秒, 行数 {Rows}): {Sql}", metrics.ElapsedMilliseconds, metrics.RowsAffected, metrics.Sql);
             }
-            else
-            {
-                _logger.LogDebug("SQL ({ElapsedMs}ms, rows {Rows}): {Sql}", metrics.ElapsedMilliseconds, metrics.RowsAffected, metrics.Sql);
-            }
+            // else
+            // {
+            //     _logger.LogDebug("SQL ({ElapsedMs}ms, rows {Rows}): {Sql}", metrics.ElapsedMilliseconds, metrics.RowsAffected, metrics.Sql);
+            // }
         }
     }
 }

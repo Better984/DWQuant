@@ -113,70 +113,104 @@ namespace ServerTest.Services
 
         public async Task WarmUpCacheAsync(DateTime startDate, CancellationToken ct = default)
         {
-            // 预热缓存：按交易所/币对/周期读取数据库并写入内存
             // 只预热币安
             List<MarketDataConfig.ExchangeEnum> exchangesToPreload = new()
             {
                 MarketDataConfig.ExchangeEnum.Binance
             };
+
             var preloadLimit = ResolvePreloadLimit();
-            foreach (var exchangeEnum in exchangesToPreload)//Enum.GetValues<MarketDataConfig.ExchangeEnum>())
+            var startMs = new DateTimeOffset(startDate).ToUnixTimeMilliseconds();
+
+            // 汇总统计
+            int combosTotal = 0, combosOk = 0, combosNoData = 0, combosFail = 0;
+            long totalRows = 0;
+
+            // 可选：记录全局最早/最晚时间范围（跨所有组合）
+            long? globalMinTs = null;
+            long? globalMaxTs = null;
+
+            // 可选：记录失败明细（避免太长，限制条数）
+            const int maxFailDetails = 10;
+            var failDetails = new List<string>(maxFailDetails);
+
+            foreach (var exchangeEnum in exchangesToPreload)
             {
                 var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
+
                 foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
                 {
                     var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
+
                     foreach (var timeframeEnum in Enum.GetValues<MarketDataConfig.TimeframeEnum>())
                     {
                         var timeframeStr = MarketDataConfig.TimeframeToString(timeframeEnum);
                         var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
                         var cacheKey = BuildCacheKey(exchangeId, symbolStr, timeframeStr);
 
+                        combosTotal++;
+
                         try
                         {
-                            var startMs = new DateTimeOffset(startDate).ToUnixTimeMilliseconds();
-                            // 尽可能多地缓存：读取 MaxCacheBars 条
-                            Logger.LogInformation(
-                                "历史行情预热读取：{Exchange} {Symbol} {Timeframe} 起始={StartDate} 上限={MaxBars}",
-                                exchangeId,
-                                symbolStr,
-                                timeframeStr,
-                                startDate.ToString("yyyy-MM-dd"),
-                                preloadLimit == int.MaxValue ? "不限" : preloadLimit.ToString());
                             var rows = await QueryRangeAsync(tableName, startMs, null, preloadLimit, ct);
                             UpdateCache(cacheKey, rows);
+
                             if (rows.Count == 0)
                             {
-                                Logger.LogInformation(
-                                    "历史行情预热结果：{Exchange} {Symbol} {Timeframe} 无数据",
-                                    exchangeId,
-                                    symbolStr,
-                                    timeframeStr);
+                                combosNoData++;
+                                continue;
                             }
-                            else
-                            {
-                                var startText = DateTimeOffset.FromUnixTimeMilliseconds((long)(rows[0].timestamp ?? 0))
-                                    .LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-                                var endText = DateTimeOffset.FromUnixTimeMilliseconds((long)(rows[^1].timestamp ?? 0))
-                                    .LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-                                Logger.LogInformation(
-                                    "历史行情预热结果：{Exchange} {Symbol} {Timeframe} 共{Count}条 范围={Start}~{End}",
-                                    exchangeId,
-                                    symbolStr,
-                                    timeframeStr,
-                                    rows.Count,
-                                    startText,
-                                    endText);
-                            }
+
+                            combosOk++;
+                            totalRows += rows.Count;
+
+                            var firstTs = (long)(rows[0].timestamp ?? 0);
+                            var lastTs = (long)(rows[^1].timestamp ?? 0);
+
+                            globalMinTs = globalMinTs is null ? firstTs : Math.Min(globalMinTs.Value, firstTs);
+                            globalMaxTs = globalMaxTs is null ? lastTs : Math.Max(globalMaxTs.Value, lastTs);
                         }
                         catch (Exception ex)
                         {
-                            Logger.LogWarning(ex, "历史行情预热失败: {Table}", tableName);
+                            combosFail++;
+                            if (failDetails.Count < maxFailDetails)
+                                failDetails.Add($"{exchangeId}/{symbolStr}/{timeframeStr}({tableName}): {ex.GetType().Name} {ex.Message}");
+                            // 不在循环内打 log
                         }
                     }
                 }
             }
+
+            string rangeText;
+            if (globalMinTs is null || globalMaxTs is null)
+            {
+                rangeText = "无";
+            }
+            else
+            {
+                var startText = DateTimeOffset.FromUnixTimeMilliseconds(globalMinTs.Value)
+                    .LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                var endText = DateTimeOffset.FromUnixTimeMilliseconds(globalMaxTs.Value)
+                    .LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                rangeText = $"{startText}~{endText}";
+            }
+
+            var limitText = preloadLimit == int.MaxValue ? "不限" : preloadLimit.ToString();
+
+            // 只输出这一条
+            Logger.LogInformation(
+                "历史行情预热完成：起始={StartDate} 上限={MaxBars} 组合={Total}(成功={Ok},无数据={NoData},失败={Fail}) 总条数={Rows} 全局范围={Range} 失败示例={FailExamples}",
+                startDate.ToString("yyyy-MM-dd"),
+                limitText,
+                combosTotal,
+                combosOk,
+                combosNoData,
+                combosFail,
+                totalRows,
+                rangeText,
+                failDetails.Count == 0 ? "无" : string.Join(" | ", failDetails));
         }
+
 
         private int ResolvePreloadLimit()
         {

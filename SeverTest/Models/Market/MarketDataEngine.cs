@@ -1,6 +1,7 @@
 using ccxt;
 using Microsoft.Extensions.Logging;
 using ServerTest.Models;
+using ServerTest.Models.Market;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
@@ -73,6 +74,71 @@ namespace ServerTest.Services
         /// 获取其他周期列表（除1m外）
         /// </summary>
         private string[] GetOtherTimeframes() => _otherTimeframes;
+
+        public MarketDataNextTickInfo GetNextTickInfo()
+        {
+            long? latest1mTimestamp = null;
+
+            foreach (var exchangeEntry in _cache)
+            {
+                foreach (var symbolEntry in exchangeEntry.Value)
+                {
+                    var symbolCache = symbolEntry.Value;
+                    if (!symbolCache.Timeframes.TryGetValue("1m", out var candles))
+                    {
+                        continue;
+                    }
+
+                    lock (symbolCache.Lock)
+                    {
+                        if (candles.Count == 0 || candles[^1].timestamp == null)
+                        {
+                            continue;
+                        }
+
+                        var ts = (long)candles[^1].timestamp;
+                        if (!latest1mTimestamp.HasValue || ts > latest1mTimestamp.Value)
+                        {
+                            latest1mTimestamp = ts;
+                        }
+                    }
+                }
+            }
+
+            DateTimeOffset? nextCloseAt = null;
+            int? nextCloseInSeconds = null;
+            var closingTimeframes = new List<string>();
+
+            if (latest1mTimestamp.HasValue)
+            {
+                var next1mTimestamp = latest1mTimestamp.Value + 60_000;
+                nextCloseAt = DateTimeOffset.FromUnixTimeMilliseconds(next1mTimestamp);
+                var deltaSeconds = (int)Math.Round((nextCloseAt.Value - DateTimeOffset.UtcNow).TotalSeconds);
+                nextCloseInSeconds = Math.Max(0, deltaSeconds);
+
+                foreach (var timeframe in _otherTimeframes)
+                {
+                    var tfMs = MarketDataConfig.TimeframeToMs(timeframe);
+                    if (tfMs <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (next1mTimestamp % tfMs == 0)
+                    {
+                        closingTimeframes.Add(timeframe);
+                    }
+                }
+            }
+
+            return new MarketDataNextTickInfo
+            {
+                Next1mCloseAt = nextCloseAt,
+                Next1mCloseInSeconds = nextCloseInSeconds,
+                UpdateTimeframes = _otherTimeframes,
+                ClosingTimeframes = closingTimeframes
+            };
+        }
 
         /// <summary>
         /// 等待初始化完成
@@ -443,7 +509,7 @@ namespace ServerTest.Services
                                 cache1m.RemoveAt(0);
                             }
 
-                            Logger.LogInformation($"[{exchangeId}] {symbol} 1m 新K线: time={FormatTimestamp(timestamp)} close={latest.close}");
+                            // Logger.LogInformation($"[{exchangeId}] {symbol} 1m 新K线: time={FormatTimestamp(timestamp)} close={latest.close}");
 
                             // 输出最新的5根K线
                             // Logger.LogInformation($"[{exchangeId}] {symbol} 1m 最新的5根K线: \n" +
@@ -1119,9 +1185,10 @@ namespace ServerTest.Services
                 return;
             }
 
-            var modeText = isBarClose ? "收线" : "更新";
-            Logger.LogInformation(
-                $"[{exchangeId}] {symbol} {timeframe} 实时行情任务入队({modeText}): time={FormatTimestamp(candleTimestamp)}");
+
+            // var modeText = isBarClose ? "收线" : "更新";
+            // Logger.LogInformation(
+            //     $"[{exchangeId}] {symbol} {timeframe} 实时行情任务入队({modeText}): time={FormatTimestamp(candleTimestamp)}");
         }
 
         private void EnqueueOnBarUpdateTasks(

@@ -5,7 +5,7 @@ import StrategyEditorFlow, { type StrategyEditorSubmitPayload } from './Strategy
 import StrategyHistoryDialog, { type StrategyHistoryVersion } from './StrategyHistoryDialog';
 import StrategyShareDialog, { type SharePolicyPayload } from './StrategyShareDialog';
 import StrategyShareImportDialog from './StrategyShareImportDialog';
-import StrategyDetailDialog, { type StrategyDetailRecord } from './StrategyDetailDialog';
+import StrategyDetailDialog, { type StrategyDetailRecord, type StrategyPositionRecord } from './StrategyDetailDialog';
 import type { StrategyConfig, StrategyTradeConfig } from './StrategyModule.types';
 import AvatarByewind from '../assets/SnowUI/head/AvatarByewind.svg';
 import { Dialog, useNotification } from './ui';
@@ -21,6 +21,7 @@ type StrategyListRecord = {
   description: string;
   state: string;
   versionNo: number;
+  exchangeApiKeyId?: number | null;
   configJson?: StrategyConfig;
   updatedAt?: string;
   officialDefId?: number | null;
@@ -29,6 +30,10 @@ type StrategyListRecord = {
   templateVersionNo?: number | null;
   marketId?: number | null;
   marketVersionNo?: number | null;
+};
+
+type PositionListResponse = {
+  items?: StrategyPositionRecord[];
 };
 
 const resolveStatus = (state: string | undefined): StrategyItemProps['status'] => {
@@ -116,6 +121,7 @@ const StrategyList: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeStrategy, setActiveStrategy] = useState<StrategyListRecord | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<'createVersion' | 'edit'>('createVersion');
   const [historyStrategy, setHistoryStrategy] = useState<StrategyListRecord | null>(null);
   const [historyVersions, setHistoryVersions] = useState<StrategyHistoryVersion[]>([]);
   const [selectedHistoryVersionId, setSelectedHistoryVersionId] = useState<number | null>(null);
@@ -158,7 +164,40 @@ const StrategyList: React.FC = () => {
       return;
     }
     setActiveStrategy(target);
+    setEditorMode('createVersion');
     setIsEditorOpen(true);
+  };
+
+  const handleEditStrategy = (usId: number) => {
+    const target = records.find((item) => item.usId === usId) ?? null;
+    if (!target) {
+      return;
+    }
+    setActiveStrategy(target);
+    setEditorMode('edit');
+    setIsEditorOpen(true);
+  };
+
+  const fetchOpenPositionsCount = async (usId: number) => {
+    const data = await client.get<PositionListResponse>('/api/positions/by-strategy', {
+      usId,
+      status: 'Open',
+    });
+    const items = Array.isArray(data?.items) ? data.items : [];
+    return items.length;
+  };
+
+  const fetchStrategyPositions = async (usId: number) => {
+    const data = await client.get<PositionListResponse>('/api/positions/by-strategy', {
+      usId,
+      status: 'all',
+    });
+    return Array.isArray(data?.items) ? data.items : [];
+  };
+
+  const closeStrategyPositions = async (usId: number) => {
+    await client.post('/api/positions/close-by-strategy', { usId });
+    await fetchStrategies();
   };
 
   const handleViewHistory = async (usId: number) => {
@@ -342,6 +381,7 @@ const StrategyList: React.FC = () => {
       usId: activeStrategy.usId,
       configJson: payload.configJson,
       changelog: '',
+      exchangeApiKeyId: payload.exchangeApiKeyId,
     });
   };
 
@@ -385,14 +425,16 @@ const StrategyList: React.FC = () => {
             key={activeStrategy.usId}
             onClose={closeEditor}
             onSubmit={handleSubmitUpdate}
-            submitLabel="创建新版本"
-            successMessage="新版本创建成功"
-            errorMessage="创建新版本失败，请稍后重试"
+            submitLabel={editorMode === 'edit' ? '保存修改' : '创建新版本'}
+            successMessage={editorMode === 'edit' ? '策略修改成功' : '新版本创建成功'}
+            errorMessage={editorMode === 'edit' ? '修改失败，请稍后重试' : '创建新版本失败，请稍后重试'}
             initialName={activeStrategy.aliasName || activeStrategy.defName}
             initialDescription={activeStrategy.description}
             initialTradeConfig={initialTradeConfig}
             initialConfig={activeStrategy.configJson}
+            initialExchangeApiKeyId={activeStrategy.exchangeApiKeyId ?? null}
             disableMetaFields={true}
+            openConfigDirectly={editorMode === 'edit'}
           />
         )}
       </Dialog>
@@ -470,6 +512,10 @@ const StrategyList: React.FC = () => {
             onCreateShare={handleCreateShare}
             onUpdateStatus={handleUpdateStatus}
             onDelete={handleDelete}
+            onEditStrategy={handleEditStrategy}
+            onFetchOpenPositionsCount={fetchOpenPositionsCount}
+            onFetchPositions={fetchStrategyPositions}
+            onClosePositions={closeStrategyPositions}
             onPublishOfficial={handlePublishOfficial}
             onPublishTemplate={handlePublishTemplate}
             onPublishMarket={handlePublishMarket}

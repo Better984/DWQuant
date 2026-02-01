@@ -36,7 +36,7 @@ namespace ServerTest.RateLimit
             var userId = TryGetUserId(context, jwtService);
             if (!string.IsNullOrWhiteSpace(userId) && !rateLimiter.Allow(userId, Protocol.Http))
             {
-                _logger.LogWarning("HTTP rate limit hit for user {UserId} path {Path}", userId, path);
+                _logger.LogWarning("HTTP速率限制触发: 用户 {UserId} 路径 {Path}", userId, path);
                 await WriteErrorAsync(context, StatusCodes.Status429TooManyRequests, "rate_limit", "HTTP rate limit exceeded");
                 return;
             }

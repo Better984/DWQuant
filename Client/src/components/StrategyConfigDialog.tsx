@@ -31,12 +31,20 @@ interface StrategyConfigDialogProps {
   strategyDescription: string;
   exchangeOptions: TradeOption[];
   symbolOptions: TradeOption[];
+  positionModeOptions: TradeOption[];
   timeframeOptions: TimeframeOption[];
   leverageOptions: number[];
+  exchangeApiKeyOptions: { id: number; label: string }[];
+  selectedExchangeApiKeyId: number | null;
+  selectedExchangeApiKeyLabel: string | null;
+  showExchangeApiKeySelector: boolean;
+  onExchangeApiKeySelect: (id: number) => void;
+  onExchangeApiKeyBack: () => void;
   onStrategyNameChange: (value: string) => void;
   onStrategyDescriptionChange: (value: string) => void;
   onExchangeChange: (value: string) => void;
   onSymbolChange: (value: string) => void;
+  onPositionModeChange: (value: string) => void;
   onTimeframeChange: (value: number) => void;
   updateTradeSizing: (key: keyof StrategyTradeConfig['sizing'], value: number) => void;
   updateTradeRisk: (key: keyof StrategyTradeConfig['risk'], value: number) => void;
@@ -73,12 +81,20 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
   strategyDescription,
   exchangeOptions,
   symbolOptions,
+  positionModeOptions,
   timeframeOptions,
   leverageOptions,
+  exchangeApiKeyOptions,
+  selectedExchangeApiKeyId,
+  selectedExchangeApiKeyLabel,
+  showExchangeApiKeySelector,
+  onExchangeApiKeySelect,
+  onExchangeApiKeyBack,
   onStrategyNameChange,
   onStrategyDescriptionChange,
   onExchangeChange,
   onSymbolChange,
+  onPositionModeChange,
   onTimeframeChange,
   updateTradeSizing,
   updateTradeRisk,
@@ -217,13 +233,21 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
           strategyName={strategyName}
           strategyDescription={strategyDescription}
           exchangeOptions={exchangeOptions}
+          exchangeApiKeyOptions={exchangeApiKeyOptions}
+          selectedExchangeApiKeyId={selectedExchangeApiKeyId}
+          selectedExchangeApiKeyLabel={selectedExchangeApiKeyLabel}
+          showExchangeApiKeySelector={showExchangeApiKeySelector}
+          onExchangeApiKeySelect={onExchangeApiKeySelect}
+          onExchangeApiKeyBack={onExchangeApiKeyBack}
           symbolOptions={symbolOptions}
+          positionModeOptions={positionModeOptions}
           timeframeOptions={timeframeOptions}
           leverageOptions={leverageOptions}
           onStrategyNameChange={onStrategyNameChange}
           onStrategyDescriptionChange={onStrategyDescriptionChange}
           onExchangeChange={onExchangeChange}
           onSymbolChange={onSymbolChange}
+          onPositionModeChange={onPositionModeChange}
           onTimeframeChange={onTimeframeChange}
           updateTradeSizing={updateTradeSizing}
           updateTradeRisk={updateTradeRisk}
