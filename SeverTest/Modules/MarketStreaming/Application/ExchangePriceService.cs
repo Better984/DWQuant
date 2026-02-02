@@ -258,10 +258,10 @@ namespace ServerTest.Modules.MarketStreaming.Application
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)last.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Console.WriteLine(
-                        $"[币安合约] {symbol} {timeframe} " +
-                        $"时间: {ts:yyyy-MM-dd HH:mm:ss} " +
-                        $"开: {last.open} 高: {last.high} 低: {last.low} 收: {last.close} 量: {last.volume}");
+                    //Console.WriteLine(
+                    //    $"[币安合约] {symbol} {timeframe} " +
+                    //    $"时间: {ts:yyyy-MM-dd HH:mm:ss} " +
+                    //    $"开: {last.open} 高: {last.high} 低: {last.low} 收: {last.close} 量: {last.volume}");
 
                     var priceData = new PriceData
                     {

@@ -22,6 +22,7 @@ namespace ServerTest.Modules.TradingExecution.Application
         private readonly MarketDataEngine _marketDataEngine;
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
+        private readonly PositionRiskIndexManager _riskIndexManager;
         private readonly INotificationPublisher _notificationPublisher;
         private readonly ILogger<TradeActionConsumer> _logger;
 
@@ -31,6 +32,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             MarketDataEngine marketDataEngine,
             IOrderExecutor orderExecutor,
             PositionRiskConfigStore riskConfigStore,
+            PositionRiskIndexManager riskIndexManager,
             INotificationPublisher notificationPublisher,
             ILogger<TradeActionConsumer> logger)
         {
@@ -39,6 +41,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
+            _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
             _notificationPublisher = notificationPublisher ?? throw new ArgumentNullException(nameof(notificationPublisher));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -194,17 +197,22 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             // 10. 将仓位记录保存到数据库
             var positionId = await _positionRepository.InsertAsync(entity, ct).ConfigureAwait(false);
+            entity.PositionId = positionId;
 
             // 11. 如果启用了追踪止损，保存追踪止损配置到风险配置存储
+            PositionRiskConfig? riskConfig = null;
             if (task.TrailingEnabled)
             {
-                _riskConfigStore.Upsert(positionId, new PositionRiskConfig
+                riskConfig = new PositionRiskConfig
                 {
                     Side = positionSide,
                     ActivationPct = task.TrailingActivationPct,  // 追踪止损激活百分比
                     DrawdownPct = task.TrailingDrawdownPct     // 追踪止损回撤百分比
-                });
+                };
+                _riskConfigStore.Upsert(positionId, riskConfig);
             }
+
+            _riskIndexManager.UpsertPosition(entity, riskConfig);
 
             // 12. 记录开仓成功日志
             _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
@@ -274,6 +282,7 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             await _positionRepository.CloseAsync(existing.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, ct).ConfigureAwait(false);
             _riskConfigStore.Remove(existing.PositionId);
+            _riskIndexManager.RemovePosition(existing.PositionId);
 
             _logger.LogInformation("仓位已平: id={PositionId} uid={Uid} usId={UsId}", existing.PositionId, existing.Uid, existing.UsId);
         }

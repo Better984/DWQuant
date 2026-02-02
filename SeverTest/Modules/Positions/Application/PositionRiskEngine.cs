@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ServerTest.Domain.Entities;
 using ServerTest.Models;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Modules.TradingExecution.Domain;
@@ -14,6 +13,7 @@ namespace ServerTest.Modules.Positions.Application
         private readonly MarketDataEngine _marketDataEngine;
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
+        private readonly PositionRiskIndexManager _riskIndexManager;
         private readonly ILogger<PositionRiskEngine> _logger;
 
         private static readonly TimeSpan LoopDelay = TimeSpan.FromSeconds(1);
@@ -23,28 +23,27 @@ namespace ServerTest.Modules.Positions.Application
             MarketDataEngine marketDataEngine,
             IOrderExecutor orderExecutor,
             PositionRiskConfigStore riskConfigStore,
+            PositionRiskIndexManager riskIndexManager,
             ILogger<PositionRiskEngine> logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
+            _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await _marketDataEngine.WaitForInitializationAsync();
+            await InitializeIndexAsync(stoppingToken).ConfigureAwait(false);
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    var openPositions = await _positionRepository.ListOpenAsync(stoppingToken).ConfigureAwait(false);
-                    foreach (var position in openPositions)
-                    {
-                        await EvaluatePositionAsync(position, stoppingToken).ConfigureAwait(false);
-                    }
+                    await RunOnceAsync(stoppingToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -55,35 +54,98 @@ namespace ServerTest.Modules.Positions.Application
             }
         }
 
-        private async Task EvaluatePositionAsync(StrategyPosition position, CancellationToken ct)
+        private async Task InitializeIndexAsync(CancellationToken ct)
         {
-            var kline = _marketDataEngine.GetLatestKline(position.Exchange, "1m", position.Symbol);
-            if (kline == null)
+            var openPositions = await _positionRepository.ListOpenAsync(ct).ConfigureAwait(false);
+            _riskIndexManager.RebuildFromPositions(
+                openPositions,
+                positionId => _riskConfigStore.TryGet(positionId, out var config) ? config : null);
+
+            _logger.LogInformation("风控索引初始化完成: 仓位数={Count}", openPositions.Count);
+        }
+
+        private async Task RunOnceAsync(CancellationToken ct)
+        {
+            var indices = _riskIndexManager.GetIndicesSnapshot();
+            if (indices.Count == 0)
             {
                 return;
             }
 
-            var close = kline.Value.close ?? kline.Value.open;
-            var high = kline.Value.high ?? close;
-            var low = kline.Value.low ?? close;
+            foreach (var index in indices)
+            {
+                var kline = _marketDataEngine.GetLatestKline(index.Exchange, "1m", index.Symbol);
+                if (kline == null)
+                {
+                    continue;
+                }
 
-            if (!high.HasValue || !low.HasValue || !close.HasValue)
+                var close = kline.Value.close ?? kline.Value.open;
+                var high = kline.Value.high ?? close;
+                var low = kline.Value.low ?? close;
+
+                if (!high.HasValue || !low.HasValue || !close.HasValue)
+                {
+                    continue;
+                }
+
+                var lastPrice = Convert.ToDecimal(close.Value);
+                var highPrice = Convert.ToDecimal(high.Value);
+                var lowPrice = Convert.ToDecimal(low.Value);
+
+                // 使用上一次价格 + 当前高低点构建区间，避免秒级波动跨桶遗漏
+                var previous = index.UpdateLastPrice(lastPrice);
+                var rangeLow = Math.Min(lowPrice, lastPrice);
+                var rangeHigh = Math.Max(highPrice, lastPrice);
+                if (previous.HasValue)
+                {
+                    rangeLow = Math.Min(rangeLow, previous.Value);
+                    rangeHigh = Math.Max(rangeHigh, previous.Value);
+                }
+
+                var candidates = index.QueryCandidates(rangeLow, rangeHigh);
+                if (candidates.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var positionId in candidates)
+                {
+                    if (!index.TryGetEntry(positionId, out var entry) || entry == null)
+                    {
+                        continue;
+                    }
+
+                    await EvaluateEntryAsync(entry, rangeLow, rangeHigh, ct)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+
+        private async Task EvaluateEntryAsync(
+            PositionRiskEntry entry,
+            decimal rangeLow,
+            decimal rangeHigh,
+            CancellationToken ct)
+        {
+            if (entry == null)
             {
                 return;
             }
 
-            var lastPrice = Convert.ToDecimal(close.Value);
-            var highPrice = Convert.ToDecimal(high.Value);
-            var lowPrice = Convert.ToDecimal(low.Value);
+            if (!string.Equals(entry.Status, "Open", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
-            var side = position.Side;
-            var stopLossHit = CheckStopLoss(position, highPrice, lowPrice, side);
-            var takeProfitHit = CheckTakeProfit(position, highPrice, lowPrice, side);
+            var side = entry.Side;
+            var stopLossHit = CheckStopLoss(entry, rangeHigh, rangeLow, side);
+            var takeProfitHit = CheckTakeProfit(entry, rangeHigh, rangeLow, side);
 
             var trailingHit = false;
-            if (position.TrailingEnabled)
+            if (entry.TrailingEnabled)
             {
-                trailingHit = await UpdateTrailingAsync(position, lastPrice, side, ct).ConfigureAwait(false);
+                trailingHit = await EvaluateTrailingAsync(entry, rangeLow, rangeHigh, ct).ConfigureAwait(false);
             }
 
             var shouldClose = stopLossHit || takeProfitHit || trailingHit;
@@ -101,110 +163,149 @@ namespace ServerTest.Modules.Positions.Application
             var orderSide = side.Equals("Long", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy";
             var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
             {
-                Uid = position.Uid,
-                ExchangeApiKeyId = position.ExchangeApiKeyId,
-                Exchange = position.Exchange,
-                Symbol = position.Symbol,
+                Uid = entry.Uid,
+                ExchangeApiKeyId = entry.ExchangeApiKeyId,
+                Exchange = entry.Exchange,
+                Symbol = entry.Symbol,
                 Side = orderSide,
-                Qty = position.Qty,
+                Qty = entry.Qty,
                 ReduceOnly = true
             }, ct).ConfigureAwait(false);
 
             if (!orderResult.Success)
             {
-                _logger.LogWarning("风险平仓订单失败: positionId={PositionId} 错误={Error}", position.PositionId, orderResult.ErrorMessage);
+                _logger.LogWarning("风险平仓订单失败: positionId={PositionId} 错误={Error}", entry.PositionId, orderResult.ErrorMessage);
                 return;
             }
 
-            await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: trailingHit, closedAt: DateTime.UtcNow, closeReason, ct)
+            await _positionRepository.CloseAsync(entry.PositionId, trailingTriggered: trailingHit, closedAt: DateTime.UtcNow, closeReason, ct)
                 .ConfigureAwait(false);
-            _riskConfigStore.Remove(position.PositionId);
+            _riskConfigStore.Remove(entry.PositionId);
+            _riskIndexManager.RemovePosition(entry.PositionId);
 
-            _logger.LogInformation("仓位因风险平仓: id={PositionId} uid={Uid} usId={UsId}", position.PositionId, position.Uid, position.UsId);
+            _logger.LogInformation("仓位因风险平仓: id={PositionId} uid={Uid} usId={UsId}", entry.PositionId, entry.Uid, entry.UsId);
         }
 
-        private static bool CheckStopLoss(StrategyPosition position, decimal high, decimal low, string side)
+        private static bool CheckStopLoss(PositionRiskEntry entry, decimal high, decimal low, string side)
         {
-            if (!position.StopLossPrice.HasValue)
+            if (!entry.StopLossPrice.HasValue)
             {
                 return false;
             }
 
             return side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                ? low <= position.StopLossPrice.Value
-                : high >= position.StopLossPrice.Value;
+                ? low <= entry.StopLossPrice.Value
+                : high >= entry.StopLossPrice.Value;
         }
 
-        private static bool CheckTakeProfit(StrategyPosition position, decimal high, decimal low, string side)
+        private static bool CheckTakeProfit(PositionRiskEntry entry, decimal high, decimal low, string side)
         {
-            if (!position.TakeProfitPrice.HasValue)
+            if (!entry.TakeProfitPrice.HasValue)
             {
                 return false;
             }
 
             return side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                ? high >= position.TakeProfitPrice.Value
-                : low <= position.TakeProfitPrice.Value;
+                ? high >= entry.TakeProfitPrice.Value
+                : low <= entry.TakeProfitPrice.Value;
         }
 
-        private async Task<bool> UpdateTrailingAsync(StrategyPosition position, decimal lastPrice, string side, CancellationToken ct)
+        private async Task<bool> EvaluateTrailingAsync(
+            PositionRiskEntry entry,
+            decimal rangeLow,
+            decimal rangeHigh,
+            CancellationToken ct)
         {
-            if (!_riskConfigStore.TryGet(position.PositionId, out var config) || config == null)
+            if (!entry.TrailingEnabled)
             {
-                if (!position.TrailingStopPrice.HasValue)
+                return false;
+            }
+
+            if (!entry.HasTrailingConfig)
+            {
+                if (!entry.TrailingStopPrice.HasValue)
                 {
                     return false;
                 }
 
-                return side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                    ? lastPrice <= position.TrailingStopPrice.Value
-                    : lastPrice >= position.TrailingStopPrice.Value;
+                return entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                    ? rangeLow <= entry.TrailingStopPrice.Value
+                    : rangeHigh >= entry.TrailingStopPrice.Value;
             }
 
-            var activationPct = config.ActivationPct ?? 0m;
-            var drawdownPct = config.DrawdownPct ?? 0m;
-            if (activationPct <= 0 || drawdownPct <= 0)
+            var activationPct = entry.TrailingActivationPct ?? 0m;
+            var drawdownPct = entry.TrailingDrawdownPct ?? 0m;
+            if (activationPct <= 0 || drawdownPct <= 0 || drawdownPct >= 1)
             {
                 return false;
             }
 
-            var activationPrice = side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                ? position.EntryPrice * (1 + activationPct)
-                : position.EntryPrice * (1 - activationPct);
-
-            if (!position.TrailingStopPrice.HasValue)
+            if (!entry.TrailingStopPrice.HasValue)
             {
-                var activated = side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                    ? lastPrice >= activationPrice
-                    : lastPrice <= activationPrice;
+                var activationPrice = entry.TrailingActivationPrice ?? 0m;
+                if (activationPrice <= 0)
+                {
+                    return false;
+                }
+
+                var activated = entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                    ? rangeHigh >= activationPrice
+                    : rangeLow <= activationPrice;
 
                 if (!activated)
                 {
                     return false;
                 }
 
-                var initialStop = side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                    ? lastPrice * (1 - drawdownPct)
-                    : lastPrice * (1 + drawdownPct);
+                var favorablePrice = entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                    ? rangeHigh
+                    : rangeLow;
 
-                await _positionRepository.UpdateTrailingAsync(position.PositionId, initialStop, ct).ConfigureAwait(false);
-                return false;
+                var initialStop = entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                    ? favorablePrice * (1 - drawdownPct)
+                    : favorablePrice * (1 + drawdownPct);
+
+                var rows = await _positionRepository.UpdateTrailingAsync(entry.PositionId, initialStop, ct).ConfigureAwait(false);
+                if (rows <= 0)
+                {
+                    return false;
+                }
+
+                _riskIndexManager.TryActivateTrailing(entry.PositionId, initialStop);
+
+                return entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                    ? rangeLow <= initialStop
+                    : rangeHigh >= initialStop;
             }
 
-            var currentStop = position.TrailingStopPrice.Value;
-            var updatedStop = side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                ? Math.Max(currentStop, lastPrice * (1 - drawdownPct))
-                : Math.Min(currentStop, lastPrice * (1 + drawdownPct));
-
-            if (updatedStop != currentStop)
+            if (entry.TrailingUpdateThresholdPrice.HasValue)
             {
-                await _positionRepository.UpdateTrailingAsync(position.PositionId, updatedStop, ct).ConfigureAwait(false);
-                position.TrailingStopPrice = updatedStop;
+                var updateThreshold = entry.TrailingUpdateThresholdPrice.Value;
+                var shouldUpdate = entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                    ? rangeHigh >= updateThreshold
+                    : rangeLow <= updateThreshold;
+
+                if (shouldUpdate)
+                {
+                    var updatedStop = entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                        ? Math.Max(entry.TrailingStopPrice.Value, rangeHigh * (1 - drawdownPct))
+                        : Math.Min(entry.TrailingStopPrice.Value, rangeLow * (1 + drawdownPct));
+
+                    if (updatedStop != entry.TrailingStopPrice.Value)
+                    {
+                        var rows = await _positionRepository.UpdateTrailingAsync(entry.PositionId, updatedStop, ct)
+                            .ConfigureAwait(false);
+                        if (rows > 0)
+                        {
+                            _riskIndexManager.TryUpdateTrailingStop(entry.PositionId, updatedStop);
+                        }
+                    }
+                }
             }
 
-            return side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                ? lastPrice <= position.TrailingStopPrice.Value
-                : lastPrice >= position.TrailingStopPrice.Value;
+            return entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
+                ? rangeLow <= entry.TrailingStopPrice.Value
+                : rangeHigh >= entry.TrailingStopPrice.Value;
         }
     }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Card,
   Tag,
@@ -18,6 +18,7 @@ import {
   Spin,
   Divider,
   Popconfirm,
+  Tree,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -27,6 +28,7 @@ import {
   DownOutlined,
   UpOutlined,
   DeleteOutlined,
+  PartitionOutlined,
 } from '@ant-design/icons';
 import { HttpClient } from '../network/httpClient';
 import { getToken } from '../network';
@@ -118,6 +120,88 @@ interface CheckLog {
   createdAt: string;
 }
 
+interface RiskPositionSnapshot {
+  positionId: number;
+  uid: number;
+  usId: number;
+  exchangeApiKeyId?: number;
+  exchange: string;
+  symbol: string;
+  side: string;
+  entryPrice: number;
+  qty: number;
+  stopLossPrice?: number | null;
+  takeProfitPrice?: number | null;
+  trailingEnabled: boolean;
+  trailingStopPrice?: number | null;
+  trailingTriggered: boolean;
+  trailingActivationPct?: number | null;
+  trailingDrawdownPct?: number | null;
+  trailingActivationPrice?: number | null;
+  trailingUpdateThresholdPrice?: number | null;
+  status: string;
+}
+
+interface Level3TreeSnapshot {
+  key: number;
+  low: number;
+  high: number;
+  positionIds: number[];
+  count: number;
+}
+
+interface Level2TreeSnapshot {
+  key: number;
+  low: number;
+  high: number;
+  level3: Level3TreeSnapshot[];
+  count: number;
+}
+
+interface Level1TreeSnapshot {
+  key: number;
+  low: number;
+  high: number;
+  level2: Level2TreeSnapshot[];
+  count: number;
+}
+
+interface ScaleTreeSnapshot {
+  scale: number;
+  step1: number;
+  step2: number;
+  step3: number;
+  level1: Level1TreeSnapshot[];
+  count: number;
+}
+
+interface IndexTreeSnapshot {
+  indexType: string;
+  scales: ScaleTreeSnapshot[];
+  count: number;
+}
+
+interface PositionRiskIndexSnapshot {
+  exchange: string;
+  symbol: string;
+  totalPositions: number;
+  generatedAt: string;
+  positions: RiskPositionSnapshot[];
+  indexTrees: IndexTreeSnapshot[];
+}
+
+interface RiskIndexResponse {
+  generatedAt: string;
+  items: PositionRiskIndexSnapshot[];
+}
+
+interface RiskTreeNodeData {
+  positionIds: number[];
+  count: number;
+  level: 'symbol' | 'index' | 'scale' | 'level1' | 'level2' | 'level3';
+  rangeText?: string;
+}
+
 const ServerList: React.FC = () => {
   const [servers, setServers] = useState<ServerNode[]>([]);
   const [loading, setLoading] = useState(false);
@@ -137,6 +221,13 @@ const ServerList: React.FC = () => {
   const [checkLogFilter, setCheckLogFilter] = useState<'all' | 'success' | 'failed'>('all');
   const [clearingLogs, setClearingLogs] = useState(false);
   const [currentStrategyUsId, setCurrentStrategyUsId] = useState<number | null>(null);
+  const [riskIndexLoading, setRiskIndexLoading] = useState(false);
+  const [riskIndexData, setRiskIndexData] = useState<RiskIndexResponse | null>(null);
+  const [riskSelectedPositionIds, setRiskSelectedPositionIds] = useState<number[]>([]);
+  const [riskSelectedNodeTitle, setRiskSelectedNodeTitle] = useState<string>('未选择节点');
+  const [riskPositionSearch, setRiskPositionSearch] = useState<string>('');
+  const [riskPositionDetailVisible, setRiskPositionDetailVisible] = useState(false);
+  const [selectedRiskPosition, setSelectedRiskPosition] = useState<RiskPositionSnapshot | null>(null);
 
   const client = new HttpClient();
   client.setTokenProvider(getToken);
@@ -220,6 +311,25 @@ const ServerList: React.FC = () => {
     }
   };
 
+  const loadRiskIndex = async () => {
+    setRiskIndexLoading(true);
+    try {
+      const response = await client.postProtocol<RiskIndexResponse>(
+        '/api/admin/position-risk/index',
+        'admin.position.risk.index',
+        {}
+      );
+      setRiskIndexData(response);
+      setRiskSelectedPositionIds([]);
+      setRiskSelectedNodeTitle('未选择节点');
+      setRiskPositionSearch('');
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '加载风控索引失败');
+    } finally {
+      setRiskIndexLoading(false);
+    }
+  };
+
   const clearCheckLogs = async () => {
     if (!currentStrategyUsId) {
       return;
@@ -274,6 +384,31 @@ const ServerList: React.FC = () => {
       return formatDate(dateStr);
     }
   };
+
+  const formatDecimal = useCallback((value?: number | null) => {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return '-';
+    }
+
+    const abs = Math.abs(value);
+    if (abs >= 1000) {
+      return value.toFixed(2);
+    }
+
+    if (abs >= 1) {
+      return value.toFixed(4);
+    }
+
+    if (abs >= 0.01) {
+      return value.toFixed(6);
+    }
+
+    return value.toFixed(8);
+  }, []);
+
+  const formatRange = useCallback((low: number, high: number) => {
+    return `${formatDecimal(low)} ~ ${formatDecimal(high)}`;
+  }, [formatDecimal]);
 
   const getStatusTag = (status: string) => {
     const statusMap: Record<string, { color: string; text: string }> = {
@@ -334,6 +469,160 @@ const ServerList: React.FC = () => {
       return checkLogs.filter((log) => !log.success);
     }
   }, [checkLogs, checkLogFilter]);
+
+  const riskPositionMap = useMemo(() => {
+    const map = new Map<number, RiskPositionSnapshot>();
+    if (!riskIndexData?.items) {
+      return map;
+    }
+
+    riskIndexData.items.forEach((item) => {
+      item.positions.forEach((position) => {
+        map.set(position.positionId, position);
+      });
+    });
+
+    return map;
+  }, [riskIndexData]);
+
+  const riskSummary = useMemo(() => {
+    const totalSymbols = riskIndexData?.items.length ?? 0;
+    const totalPositions = riskIndexData?.items.reduce((sum, item) => sum + item.totalPositions, 0) ?? 0;
+    return {
+      totalSymbols,
+      totalPositions,
+      generatedAt: riskIndexData?.generatedAt,
+    };
+  }, [riskIndexData]);
+
+  const riskTreeData = useMemo(() => {
+    if (!riskIndexData?.items) {
+      return [];
+    }
+
+    const buildLevel3Node = (level3: Level3TreeSnapshot, keyPrefix: string) => ({
+      title: `L3 ${formatRange(level3.low, level3.high)}（${level3.count}）`,
+      key: `${keyPrefix}-l3-${level3.key}`,
+      dataRef: {
+        positionIds: level3.positionIds ?? [],
+        count: level3.count,
+        level: 'level3',
+        rangeText: formatRange(level3.low, level3.high),
+      } as RiskTreeNodeData,
+      children: [],
+    });
+
+    const buildLevel2Node = (level2: Level2TreeSnapshot, keyPrefix: string) => {
+      const children = level2.level3.map((level3) => buildLevel3Node(level3, `${keyPrefix}-l2-${level2.key}`));
+      const positionIds = level2.level3.flatMap((level3) => level3.positionIds ?? []);
+      return {
+        title: `L2 ${formatRange(level2.low, level2.high)}（${level2.count}）`,
+        key: `${keyPrefix}-l2-${level2.key}`,
+        dataRef: {
+          positionIds,
+          count: level2.count,
+          level: 'level2',
+          rangeText: formatRange(level2.low, level2.high),
+        } as RiskTreeNodeData,
+        children,
+      };
+    };
+
+    const buildLevel1Node = (level1: Level1TreeSnapshot, keyPrefix: string) => {
+      const children = level1.level2.map((level2) => buildLevel2Node(level2, `${keyPrefix}-l1-${level1.key}`));
+      const positionIds = level1.level2.flatMap((level2) =>
+        level2.level3.flatMap((level3) => level3.positionIds ?? [])
+      );
+      return {
+        title: `L1 ${formatRange(level1.low, level1.high)}（${level1.count}）`,
+        key: `${keyPrefix}-l1-${level1.key}`,
+        dataRef: {
+          positionIds,
+          count: level1.count,
+          level: 'level1',
+          rangeText: formatRange(level1.low, level1.high),
+        } as RiskTreeNodeData,
+        children,
+      };
+    };
+
+    const buildScaleNode = (scale: ScaleTreeSnapshot, keyPrefix: string) => {
+      const children = scale.level1.map((level1) => buildLevel1Node(level1, `${keyPrefix}-scale-${scale.scale}`));
+      const positionIds = scale.level1.flatMap((level1) =>
+        level1.level2.flatMap((level2) => level2.level3.flatMap((level3) => level3.positionIds ?? []))
+      );
+      return {
+        title: `数量级 ${scale.scale}（${scale.count}） 步长=${formatDecimal(scale.step1)}/${formatDecimal(scale.step2)}/${formatDecimal(scale.step3)}`,
+        key: `${keyPrefix}-scale-${scale.scale}`,
+        dataRef: {
+          positionIds,
+          count: scale.count,
+          level: 'scale',
+        } as RiskTreeNodeData,
+        children,
+      };
+    };
+
+    const buildIndexNode = (index: IndexTreeSnapshot, keyPrefix: string) => {
+      const children = index.scales.map((scale) => buildScaleNode(scale, `${keyPrefix}-index-${index.indexType}`));
+      const positionIds = index.scales.flatMap((scale) =>
+        scale.level1.flatMap((level1) =>
+          level1.level2.flatMap((level2) => level2.level3.flatMap((level3) => level3.positionIds ?? []))
+        )
+      );
+      return {
+        title: `${index.indexType}（${index.count}）`,
+        key: `${keyPrefix}-index-${index.indexType}`,
+        dataRef: {
+          positionIds,
+          count: index.count,
+          level: 'index',
+        } as RiskTreeNodeData,
+        children,
+      };
+    };
+
+    return riskIndexData.items.map((item) => {
+      const symbolKey = `${item.exchange}|${item.symbol}`;
+      const positionIds = item.positions.map((position) => position.positionId);
+      return {
+        title: `${item.exchange} ${item.symbol}（${item.totalPositions}）`,
+        key: `symbol-${symbolKey}`,
+        dataRef: {
+          positionIds,
+          count: item.totalPositions,
+          level: 'symbol',
+        } as RiskTreeNodeData,
+        children: item.indexTrees.map((index) => buildIndexNode(index, symbolKey)),
+      };
+    });
+  }, [riskIndexData, formatDecimal, formatRange]);
+
+  const riskSelectedPositions = useMemo(() => {
+    const allPositions = riskSelectedPositionIds.length > 0
+      ? riskSelectedPositionIds
+      : Array.from(riskPositionMap.keys());
+
+    const searchText = riskPositionSearch.trim().toLowerCase();
+    const list = allPositions
+      .map((id) => riskPositionMap.get(id))
+      .filter((item): item is RiskPositionSnapshot => !!item);
+
+    if (!searchText) {
+      return list;
+    }
+
+    return list.filter((item) => {
+      return (
+        item.positionId.toString().includes(searchText) ||
+        item.uid.toString().includes(searchText) ||
+        item.usId.toString().includes(searchText) ||
+        item.exchange.toLowerCase().includes(searchText) ||
+        item.symbol.toLowerCase().includes(searchText) ||
+        item.side.toLowerCase().includes(searchText)
+      );
+    });
+  }, [riskPositionMap, riskSelectedPositionIds, riskPositionSearch]);
 
   // 统计信息
   const stats = useMemo(() => {
@@ -411,6 +700,96 @@ const ServerList: React.FC = () => {
     },
   ];
 
+  const riskPositionColumns = [
+    {
+      title: '仓位ID',
+      dataIndex: 'positionId',
+      key: 'positionId',
+      width: 100,
+    },
+    {
+      title: '用户ID',
+      dataIndex: 'uid',
+      key: 'uid',
+      width: 100,
+    },
+    {
+      title: '策略ID',
+      dataIndex: 'usId',
+      key: 'usId',
+      width: 100,
+    },
+    {
+      title: '交易所',
+      dataIndex: 'exchange',
+      key: 'exchange',
+      width: 100,
+    },
+    {
+      title: '交易对',
+      dataIndex: 'symbol',
+      key: 'symbol',
+      width: 140,
+    },
+    {
+      title: '方向',
+      dataIndex: 'side',
+      key: 'side',
+      width: 80,
+      render: (side: string) => (
+        <Tag color={side?.toLowerCase() === 'long' ? 'green' : 'red'}>
+          {side?.toLowerCase() === 'long' ? '多头' : '空头'}
+        </Tag>
+      ),
+    },
+    {
+      title: '数量',
+      dataIndex: 'qty',
+      key: 'qty',
+      width: 120,
+      render: (value: number) => formatDecimal(value),
+    },
+    {
+      title: '入场价',
+      dataIndex: 'entryPrice',
+      key: 'entryPrice',
+      width: 120,
+      render: (value: number) => formatDecimal(value),
+    },
+    {
+      title: '止损价',
+      dataIndex: 'stopLossPrice',
+      key: 'stopLossPrice',
+      width: 120,
+      render: (value?: number | null) => formatDecimal(value),
+    },
+    {
+      title: '止盈价',
+      dataIndex: 'takeProfitPrice',
+      key: 'takeProfitPrice',
+      width: 120,
+      render: (value?: number | null) => formatDecimal(value),
+    },
+    {
+      title: '移动止盈价',
+      dataIndex: 'trailingStopPrice',
+      key: 'trailingStopPrice',
+      width: 140,
+      render: (value?: number | null) => formatDecimal(value),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status: string) => (
+        <Tag color={status?.toLowerCase() === 'open' ? 'success' : 'default'}>
+          {status?.toLowerCase() === 'open' ? '持仓中' : '已平仓'}
+        </Tag>
+      ),
+    },
+  ];
+
   return (
     <div className="server-list">
       <div className="server-list-header">
@@ -418,42 +797,36 @@ const ServerList: React.FC = () => {
           <CloudServerOutlined style={{ fontSize: 24 }} />
           <h2>服务器列表</h2>
         </Space>
-        <Button type="primary" icon={<ReloadOutlined />} onClick={loadServers} loading={loading}>
-          刷新
-        </Button>
+        <Space size="middle" className="server-list-stats">
+          <Space size="small" split={<Divider type="vertical" style={{ margin: 0, height: 16 }} />}>
+            <span className="stat-item">
+              <span className="stat-label">总服务器</span>
+              <span className="stat-value">{stats.total}</span>
+            </span>
+            <span className="stat-item">
+              <span className="stat-label">在线</span>
+              <span className="stat-value" style={{ color: '#3f8600' }}>
+                <Badge status="success" style={{ marginRight: 4 }} />
+                {stats.online}
+              </span>
+            </span>
+            <span className="stat-item">
+              <span className="stat-label">警告</span>
+              <span className="stat-value" style={{ color: '#cf1322' }}>
+                <Badge status="warning" style={{ marginRight: 4 }} />
+                {stats.warning}
+              </span>
+            </span>
+            <span className="stat-item">
+              <span className="stat-label">连接数</span>
+              <span className="stat-value" style={{ color: '#1890ff' }}>{stats.totalConnections}</span>
+            </span>
+          </Space>
+          <Button type="primary" icon={<ReloadOutlined />} onClick={loadServers} loading={loading} size="small">
+            刷新
+          </Button>
+        </Space>
       </div>
-
-      {/* 统计信息卡片 - 置顶 */}
-      <Card className="server-stats-card" style={{ marginBottom: 12 }}>
-        <Row gutter={8}>
-          <Col span={6}>
-            <Statistic title="总服务器数" value={stats.total} />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="在线服务器"
-              value={stats.online}
-              valueStyle={{ color: '#3f8600' }}
-              prefix={<Badge status="success" />}
-            />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="警告服务器"
-              value={stats.warning}
-              valueStyle={{ color: '#cf1322' }}
-              prefix={<Badge status="warning" />}
-            />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="总连接数"
-              value={stats.totalConnections}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Col>
-        </Row>
-      </Card>
 
       {/* 服务器节点列表 */}
       <div className="server-nodes-container">
@@ -464,64 +837,56 @@ const ServerList: React.FC = () => {
               key={server.nodeId}
               className={`server-node-card ${isExpanded ? 'expanded' : ''}`}
               hoverable
-              onClick={() => handleNodeClick(server.nodeId)}
             >
-              <div className="server-node-header">
+              <div 
+                className="server-node-header"
+                onClick={() => handleNodeClick(server.nodeId)}
+                style={{ cursor: 'pointer' }}
+              >
                 <div className="server-node-title-section">
                   <div className="server-node-title">
-                    <Space>
+                    <Space size="small">
                       {server.isCurrentNode && <Badge status="processing" />}
                       <span className="server-node-id" title={`完整节点ID: ${server.nodeId}`}>
                         {server.machineName}
-                        <span style={{ color: '#999', fontSize: '12px', marginLeft: '4px' }}>
-                          ({server.nodeId.split('-').slice(1).join('-').substring(0, 8)}...)
-                        </span>
                       </span>
                       {getStatusTag(server.status)}
+                      <span className="server-node-meta-inline">
+                        <span className="meta-inline-item">连接数: {server.connectionCount}</span>
+                        {server.systems.length > 0 && (
+                          <>
+                            <span className="meta-divider">|</span>
+                            <span className="meta-inline-item">系统: {server.systems.join(', ')}</span>
+                          </>
+                        )}
+                      </span>
                     </Space>
                   </div>
                   <div className="server-node-meta-compact">
-                    <Space size="middle" split={<Divider type="vertical" style={{ margin: 0 }} />}>
-                      <span className="meta-item">
-                        <span className="meta-label">节点ID</span>
-                        <span className="meta-value" title={server.nodeId} style={{ fontFamily: 'monospace', fontSize: '11px' }}>
-                          {server.nodeId.length > 40 ? `${server.nodeId.substring(0, 40)}...` : server.nodeId}
-                        </span>
-                      </span>
-                      <span className="meta-item">
-                        <span className="meta-label">连接数</span>
-                        <span className="meta-value">{server.connectionCount}</span>
-                      </span>
-                      {server.systems.length > 0 && (
-                        <span className="meta-item">
-                          <span className="meta-label">系统</span>
-                          <Space size={4}>
-                            {server.systems.map((sys) => (
-                              <Tag key={sys} color="blue" style={{ margin: 0 }}>
-                                {sys}
-                              </Tag>
-                            ))}
-                          </Space>
-                        </span>
-                      )}
-                    </Space>
+                    <span className="meta-item-compact" title={server.nodeId}>
+                      <span className="meta-label-compact">节点ID:</span>
+                      <span className="meta-value-compact">{server.nodeId}</span>
+                    </span>
+                    <span className="meta-item-compact">
+                      <span className="meta-label-compact">心跳:</span>
+                      <span className="meta-value-compact">{formatDate(server.lastHeartbeat)}</span>
+                    </span>
                   </div>
                 </div>
-                <div className="server-node-actions">
-                  <div className="server-node-time">
-                    <div className="time-label">最后心跳</div>
-                    <div className="time-value">{formatDate(server.lastHeartbeat)}</div>
-                  </div>
-                  <div className="server-node-expand-icon">
-                    {isExpanded ? <UpOutlined /> : <DownOutlined />}
-                  </div>
+                <div className="server-node-expand-icon">
+                  {isExpanded ? <UpOutlined /> : <DownOutlined />}
                 </div>
               </div>
 
               {isExpanded && (
-                <div className="server-node-details">
+                <div className="server-node-details" onClick={(e) => e.stopPropagation()}>
                   <Tabs
                     defaultActiveKey="strategies"
+                    onChange={(key) => {
+                      if (key === 'position-risk') {
+                        loadRiskIndex();
+                      }
+                    }}
                     items={[
                       {
                         key: 'strategies',
@@ -534,14 +899,14 @@ const ServerList: React.FC = () => {
                         children: (
                           <div className="strategies-tab-content">
                             <div className="strategies-header">
-                              <Space>
-                                <strong>运行策略数量：</strong>
-                                <Badge count={strategies.length} showZero style={{ backgroundColor: '#52c41a' }} />
+                              <Space size="small">
+                                <span className="strategies-count">策略数: <strong>{strategies.length}</strong></span>
                               </Space>
                               <Search
-                                placeholder="搜索策略（名称、ID）"
+                                placeholder="搜索策略"
                                 allowClear
-                                style={{ width: 300 }}
+                                size="small"
+                                style={{ width: 240 }}
                                 value={strategySearch[server.nodeId] || ''}
                                 onChange={(e) =>
                                   setStrategySearch({ ...strategySearch, [server.nodeId]: e.target.value })
@@ -578,22 +943,107 @@ const ServerList: React.FC = () => {
                                   >
                                     <List.Item.Meta
                                       title={
-                                        <Space>
-                                          <span>{strategy.aliasName || strategy.defName}</span>
+                                        <Space size="small">
+                                          <span className="strategy-name">{strategy.aliasName || strategy.defName}</span>
                                           {getStrategyStatusTag(strategy.state)}
+                                          <span className="strategy-meta-inline">ID:{strategy.usId} | v{strategy.versionNo}</span>
                                         </Space>
                                       }
                                       description={
-                                        <div>
-                                          <div>策略ID: {strategy.usId}</div>
-                                          {strategy.description && <div>{strategy.description}</div>}
-                                          <div>版本: v{strategy.versionNo}</div>
-                                        </div>
+                                        strategy.description ? (
+                                          <div className="strategy-description">{strategy.description}</div>
+                                        ) : null
                                       }
                                     />
                                   </List.Item>
                                 )}
                               />
+                            )}
+                          </div>
+                        ),
+                      },
+                      {
+                        key: 'position-risk',
+                        label: (
+                          <span>
+                            <PartitionOutlined />
+                            实盘仓位检测
+                          </span>
+                        ),
+                        children: (
+                          <div className="risk-index-tab">
+                            <div className="risk-index-header">
+                              <Space>
+                                <strong>当前仓位：</strong>
+                                <Badge count={riskSummary.totalPositions} showZero style={{ backgroundColor: '#1890ff' }} />
+                                <span>交易对数：{riskSummary.totalSymbols}</span>
+                                {riskSummary.generatedAt && (
+                                  <span>快照时间：{formatDate(riskSummary.generatedAt)}</span>
+                                )}
+                              </Space>
+                              <Button
+                                type="primary"
+                                icon={<ReloadOutlined />}
+                                onClick={loadRiskIndex}
+                                loading={riskIndexLoading}
+                              >
+                                刷新
+                              </Button>
+                            </div>
+
+                            {riskIndexLoading ? (
+                              <div style={{ textAlign: 'center', padding: 40 }}>
+                                <Spin size="large" />
+                              </div>
+                            ) : riskIndexData?.items?.length ? (
+                              <div className="risk-index-body">
+                                <div className="risk-index-tree">
+                                  <Tree
+                                    treeData={riskTreeData}
+                                    showLine={{ showLeafIcon: false }}
+                                    defaultExpandAll={false}
+                                    height={420}
+                                    blockNode
+                                    onSelect={(_, info) => {
+                                      const node = info.node as any;
+                                      const dataRef = node?.dataRef as RiskTreeNodeData | undefined;
+                                      setRiskSelectedPositionIds(dataRef?.positionIds ?? []);
+                                      setRiskSelectedNodeTitle(typeof node?.title === 'string' ? node.title : '已选择节点');
+                                    }}
+                                  />
+                                </div>
+                                <div className="risk-index-detail">
+                                  <div className="risk-index-detail-header">
+                                    <div className="risk-index-detail-title">
+                                      已选节点：{riskSelectedNodeTitle}（{riskSelectedPositionIds.length || riskSelectedPositions.length}）
+                                    </div>
+                                    <Search
+                                      placeholder="搜索仓位（仓位ID/用户ID/策略ID/交易对/方向）"
+                                      allowClear
+                                      style={{ width: 360 }}
+                                      value={riskPositionSearch}
+                                      onChange={(e) => setRiskPositionSearch(e.target.value)}
+                                    />
+                                  </div>
+                                  <Table
+                                    dataSource={riskSelectedPositions}
+                                    columns={riskPositionColumns}
+                                    rowKey="positionId"
+                                    pagination={{ pageSize: 10 }}
+                                    size="small"
+                                    scroll={{ x: 1200, y: 360 }}
+                                    onRow={(record) => ({
+                                      onClick: (e) => {
+                                        e.stopPropagation();
+                                        setSelectedRiskPosition(record);
+                                        setRiskPositionDetailVisible(true);
+                                      },
+                                    })}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <Empty description="暂无风控索引数据" />
                             )}
                           </div>
                         ),
@@ -1028,6 +1478,39 @@ const ServerList: React.FC = () => {
               提示：双击可关闭此窗口
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* 风控仓位详情弹窗 */}
+      <Modal
+        title={`仓位详情 - ${selectedRiskPosition?.positionId ?? ''}`}
+        open={riskPositionDetailVisible}
+        onCancel={() => {
+          setRiskPositionDetailVisible(false);
+          setSelectedRiskPosition(null);
+        }}
+        footer={null}
+        width={900}
+      >
+        {selectedRiskPosition && (
+          <Descriptions column={2} bordered size="small">
+            <Descriptions.Item label="仓位ID">{selectedRiskPosition.positionId}</Descriptions.Item>
+            <Descriptions.Item label="状态">{selectedRiskPosition.status}</Descriptions.Item>
+            <Descriptions.Item label="用户ID">{selectedRiskPosition.uid}</Descriptions.Item>
+            <Descriptions.Item label="策略ID">{selectedRiskPosition.usId}</Descriptions.Item>
+            <Descriptions.Item label="交易所">{selectedRiskPosition.exchange}</Descriptions.Item>
+            <Descriptions.Item label="交易对">{selectedRiskPosition.symbol}</Descriptions.Item>
+            <Descriptions.Item label="方向">{selectedRiskPosition.side}</Descriptions.Item>
+            <Descriptions.Item label="数量">{formatDecimal(selectedRiskPosition.qty)}</Descriptions.Item>
+            <Descriptions.Item label="入场价">{formatDecimal(selectedRiskPosition.entryPrice)}</Descriptions.Item>
+            <Descriptions.Item label="止损价">{formatDecimal(selectedRiskPosition.stopLossPrice)}</Descriptions.Item>
+            <Descriptions.Item label="止盈价">{formatDecimal(selectedRiskPosition.takeProfitPrice)}</Descriptions.Item>
+            <Descriptions.Item label="移动止盈价">{formatDecimal(selectedRiskPosition.trailingStopPrice)}</Descriptions.Item>
+            <Descriptions.Item label="移动止盈激活率">{formatDecimal(selectedRiskPosition.trailingActivationPct)}</Descriptions.Item>
+            <Descriptions.Item label="移动止盈回撤率">{formatDecimal(selectedRiskPosition.trailingDrawdownPct)}</Descriptions.Item>
+            <Descriptions.Item label="激活价">{formatDecimal(selectedRiskPosition.trailingActivationPrice)}</Descriptions.Item>
+            <Descriptions.Item label="更新阈值价">{formatDecimal(selectedRiskPosition.trailingUpdateThresholdPrice)}</Descriptions.Item>
+          </Descriptions>
         )}
       </Modal>
     </div>

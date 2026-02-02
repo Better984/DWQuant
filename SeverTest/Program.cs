@@ -143,6 +143,7 @@ builder.Services.AddSingleton<RealTimeStrategyEngine>();
 builder.Services.AddSingleton<StrategyPositionRepository>();
 builder.Services.AddSingleton<UserExchangeApiKeyRepository>();
 builder.Services.AddSingleton<PositionRiskConfigStore>();
+builder.Services.AddSingleton<PositionRiskIndexManager>();
 builder.Services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
 builder.Services.AddScoped<ServerTest.Modules.Positions.Application.StrategyPositionCloseService>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Infrastructure.StrategyRuntimeRepository>();

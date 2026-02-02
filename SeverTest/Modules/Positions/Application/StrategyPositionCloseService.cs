@@ -14,17 +14,20 @@ namespace ServerTest.Modules.Positions.Application
         private readonly StrategyPositionRepository _positionRepository;
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
+        private readonly PositionRiskIndexManager _riskIndexManager;
         private readonly ILogger<StrategyPositionCloseService> _logger;
 
         public StrategyPositionCloseService(
             StrategyPositionRepository positionRepository,
             IOrderExecutor orderExecutor,
             PositionRiskConfigStore riskConfigStore,
+            PositionRiskIndexManager riskIndexManager,
             ILogger<StrategyPositionCloseService> logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
+            _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -124,6 +127,7 @@ namespace ServerTest.Modules.Positions.Application
                     await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "ManualBatch", ct)
                         .ConfigureAwait(false);
                     _riskConfigStore.Remove(position.PositionId);
+                    _riskIndexManager.RemovePosition(position.PositionId);
                     closedPositions++;
                 }
             }
@@ -221,6 +225,7 @@ namespace ServerTest.Modules.Positions.Application
             await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "ManualSingle", ct)
                 .ConfigureAwait(false);
             _riskConfigStore.Remove(position.PositionId);
+            _riskIndexManager.RemovePosition(position.PositionId);
 
             _logger.LogInformation("手动平仓完成: uid={Uid} positionId={PositionId}", uid, position.PositionId);
 
