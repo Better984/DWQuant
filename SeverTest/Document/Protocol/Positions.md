@@ -7,6 +7,7 @@
   - `to` string?
   - `status` string?
 - 响应 data：`PositionListResponse`
+  - `items[].closeReason` string? 平仓原因（ManualSingle/ManualBatch/StopLoss/TakeProfit/TrailingStop）
 
 ### position.list.by_strategy
 - 路径：`POST /api/positions/by-strategy`
@@ -16,9 +17,16 @@
   - `to` string?
   - `status` string?
 - 响应 data：`PositionListResponse`
+  - `items[].closeReason` string? 平仓原因（ManualSingle/ManualBatch/StopLoss/TakeProfit/TrailingStop）
 
 ### position.close.by_strategy
 - 路径：`POST /api/positions/close-by-strategy`
 - data：
   - `usId` long
 - 响应 data：`StrategyClosePositionsResult`
+
+### position.close.by_id
+- 路径：`POST /api/positions/close-by-id`
+- data：
+  - `positionId` long
+- 响应 data：`PositionCloseResult`

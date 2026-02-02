@@ -41,13 +41,17 @@ namespace ServerTest.Controllers
             var uid = await GetUserIdAsync().ConfigureAwait(false);
             if (!uid.HasValue)
             {
-                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+                var reqId = request?.ReqId;
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Unauthorized, "未授权，请重新登录", null, HttpContext.TraceIdentifier);
+                return Unauthorized(error);
             }
 
             var role = await _accountRepository.GetRoleAsync((ulong)uid.Value, null, HttpContext.RequestAborted).ConfigureAwait(false);
             if (!role.HasValue || role.Value != _businessRules.SuperAdminRole)
             {
-                return StatusCode(403, ApiResponse<object>.Error("无权限访问"));
+                var reqId = request?.ReqId;
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Forbidden, "无权限访问", null, HttpContext.TraceIdentifier);
+                return StatusCode(403, error);
             }
 
             try
@@ -88,12 +92,17 @@ namespace ServerTest.Controllers
                     } : null,
                 }).ToList();
 
-                return Ok(ApiResponse<object>.Ok(new { servers = result }, "查询成功"));
+                var reqId = request?.ReqId;
+                var responseType = ProtocolEnvelopeFactory.BuildAckType(request?.Type ?? "admin.server.list");
+                var envelope = ProtocolEnvelopeFactory.Ok(responseType, reqId, new { servers = result }, "查询成功", HttpContext.TraceIdentifier);
+                return Ok(envelope);
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "获取服务器列表失败");
-                return StatusCode(500, ApiResponse<object>.Error($"查询失败: {ex.Message}"));
+                var reqId = request?.ReqId;
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.InternalError, $"查询失败: {ex.Message}", null, HttpContext.TraceIdentifier);
+                return StatusCode(500, error);
             }
         }
 

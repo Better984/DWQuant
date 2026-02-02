@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Modules.Accounts.Infrastructure;
@@ -8,22 +9,22 @@ using ServerTest.Options;
 namespace ServerTest.Modules.AdminBroadcast.Application
 {
     /// <summary>
-    /// ??????
+    /// 管理员广播服务
     /// </summary>
     public sealed class AdminBroadcastService
     {
-        private readonly AccountRepository _accountRepository;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly INotificationPublisher _publisher;
         private readonly BusinessRulesOptions _businessRules;
         private readonly ILogger<AdminBroadcastService> _logger;
 
         public AdminBroadcastService(
-            AccountRepository accountRepository,
+            IServiceScopeFactory serviceScopeFactory,
             INotificationPublisher publisher,
             IOptions<BusinessRulesOptions> businessRules,
             ILogger<AdminBroadcastService> logger)
         {
-            _accountRepository = accountRepository ?? throw new ArgumentNullException(nameof(accountRepository));
+            _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
             _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
             _businessRules = businessRules?.Value ?? new BusinessRulesOptions();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -39,10 +40,14 @@ namespace ServerTest.Modules.AdminBroadcast.Application
                 return (false, "Invalid request", null);
             }
 
-            var role = await _accountRepository.GetRoleAsync((ulong)uid, null, ct).ConfigureAwait(false);
-            if (!role.HasValue || role.Value != _businessRules.SuperAdminRole)
+            using (var scope = _serviceScopeFactory.CreateScope())
             {
-                return (false, "Forbidden", null);
+                var accountRepository = scope.ServiceProvider.GetRequiredService<AccountRepository>();
+                var role = await accountRepository.GetRoleAsync((ulong)uid, null, ct).ConfigureAwait(false);
+                if (!role.HasValue || role.Value != _businessRules.SuperAdminRole)
+                {
+                    return (false, "Forbidden", null);
+                }
             }
 
             if (!NotificationContractHelper.TryParseCategory(request.Category, out var category)
@@ -62,7 +67,7 @@ namespace ServerTest.Modules.AdminBroadcast.Application
             var result = await _publisher.PublishSystemBroadcastAsync(category, severity, template, payload, ct)
                 .ConfigureAwait(false);
 
-            _logger.LogInformation("???????: uid={Uid} category={Category} severity={Severity}", uid, category, severity);
+            _logger.LogInformation("管理员广播: uid={Uid} category={Category} severity={Severity}", uid, category, severity);
             return (true, string.Empty, result);
         }
     }

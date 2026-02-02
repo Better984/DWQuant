@@ -44,22 +44,26 @@ namespace ServerTest.Controllers
         [HttpPost("list")]
         public async Task<IActionResult> GetCheckLogs([FromBody] ProtocolRequest<StrategyCheckLogRequest> request)
         {
+            var reqId = request?.ReqId;
             var uid = await GetUserIdAsync().ConfigureAwait(false);
             if (!uid.HasValue)
             {
-                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Unauthorized, "未授权，请重新登录", null, HttpContext.TraceIdentifier);
+                return Unauthorized(error);
             }
 
             var role = await _accountRepository.GetRoleAsync((ulong)uid.Value, null, HttpContext.RequestAborted).ConfigureAwait(false);
             if (!role.HasValue || role.Value != _businessRules.SuperAdminRole)
             {
-                return StatusCode(403, ApiResponse<object>.Error("无权限访问"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Forbidden, "无权限访问", null, HttpContext.TraceIdentifier);
+                return StatusCode(403, error);
             }
 
             var payload = request.Data;
             if (payload == null || payload.UsId <= 0)
             {
-                return BadRequest(ApiResponse<object>.Error("无效的策略实例ID"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.InvalidRequest, "无效的策略实例ID", null, HttpContext.TraceIdentifier);
+                return BadRequest(error);
             }
 
             try
@@ -69,12 +73,15 @@ namespace ServerTest.Controllers
                     payload.Limit ?? 1000,
                     HttpContext.RequestAborted).ConfigureAwait(false);
 
-                return Ok(ApiResponse<object>.Ok(logs, "查询成功"));
+                var responseType = ProtocolEnvelopeFactory.BuildAckType(request?.Type ?? "admin.strategy.check.list");
+                var envelope = ProtocolEnvelopeFactory.Ok(responseType, reqId, logs, "查询成功", HttpContext.TraceIdentifier);
+                return Ok(envelope);
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "获取策略检查日志失败: usId={UsId}", payload.UsId);
-                return StatusCode(500, ApiResponse<object>.Error($"查询失败: {ex.Message}"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.InternalError, $"查询失败: {ex.Message}", null, HttpContext.TraceIdentifier);
+                return StatusCode(500, error);
             }
         }
 
@@ -85,22 +92,26 @@ namespace ServerTest.Controllers
         [HttpPost("clear")]
         public async Task<IActionResult> ClearCheckLogs([FromBody] ProtocolRequest<StrategyCheckLogRequest> request)
         {
+            var reqId = request?.ReqId;
             var uid = await GetUserIdAsync().ConfigureAwait(false);
             if (!uid.HasValue)
             {
-                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Unauthorized, "未授权，请重新登录", null, HttpContext.TraceIdentifier);
+                return Unauthorized(error);
             }
 
             var role = await _accountRepository.GetRoleAsync((ulong)uid.Value, null, HttpContext.RequestAborted).ConfigureAwait(false);
             if (!role.HasValue || role.Value != _businessRules.SuperAdminRole)
             {
-                return StatusCode(403, ApiResponse<object>.Error("无权限访问"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Forbidden, "无权限访问", null, HttpContext.TraceIdentifier);
+                return StatusCode(403, error);
             }
 
             var payload = request.Data;
             if (payload == null || payload.UsId <= 0)
             {
-                return BadRequest(ApiResponse<object>.Error("无效的策略实例ID"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.InvalidRequest, "无效的策略实例ID", null, HttpContext.TraceIdentifier);
+                return BadRequest(error);
             }
 
             try
@@ -109,12 +120,15 @@ namespace ServerTest.Controllers
                     payload.UsId,
                     HttpContext.RequestAborted).ConfigureAwait(false);
 
-                return Ok(ApiResponse<object>.Ok(new { deletedCount }, $"已清空 {deletedCount} 条检查记录"));
+                var responseType = ProtocolEnvelopeFactory.BuildAckType(request?.Type ?? "admin.strategy.check.clear");
+                var envelope = ProtocolEnvelopeFactory.Ok(responseType, reqId, new { deletedCount }, $"已清空 {deletedCount} 条检查记录", HttpContext.TraceIdentifier);
+                return Ok(envelope);
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "清空策略检查日志失败: usId={UsId}", payload.UsId);
-                return StatusCode(500, ApiResponse<object>.Error($"清空失败: {ex.Message}"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.InternalError, $"清空失败: {ex.Message}", null, HttpContext.TraceIdentifier);
+                return StatusCode(500, error);
             }
         }
 

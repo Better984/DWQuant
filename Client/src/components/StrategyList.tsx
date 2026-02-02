@@ -200,6 +200,11 @@ const StrategyList: React.FC = () => {
     await fetchStrategies();
   };
 
+  const closeStrategyPosition = async (positionId: number) => {
+    await client.postProtocol('/api/positions/close-by-id', 'position.close.by_id', { positionId });
+    await fetchStrategies();
+  };
+
   const handleViewHistory = async (usId: number) => {
     const target = records.find((item) => item.usId === usId) ?? null;
     if (!target) {
@@ -515,6 +520,7 @@ const StrategyList: React.FC = () => {
             onFetchOpenPositionsCount={fetchOpenPositionsCount}
             onFetchPositions={fetchStrategyPositions}
             onClosePositions={closeStrategyPositions}
+            onClosePosition={closeStrategyPosition}
             onPublishOfficial={handlePublishOfficial}
             onPublishTemplate={handlePublishTemplate}
             onPublishMarket={handlePublishMarket}

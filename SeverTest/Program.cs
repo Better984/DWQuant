@@ -19,8 +19,12 @@ using ServerTest.Modules.Monitoring.Infrastructure;
 using ServerTest.Modules.Positions.Application;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Modules.StrategyEngine.Application;
+using ServerTest.Modules.StrategyEngine.Application.RunChecks;
+using ServerTest.Modules.StrategyEngine.Application.RunChecks.Checks;
 using ServerTest.Modules.StrategyEngine.Domain;
 using ServerTest.Modules.StrategyEngine.Infrastructure;
+using ServerTest.Modules.StrategyManagement.Application;
+using ServerTest.Modules.StrategyManagement.Infrastructure;
 using ServerTest.Modules.StrategyRuntime.Application;
 using ServerTest.Modules.TradingExecution.Application;
 using ServerTest.Protocol;
@@ -39,7 +43,16 @@ var builder = WebApplication.CreateBuilder(args);
 // ============================================================================
 // 第一阶段：基础服务注册
 // ============================================================================
-builder.Services.AddControllers();
+// 注册协议过滤器（需要先注册为服务以支持依赖注入）
+builder.Services.AddScoped<ServerTest.Protocol.ProtocolRequestFilter>();
+builder.Services.AddScoped<ServerTest.Protocol.ProtocolResponseFilter>();
+
+builder.Services.AddControllers(options =>
+{
+    // 注册协议过滤器
+    options.Filters.Add<ServerTest.Protocol.ProtocolRequestFilter>();
+    options.Filters.Add<ServerTest.Protocol.ProtocolResponseFilter>();
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -131,6 +144,7 @@ builder.Services.AddSingleton<StrategyPositionRepository>();
 builder.Services.AddSingleton<UserExchangeApiKeyRepository>();
 builder.Services.AddSingleton<PositionRiskConfigStore>();
 builder.Services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
+builder.Services.AddScoped<ServerTest.Modules.Positions.Application.StrategyPositionCloseService>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Infrastructure.StrategyRuntimeRepository>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Application.StrategyRuntimeLoader>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Application.StrategyOwnershipService>();
@@ -138,8 +152,24 @@ builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.No
 builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.NotificationPreferenceRepository>();
 builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.NotificationAccountRepository>();
 builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.UserNotifyChannelRepository>();
+builder.Services.AddScoped<ServerTest.Modules.Notifications.Application.NotificationPreferenceService>();
 builder.Services.AddSingleton<ServerTest.Modules.Notifications.Application.INotificationPreferenceResolver, ServerTest.Modules.Notifications.Application.NotificationPreferenceResolver>();
 builder.Services.AddSingleton<ServerTest.Modules.Notifications.Application.INotificationPublisher, ServerTest.Modules.Notifications.Application.NotificationPublisher>();
+
+// 策略运行检查相关
+builder.Services.AddScoped<IStrategyRunCheck, ApiKeyRunCheck>();
+builder.Services.AddScoped<IStrategyRunCheck, BalanceRunCheck>();
+builder.Services.AddScoped<IStrategyRunCheck, PositionModeRunCheck>();
+builder.Services.AddScoped<IStrategyRunCheck, ExchangeReadyRunCheck>();
+builder.Services.AddScoped<StrategyRunCheckService>();
+builder.Services.AddScoped<StrategyRunCheckLogRepository>();
+// TestStrategyCheckLogRepository 需要是 Singleton，因为被 RealTimeStrategyEngine (Singleton) 使用
+builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.TestStrategyCheckLogRepository>();
+
+// 策略管理相关
+builder.Services.AddScoped<StrategyRepository>();
+builder.Services.AddScoped<StrategyService>();
+
 builder.Services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
 builder.Services.AddHostedService<TradeActionConsumer>();
 builder.Services.AddHostedService<PositionRiskEngine>();
@@ -161,9 +191,18 @@ builder.Services.AddSingleton<MarketTickerBroadcastService>();
 builder.Services.AddHostedService<MarketTickerBroadcastService>(sp => sp.GetRequiredService<MarketTickerBroadcastService>());
 builder.Services.AddHostedService<KlineCloseListenerService>();
 
+// 管理员广播服务
+builder.Services.AddSingleton<ServerTest.Modules.AdminBroadcast.Application.AdminWebSocketBroadcastService>();
+builder.Services.AddSingleton<ServerTest.Modules.AdminBroadcast.Application.ServerStatusService>();
+builder.Services.AddSingleton<ServerTest.Modules.AdminBroadcast.Application.AdminBroadcastService>();
+builder.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider, ServerTest.Modules.AdminBroadcast.Infrastructure.AdminLogBroadcastProvider>();
+
 // 配置选项
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection("RateLimit"));
 builder.Services.Configure<Microsoft.AspNetCore.Builder.WebSocketOptions>(builder.Configuration.GetSection("WebSocket"));
+builder.Services.Configure<ServerTest.Options.RequestLimitsOptions>(builder.Configuration.GetSection("RequestLimits"));
+// 交易配置（沙盒模式等）
+builder.Services.Configure<ServerTest.Options.TradingOptions>(builder.Configuration.GetSection("Trading"));
 
 // ============================================================================
 // 构建应用

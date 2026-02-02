@@ -19,4 +19,11 @@ namespace ServerTest.Modules.Positions.Domain
         public decimal Qty { get; set; }
         public string Error { get; set; } = string.Empty;
     }
+
+    public sealed class PositionCloseResult
+    {
+        public long PositionId { get; set; }
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+    }
 }

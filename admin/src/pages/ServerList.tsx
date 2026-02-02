@@ -471,15 +471,22 @@ const ServerList: React.FC = () => {
                   <div className="server-node-title">
                     <Space>
                       {server.isCurrentNode && <Badge status="processing" />}
-                      <span className="server-node-id">{server.nodeId}</span>
+                      <span className="server-node-id" title={`完整节点ID: ${server.nodeId}`}>
+                        {server.machineName}
+                        <span style={{ color: '#999', fontSize: '12px', marginLeft: '4px' }}>
+                          ({server.nodeId.split('-').slice(1).join('-').substring(0, 8)}...)
+                        </span>
+                      </span>
                       {getStatusTag(server.status)}
                     </Space>
                   </div>
                   <div className="server-node-meta-compact">
                     <Space size="middle" split={<Divider type="vertical" style={{ margin: 0 }} />}>
                       <span className="meta-item">
-                        <span className="meta-label">机器名</span>
-                        <span className="meta-value">{server.machineName}</span>
+                        <span className="meta-label">节点ID</span>
+                        <span className="meta-value" title={server.nodeId} style={{ fontFamily: 'monospace', fontSize: '11px' }}>
+                          {server.nodeId.length > 40 ? `${server.nodeId.substring(0, 40)}...` : server.nodeId}
+                        </span>
                       </span>
                       <span className="meta-item">
                         <span className="meta-label">连接数</span>
@@ -793,6 +800,20 @@ const ServerList: React.FC = () => {
                     清空
                   </Button>
                 </Popconfirm>
+                <Divider type="vertical" style={{ margin: '0 8px' }} />
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={checkLogsLoading}
+                  onClick={() => {
+                    if (currentStrategyUsId) {
+                      loadCheckLogs(currentStrategyUsId);
+                    }
+                  }}
+                >
+                  刷新
+                </Button>
               </Space>
               <span style={{ color: '#999', fontSize: '12px' }}>
                 共 {checkLogs.length} 条记录

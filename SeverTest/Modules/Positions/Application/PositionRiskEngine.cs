@@ -92,6 +92,12 @@ namespace ServerTest.Modules.Positions.Application
                 return;
             }
 
+            var closeReason = trailingHit
+                ? "TrailingStop"
+                : stopLossHit
+                    ? "StopLoss"
+                    : "TakeProfit";
+
             var orderSide = side.Equals("Long", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy";
             var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
             {
@@ -110,7 +116,7 @@ namespace ServerTest.Modules.Positions.Application
                 return;
             }
 
-            await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: trailingHit, closedAt: DateTime.UtcNow, ct)
+            await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: trailingHit, closedAt: DateTime.UtcNow, closeReason, ct)
                 .ConfigureAwait(false);
             _riskConfigStore.Remove(position.PositionId);
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using ServerTest.Modules.StrategyManagement.Application;
 using ServerTest.Models;
@@ -53,21 +53,21 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.Create(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.Create(uid, payload));
         }
 
         [ProtocolType("strategy.list")]
         [HttpPost("list")]
         public Task<IActionResult> List([FromBody] ProtocolRequest<object> request)
         {
-            return WithUserAsync(uid => _strategyService.List(uid));
+            return WithUserAsync(request, uid => _strategyService.List(uid));
         }
 
         [ProtocolType("strategy.official.list")]
         [HttpPost("official/list")]
         public Task<IActionResult> ListOfficial([FromBody] ProtocolRequest<object> request)
         {
-            return WithUserAsync(uid => _strategyService.ListOfficial(uid));
+            return WithUserAsync(request, uid => _strategyService.ListOfficial(uid));
         }
 
         [ProtocolType("strategy.official.versions")]
@@ -80,21 +80,21 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("无效的策略定义")));
             }
 
-            return WithUserAsync(uid => _strategyService.OfficialVersions(uid, payload.DefId));
+            return WithUserAsync(request, uid => _strategyService.OfficialVersions(uid, payload.DefId));
         }
 
         [ProtocolType("strategy.template.list")]
         [HttpPost("template/list")]
         public Task<IActionResult> ListTemplate([FromBody] ProtocolRequest<object> request)
         {
-            return WithUserAsync(uid => _strategyService.ListTemplate(uid));
+            return WithUserAsync(request, uid => _strategyService.ListTemplate(uid));
         }
 
         [ProtocolType("strategy.market.list")]
         [HttpPost("market/list")]
         public Task<IActionResult> ListMarket([FromBody] ProtocolRequest<object> request)
         {
-            return WithUserAsync(uid => _strategyService.ListMarket(uid));
+            return WithUserAsync(request, uid => _strategyService.ListMarket(uid));
         }
 
         [ProtocolType("strategy.market.publish")]
@@ -107,7 +107,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.PublishMarket(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.PublishMarket(uid, payload));
         }
 
         [ProtocolType("strategy.update")]
@@ -120,7 +120,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.Update(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.Update(uid, payload));
         }
 
         [ProtocolType("strategy.publish")]
@@ -133,7 +133,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.Publish(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.Publish(uid, payload));
         }
 
         [ProtocolType("strategy.official.publish")]
@@ -146,7 +146,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.PublishOfficial(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.PublishOfficial(uid, payload));
         }
 
         [ProtocolType("strategy.template.publish")]
@@ -159,7 +159,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.PublishTemplate(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.PublishTemplate(uid, payload));
         }
 
         [ProtocolType("strategy.official.sync")]
@@ -172,7 +172,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.SyncOfficial(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.SyncOfficial(uid, payload));
         }
 
         [ProtocolType("strategy.template.sync")]
@@ -185,7 +185,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.SyncTemplate(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.SyncTemplate(uid, payload));
         }
 
         [ProtocolType("strategy.official.remove")]
@@ -198,7 +198,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.RemoveOfficial(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.RemoveOfficial(uid, payload));
         }
 
         [ProtocolType("strategy.template.remove")]
@@ -211,7 +211,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.RemoveTemplate(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.RemoveTemplate(uid, payload));
         }
 
         [ProtocolType("strategy.market.sync")]
@@ -224,7 +224,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.SyncMarket(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.SyncMarket(uid, payload));
         }
 
         [ProtocolType("strategy.share.create")]
@@ -237,7 +237,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.CreateShareCode(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.CreateShareCode(uid, payload));
         }
 
         [ProtocolType("strategy.share.import")]
@@ -250,7 +250,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.ImportShareCode(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.ImportShareCode(uid, payload));
         }
 
         [ProtocolType("strategy.versions")]
@@ -263,7 +263,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("无效的策略实例")));
             }
 
-            return WithUserAsync(uid => _strategyService.Versions(uid, payload.UsId));
+            return WithUserAsync(request, uid => _strategyService.Versions(uid, payload.UsId));
         }
 
         [ProtocolType("strategy.delete")]
@@ -276,7 +276,7 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(uid => _strategyService.Delete(uid, payload));
+            return WithUserAsync(request, uid => _strategyService.Delete(uid, payload));
         }
 
         [ProtocolType("strategy.instance.state.update")]
@@ -295,15 +295,17 @@ namespace ServerTest.Controllers
                 State = payload.State,
                 ExchangeApiKeyId = payload.ExchangeApiKeyId
             };
-            return WithUserAsync(uid => _strategyService.UpdateInstanceState(uid, payload.Id, stateRequest, ct));
+            return WithUserAsync(request, uid => _strategyService.UpdateInstanceState(uid, payload.Id, stateRequest, ct));
         }
 
-        private async Task<IActionResult> WithUserAsync(Func<long, Task<IActionResult>> action)
+        private async Task<IActionResult> WithUserAsync(IProtocolRequest? request, Func<long, Task<IActionResult>> action)
         {
             var uid = await GetUserIdAsync();
             if (!uid.HasValue)
             {
-                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+                var reqId = request?.ReqId;
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Unauthorized, "未授权，请重新登录", null, HttpContext.TraceIdentifier);
+                return Unauthorized(error);
             }
 
             return await action(uid.Value).ConfigureAwait(false);

@@ -57,6 +57,7 @@ type StrategyDetailDialogProps = {
   onFetchOpenPositionsCount: (usId: number) => Promise<number>;
   onFetchPositions: (usId: number) => Promise<StrategyPositionRecord[]>;
   onClosePositions: (usId: number) => Promise<void>;
+  onClosePosition: (positionId: number) => Promise<void>;
   onPublishOfficial: (usId: number) => Promise<void>;
   onPublishTemplate: (usId: number) => Promise<void>;
   onPublishMarket: (usId: number) => Promise<void>;
@@ -81,6 +82,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   onFetchOpenPositionsCount,
   onFetchPositions,
   onClosePositions,
+  onClosePosition,
   onPublishOfficial,
   onPublishTemplate,
   onPublishMarket,
@@ -115,6 +117,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
   const [isClosePositionsConfirmOpen, setIsClosePositionsConfirmOpen] = useState(false);
   const [isClosingPositions, setIsClosingPositions] = useState(false);
+  const [closePositionTarget, setClosePositionTarget] = useState<StrategyPositionRecord | null>(null);
+  const [isClosingPosition, setIsClosingPosition] = useState(false);
 
   const profile = useMemo(() => getAuthProfile(), []);
   const canPublish = profile?.role === 255;
@@ -239,6 +243,29 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     } finally {
       setIsClosingPositions(false);
       setIsClosePositionsConfirmOpen(false);
+    }
+  };
+
+  const handleClosePosition = async () => {
+    if (!closePositionTarget || isClosingPosition) {
+      return;
+    }
+    if (!closePositionTarget.positionId) {
+      error('仓位ID无效');
+      setClosePositionTarget(null);
+      return;
+    }
+    setIsClosingPosition(true);
+    try {
+      await onClosePosition(closePositionTarget.positionId);
+      success('已发起平仓');
+      await handleLoadPositions(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '平仓失败';
+      error(message);
+    } finally {
+      setIsClosingPosition(false);
+      setClosePositionTarget(null);
     }
   };
 
@@ -389,7 +416,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     return value.toFixed(4).replace(/\.?0+$/, '');
   };
 
-  const formatStatus = (status?: string) => {
+  const formatStatus = (status?: string, closeReason?: string | null) => {
     if (!status) {
       return '-';
     }
@@ -398,7 +425,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
       return '未平仓';
     }
     if (normalized === 'closed') {
-      return '已平仓';
+      const reasonText = formatCloseReason(closeReason);
+      return reasonText !== '-' ? reasonText : '已平仓';
     }
     return status;
   };
@@ -429,17 +457,23 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
       return '-';
     }
     const normalized = value.toLowerCase();
+    if (normalized === 'manualsingle' || normalized === 'manual_single') {
+      return '手动平此仓';
+    }
+    if (normalized === 'manualbatch' || normalized === 'manual_batch') {
+      return '批量一键平仓';
+    }
     if (normalized === 'manual') {
       return '手动平仓';
     }
     if (normalized === 'stoploss') {
-      return '止损';
+      return '固定止损';
     }
     if (normalized === 'takeprofit') {
-      return '止盈';
+      return '固定止盈';
     }
     if (normalized === 'trailingstop') {
-      return '移动止盈';
+      return '移动止盈止损';
     }
     return value;
   };
@@ -778,30 +812,48 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                     <div className="positions-table-cell">平仓原因</div>
                     <div className="positions-table-cell">开仓时间</div>
                     <div className="positions-table-cell">平仓时间</div>
+                    <div className="positions-table-cell">操作</div>
                   </div>
                   <div className="positions-table-body">
-                    {positions.map((position, index) => (
-                      <div
-                        className="positions-table-row"
-                        key={position.positionId ?? `${position.openedAt ?? 'pos'}-${index}`}
-                      >
-                        <div className="positions-table-cell">{position.positionId ?? '-'}</div>
-                        <div className="positions-table-cell">{position.exchange ?? '-'}</div>
-                        <div className="positions-table-cell">{position.symbol ?? '-'}</div>
-                        <div className="positions-table-cell">{formatSide(position.side)}</div>
-                        <div className="positions-table-cell">{formatStatus(position.status)}</div>
-                        <div className="positions-table-cell">{formatNumber(position.entryPrice)}</div>
-                        <div className="positions-table-cell">{formatNumber(position.qty)}</div>
-                        <div className="positions-table-cell">{formatNumber(position.stopLossPrice)}</div>
-                        <div className="positions-table-cell">{formatNumber(position.takeProfitPrice)}</div>
-                        <div className="positions-table-cell">{formatBoolean(position.trailingEnabled)}</div>
-                        <div className="positions-table-cell">{formatBoolean(position.trailingTriggered)}</div>
-                        <div className="positions-table-cell">{formatNumber(position.trailingStopPrice)}</div>
-                        <div className="positions-table-cell">{formatCloseReason(position.closeReason)}</div>
-                        <div className="positions-table-cell">{formatDateTimeLocal(position.openedAt)}</div>
-                        <div className="positions-table-cell">{formatDateTimeLocal(position.closedAt)}</div>
-                      </div>
-                    ))}
+                    {positions.map((position, index) => {
+                      const isOpenPosition = position.status?.toLowerCase() === 'open';
+                      return (
+                        <div
+                          className="positions-table-row"
+                          key={position.positionId ?? `${position.openedAt ?? 'pos'}-${index}`}
+                        >
+                          <div className="positions-table-cell">{position.positionId ?? '-'}</div>
+                          <div className="positions-table-cell">{position.exchange ?? '-'}</div>
+                          <div className="positions-table-cell">{position.symbol ?? '-'}</div>
+                          <div className="positions-table-cell">{formatSide(position.side)}</div>
+                          <div className="positions-table-cell">{formatStatus(position.status, position.closeReason)}</div>
+                          <div className="positions-table-cell">{formatNumber(position.entryPrice)}</div>
+                          <div className="positions-table-cell">{formatNumber(position.qty)}</div>
+                          <div className="positions-table-cell">{formatNumber(position.stopLossPrice)}</div>
+                          <div className="positions-table-cell">{formatNumber(position.takeProfitPrice)}</div>
+                          <div className="positions-table-cell">{formatBoolean(position.trailingEnabled)}</div>
+                          <div className="positions-table-cell">{formatBoolean(position.trailingTriggered)}</div>
+                          <div className="positions-table-cell">{formatNumber(position.trailingStopPrice)}</div>
+                          <div className="positions-table-cell">{formatCloseReason(position.closeReason)}</div>
+                          <div className="positions-table-cell">{formatDateTimeLocal(position.openedAt)}</div>
+                          <div className="positions-table-cell">{formatDateTimeLocal(position.closedAt)}</div>
+                          <div className="positions-table-cell positions-table-cell--actions">
+                            {isOpenPosition ? (
+                              <button
+                                type="button"
+                                className="positions-table-action positions-table-action--danger"
+                                onClick={() => setClosePositionTarget(position)}
+                                disabled={isClosingPosition || isClosingPositions}
+                              >
+                                平掉此仓
+                              </button>
+                            ) : (
+                              <span className="positions-table-action positions-table-action--muted">-</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -909,6 +961,22 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         onCancel={() => setIsClosePositionsConfirmOpen(false)}
         onClose={() => setIsClosePositionsConfirmOpen(false)}
         onConfirm={handleCloseAllPositions}
+      />
+      <AlertDialog
+        open={closePositionTarget !== null}
+        title="平掉此仓"
+        description={
+          closePositionTarget
+            ? `确认平掉该仓位吗？${closePositionTarget.exchange ?? '-'} ${closePositionTarget.symbol ?? '-'} ${formatSide(closePositionTarget.side)} 数量 ${formatNumber(closePositionTarget.qty)}`
+            : undefined
+        }
+        helperText="该操作为人工平仓，将记录为手动平仓。"
+        cancelText="取消"
+        confirmText={isClosingPosition ? '处理中...' : '确认平仓'}
+        danger={true}
+        onCancel={() => setClosePositionTarget(null)}
+        onClose={() => setClosePositionTarget(null)}
+        onConfirm={handleClosePosition}
       />
     </div>
   );

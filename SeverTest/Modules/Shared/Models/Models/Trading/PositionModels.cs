@@ -17,6 +17,7 @@ namespace ServerTest.Models.Trading
         public bool TrailingEnabled { get; set; }
         public bool TrailingTriggered { get; set; }
         public decimal? TrailingStopPrice { get; set; }
+        public string? CloseReason { get; set; }
         public DateTime OpenedAt { get; set; }
         public DateTime? ClosedAt { get; set; }
     }

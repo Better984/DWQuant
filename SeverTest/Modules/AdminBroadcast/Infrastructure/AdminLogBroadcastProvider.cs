@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using ServerTest.Modules.AdminBroadcast.Application;
 using System;
@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 namespace ServerTest.Modules.AdminBroadcast.Infrastructure
 {
     /// <summary>
-    /// 日志提供者，用于拦截日志并推送给管理员
+    /// 日志提供者，用于拦截日志并推送给管理�?
     /// </summary>
     public sealed class AdminLogBroadcastProvider : ILoggerProvider
     {
@@ -46,8 +46,8 @@ namespace ServerTest.Modules.AdminBroadcast.Infrastructure
 
             public bool IsEnabled(LogLevel logLevel)
             {
-                // 只推送 Warning、Error、Critical 级别的日志
-                return logLevel >= LogLevel.Warning;
+                // 推送 Information 及以上级别，避免 Debug/Trace 造成噪音
+                return logLevel >= LogLevel.Information;
             }
 
             public void Log<TState>(
@@ -73,9 +73,13 @@ namespace ServerTest.Modules.AdminBroadcast.Infrastructure
                     // 转换日志级别
                     var level = logLevel switch
                     {
-                        LogLevel.Warning => "WARNING",
-                        LogLevel.Error => "ERROR",
                         LogLevel.Critical => "CRITICAL",
+                        LogLevel.Error => "ERROR",
+                        LogLevel.Warning => "WARNING",
+                        LogLevel.Information => "INFORMATION",
+                        LogLevel.Debug => "DEBUG",
+                        LogLevel.Trace => "TRACE",
+                        LogLevel.None => "NONE",
                         _ => "INFO"
                     };
 
@@ -93,15 +97,18 @@ namespace ServerTest.Modules.AdminBroadcast.Infrastructure
                         }
                         catch
                         {
-                            // 静默失败，避免影响日志记录
+                            // 静默失败，避免影响日志记�?
                         }
                     });
                 }
                 catch
                 {
-                    // 静默失败，避免影响日志记录
+                    // 静默失败，避免影响日志记�?
                 }
             }
         }
     }
 }
+
+
+

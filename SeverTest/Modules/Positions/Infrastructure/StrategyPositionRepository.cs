@@ -85,6 +85,23 @@ LIMIT 1;";
             return _db.QuerySingleOrDefaultAsync<StrategyPosition>(sql, new { uid, usId, exchange, symbol, side }, null, ct);
         }
 
+        public Task<StrategyPosition?> GetByIdAsync(long positionId, long uid, CancellationToken ct = default)
+        {
+            if (positionId <= 0 || uid <= 0)
+            {
+                return Task.FromResult<StrategyPosition?>(null);
+            }
+
+            var sql = @"
+SELECT *
+FROM strategy_position
+WHERE position_id = @positionId
+  AND uid = @uid
+LIMIT 1;";
+
+            return _db.QuerySingleOrDefaultAsync<StrategyPosition>(sql, new { positionId, uid }, null, ct);
+        }
+
         public async Task<IReadOnlyList<StrategyPosition>> GetByUidAsync(
             long uid,
             DateTime? from,

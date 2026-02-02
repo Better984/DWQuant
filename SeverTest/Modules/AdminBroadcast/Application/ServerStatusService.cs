@@ -57,7 +57,13 @@ namespace ServerTest.Modules.AdminBroadcast.Application
                 currentSystems,
                 true,
                 ct).ConfigureAwait(false);
-            servers.Add(currentNodeInfo);
+            
+            // 使用字典按机器名分组，确保同一台机器只保留最新的节点
+            // 当前节点总是优先（因为它是正在运行的）
+            var nodeInfoMap = new Dictionary<string, ServerNodeInfo>(StringComparer.Ordinal)
+            {
+                [currentNodeInfo.MachineName] = currentNodeInfo
+            };
 
             // 从Redis中获取其他节点信息
             foreach (var key in nodeKeys)
@@ -69,29 +75,76 @@ namespace ServerTest.Modules.AdminBroadcast.Application
                 }
 
                 var nodeData = await db.StringGetAsync(key).ConfigureAwait(false);
-                if (nodeData.HasValue)
+                if (!nodeData.HasValue)
                 {
-                    try
+                    // 键已过期，跳过
+                    continue;
+                }
+
+                try
+                {
+                    var heartbeat = ProtocolJson.Deserialize<NodeHeartbeat>(nodeData.ToString());
+                    if (heartbeat == null)
                     {
-                        var heartbeat = ProtocolJson.Deserialize<NodeHeartbeat>(nodeData.ToString());
-                        if (heartbeat != null)
-                        {
-                            var nodeInfo = await BuildServerNodeInfoAsync(
-                                nodeId,
-                                heartbeat.ConnectionCount,
-                                heartbeat.Systems ?? Array.Empty<string>(),
-                                false,
-                                ct).ConfigureAwait(false);
-                            nodeInfo.LastHeartbeat = DateTimeOffset.FromUnixTimeMilliseconds(heartbeat.Timestamp);
-                            servers.Add(nodeInfo);
-                        }
+                        continue;
                     }
-                    catch (Exception ex)
+
+                    var heartbeatTime = DateTimeOffset.FromUnixTimeMilliseconds(heartbeat.Timestamp);
+                    var timeSinceHeartbeat = DateTimeOffset.UtcNow - heartbeatTime;
+
+                    // 过滤掉超过10分钟未心跳的节点（已离线）
+                    if (timeSinceHeartbeat.TotalMinutes > 10)
                     {
-                        _logger.LogWarning(ex, "解析节点心跳数据失败: NodeId={NodeId}", nodeId);
+                        // 删除过期的键
+                        await db.KeyDeleteAsync(key).ConfigureAwait(false);
+                        _logger.LogDebug("删除过期节点心跳: NodeId={NodeId}, 最后心跳={LastHeartbeat}", nodeId, heartbeatTime);
+                        continue;
+                    }
+
+                    var nodeInfo = await BuildServerNodeInfoAsync(
+                        nodeId,
+                        heartbeat.ConnectionCount,
+                        heartbeat.Systems ?? Array.Empty<string>(),
+                        false,
+                        ct).ConfigureAwait(false);
+                    nodeInfo.LastHeartbeat = heartbeatTime;
+
+                    // 对于同一台机器，只保留最新的节点（心跳时间最新的）
+                    var machineName = nodeInfo.MachineName;
+                    if (nodeInfoMap.TryGetValue(machineName, out var existingNode))
+                    {
+                        // 如果当前节点是同一台机器，优先保留当前节点（因为它是正在运行的）
+                        if (existingNode.IsCurrentNode)
+                        {
+                            // 当前节点优先，忽略旧的远程节点
+                            _logger.LogDebug("忽略同一机器的旧节点（当前节点优先）: MachineName={MachineName}, 旧NodeId={OldNodeId}",
+                                machineName, nodeId);
+                            continue;
+                        }
+                        
+                        // 如果都是远程节点，保留心跳时间最新的
+                        if (nodeInfo.LastHeartbeat > existingNode.LastHeartbeat)
+                        {
+                            // 当前节点更新，替换旧的
+                            nodeInfoMap[machineName] = nodeInfo;
+                            _logger.LogDebug("替换同一机器的旧节点: MachineName={MachineName}, 旧NodeId={OldNodeId}, 新NodeId={NewNodeId}",
+                                machineName, existingNode.NodeId, nodeId);
+                        }
+                        // 否则保留现有的（更旧的节点会被忽略）
+                    }
+                    else
+                    {
+                        nodeInfoMap[machineName] = nodeInfo;
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "解析节点心跳数据失败: NodeId={NodeId}", nodeId);
+                }
             }
+
+            // 添加所有有效的节点（同一机器只保留最新的）
+            servers.AddRange(nodeInfoMap.Values);
 
             // 按节点ID排序
             return servers.OrderBy(s => s.NodeId).ToList();

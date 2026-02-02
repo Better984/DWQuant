@@ -605,6 +605,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
 
                         if (isNewCandle)
                         {
+                            var previousCandle = cache1m.Count > 0 ? (OHLCV?)cache1m[^1] : null;
                             // 新K线，添加到缓存
                             cache1m.Add(latest);
 
@@ -620,14 +621,22 @@ namespace ServerTest.Modules.MarketStreaming.Application
                             // Logger.LogInformation($"[{exchangeId}] {symbol} 1m 最新的5根K线: \n" +
                             //     $"{string.Join("\n", cache1m.TakeLast(5).Select(c => $"time={FormatTimestamp(c.timestamp ?? 0)}, close={c.close}"))}\n");
 
-                            // 1分钟收线，更新其他周期（增量聚合）
-                            UpdateOtherTimeframesIncremental(exchangeId, symbol, latest, symbolCache);
+                            if (previousCandle.HasValue)
+                            {
+                                var closedCandle = previousCandle.Value;
+                                var closedTimestamp = closedCandle.timestamp != null ? (long)closedCandle.timestamp : 0;
+                                if (closedTimestamp > 0)
+                                {
+                                    // 1m 收线时，使用已收线的上一根K线进行聚合与任务投递
+                                    UpdateOtherTimeframesIncremental(exchangeId, symbol, closedCandle, symbolCache);
 
-                            // 1m 收线生成实时行情任务
-                            EnqueueMarketTask(exchangeId, symbol, "1m", timestamp, isBarClose: true);
+                                    // 1m 收线生成实时行情任务
+                                    EnqueueMarketTask(exchangeId, symbol, "1m", closedTimestamp, isBarClose: true);
 
-                            // 1m 收线驱动其他周期 OnBarUpdate 任务
-                            EnqueueOnBarUpdateTasks(exchangeId, symbol, symbolCache, timestamp);
+                                    // 1m 收线驱动其他周期 OnBarUpdate 任务
+                                    EnqueueOnBarUpdateTasks(exchangeId, symbol, symbolCache, closedTimestamp);
+                                }
+                            }
                         }
                         else
                         {

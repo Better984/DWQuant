@@ -56,21 +56,25 @@ namespace ServerTest.Controllers
         public async Task<IActionResult> UniversalSearch([FromBody] ProtocolRequest<UniversalSearchRequest> request)
         {
             var payload = request.Data;
+            var reqId = request?.ReqId;
             if (payload == null || string.IsNullOrWhiteSpace(payload.Query))
             {
-                return BadRequest(ApiResponse<object>.Error("查询关键词不能为空"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.MissingField, "查询关键词不能为空", null, HttpContext.TraceIdentifier);
+                return BadRequest(error);
             }
 
             var uid = await GetUserIdAsync().ConfigureAwait(false);
             if (!uid.HasValue)
             {
-                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Unauthorized, "未授权，请重新登录", null, HttpContext.TraceIdentifier);
+                return Unauthorized(error);
             }
 
             var role = await _accountRepository.GetRoleAsync((ulong)uid.Value, null, HttpContext.RequestAborted).ConfigureAwait(false);
             if (!role.HasValue || role.Value != _businessRules.SuperAdminRole)
             {
-                return StatusCode(403, ApiResponse<object>.Error("无权限访问"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.Forbidden, "无权限访问", null, HttpContext.TraceIdentifier);
+                return StatusCode(403, error);
             }
 
             try
@@ -161,14 +165,16 @@ SELECT creator_uid FROM strategy_def WHERE name LIKE @name LIMIT 1;";
 
                 if (!targetUid.HasValue)
                 {
-                    return NotFound(ApiResponse<object>.Error("未找到相关用户"));
+                    var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.NotFound, "未找到相关用户", null, HttpContext.TraceIdentifier);
+                    return NotFound(error);
                 }
 
                 // 2. 获取用户基础信息
                 var targetAccount = await _accountRepository.GetByUidAsync(targetUid.Value, null, HttpContext.RequestAborted).ConfigureAwait(false);
                 if (targetAccount == null)
                 {
-                    return NotFound(ApiResponse<object>.Error("用户不存在"));
+                    var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.NotFound, "用户不存在", null, HttpContext.TraceIdentifier);
+                    return NotFound(error);
                 }
 
                 // 3. 向下检索用户的所有行为
@@ -202,12 +208,15 @@ SELECT creator_uid FROM strategy_def WHERE name LIKE @name LIMIT 1;";
                     positions = await GetPositionsAsync(targetUid.Value).ConfigureAwait(false),
                 };
 
-                return Ok(ApiResponse<object>.Ok(result, "查询成功"));
+                var responseType = ProtocolEnvelopeFactory.BuildAckType(request?.Type ?? "admin.user.universal-search");
+                var envelope = ProtocolEnvelopeFactory.Ok(responseType, reqId, result, "查询成功", HttpContext.TraceIdentifier);
+                return Ok(envelope);
             }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "万向查询失败: Query={Query}", payload.Query);
-                return StatusCode(500, ApiResponse<object>.Error($"查询失败: {ex.Message}"));
+                var error = ProtocolEnvelopeFactory.Error(reqId, ProtocolErrorCodes.InternalError, $"查询失败: {ex.Message}", null, HttpContext.TraceIdentifier);
+                return StatusCode(500, error);
             }
         }
 

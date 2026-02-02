@@ -431,8 +431,8 @@
 .positions-table-header,
 .positions-table-row {
   display: grid;
-  grid-template-columns: 90px 90px 120px 80px 90px 110px 100px 110px 110px 120px 90px 120px 120px 170px 170px;
-  min-width: 1500px;
+  grid-template-columns: 90px 90px 120px 80px 90px 110px 100px 110px 110px 120px 90px 120px 120px 170px 170px 120px;
+  min-width: 1620px;
   align-items: center;
 }
 
@@ -457,6 +457,44 @@
 .positions-table-cell {
   padding: 10px 12px;
   white-space: nowrap;
+}
+
+.positions-table-cell--actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.positions-table-action {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: #f3f4f6;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.positions-table-action--danger {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.positions-table-action--danger:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.positions-table-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.positions-table-action--muted {
+  color: #9ca3af;
+  font-size: 12px;
 }
 
 /* 响应式设计 */
@@ -520,6 +558,6 @@
 
   .positions-table-header,
   .positions-table-row {
-    min-width: 1350px;
+    min-width: 1470px;
   }
 }

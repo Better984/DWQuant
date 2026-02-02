@@ -99,12 +99,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
             {
                 value = parsed;
+                LogResolvedConstant(context, reference, value);
                 return true;
             }
 
             if (double.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed))
             {
                 value = parsed;
+                LogResolvedConstant(context, reference, value);
                 return true;
             }
 
@@ -204,6 +206,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
+            LogResolvedField(context, reference, candle, value, offset);
+
             return true;
         }
 
@@ -251,7 +255,77 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
+            LogResolvedIndicator(context, reference, request, value, offset);
+
             return true;
+        }
+
+        private void LogResolvedConstant(
+            StrategyExecutionContext context,
+            StrategyValueRef reference,
+            double value)
+        {
+            _logger.LogInformation(
+                "条件检测取值 固定值: {Uid} input={Input} value={Value:F6}",
+                context.Strategy.UidCode,
+                reference?.Input,
+                value);
+        }
+
+        private void LogResolvedField(
+            StrategyExecutionContext context,
+            StrategyValueRef reference,
+            ccxt.OHLCV? candle,
+            double value,
+            int offset)
+        {
+            var candleTimestamp = candle?.timestamp ?? 0;
+            var timeText = FormatKlineTime(candleTimestamp);
+            var open = candle?.open ?? 0;
+            var high = candle?.high ?? 0;
+            var low = candle?.low ?? 0;
+            var close = candle?.close ?? 0;
+
+            _logger.LogInformation(
+                "条件检测取值 K线: {Uid} field={Field} time={Time} open={Open:F4} high={High:F4} low={Low:F4} close={Close:F4} value={Value:F6} offset={Offset}",
+                context.Strategy.UidCode,
+                reference?.Input,
+                timeText,
+                open,
+                high,
+                low,
+                close,
+                value,
+                offset);
+        }
+
+        private void LogResolvedIndicator(
+            StrategyExecutionContext context,
+            StrategyValueRef reference,
+            IndicatorRequest request,
+            double value,
+            int offset)
+        {
+            _logger.LogInformation(
+                "条件检测取值 指标: {Uid} indicator={Indicator} output={Output} timeframe={Timeframe} value={Value:F6} offset={Offset}",
+                context.Strategy.UidCode,
+                reference?.Indicator,
+                reference?.Output,
+                request?.Key.Timeframe,
+                value,
+                offset);
+        }
+
+        private static string FormatKlineTime(long timestamp)
+        {
+            if (timestamp <= 0)
+            {
+                return "N/A";
+            }
+
+            return DateTimeOffset.FromUnixTimeMilliseconds(timestamp)
+                .ToLocalTime()
+                .ToString("MM-dd HH:mm");
         }
 
         private static int GetBaseOffset(StrategyValueRef reference)

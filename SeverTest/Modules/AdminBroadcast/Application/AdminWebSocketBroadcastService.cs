@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Modules.Accounts.Infrastructure;
@@ -16,22 +17,25 @@ namespace ServerTest.Modules.AdminBroadcast.Application
     public sealed class AdminWebSocketBroadcastService
     {
         private readonly IConnectionManager _connectionManager;
-        private readonly AccountRepository _accountRepository;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly BusinessRulesOptions _businessRules;
         private readonly ILogger<AdminWebSocketBroadcastService> _logger;
+        private readonly WebSocketNodeId _nodeId;
         private readonly ConcurrentDictionary<string, bool> _adminCache = new(StringComparer.Ordinal);
         private DateTime _lastCacheRefresh = DateTime.UtcNow;
         private readonly TimeSpan _cacheRefreshInterval = TimeSpan.FromMinutes(1);
 
         public AdminWebSocketBroadcastService(
             IConnectionManager connectionManager,
-            AccountRepository accountRepository,
+            IServiceScopeFactory serviceScopeFactory,
             IOptions<BusinessRulesOptions> businessRules,
+            WebSocketNodeId nodeId,
             ILogger<AdminWebSocketBroadcastService> logger)
         {
             _connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
-            _accountRepository = accountRepository ?? throw new ArgumentNullException(nameof(accountRepository));
+            _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
             _businessRules = businessRules?.Value ?? new BusinessRulesOptions();
+            _nodeId = nodeId ?? throw new ArgumentNullException(nameof(nodeId));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -105,6 +109,7 @@ namespace ServerTest.Modules.AdminBroadcast.Application
                     level,
                     message,
                     category,
+                    nodeId = _nodeId.Value,
                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 };
 
@@ -170,22 +175,26 @@ namespace ServerTest.Modules.AdminBroadcast.Application
                 }
 
                 // 检查在线用户是否是管理员
-                foreach (var userId in userIds)
+                using (var scope = _serviceScopeFactory.CreateScope())
                 {
-                    if (_adminCache.ContainsKey(userId))
+                    var accountRepository = scope.ServiceProvider.GetRequiredService<AccountRepository>();
+                    foreach (var userId in userIds)
                     {
-                        continue;
-                    }
+                        if (_adminCache.ContainsKey(userId))
+                        {
+                            continue;
+                        }
 
-                    if (long.TryParse(userId, out var uid))
-                    {
-                        var role = await _accountRepository.GetRoleAsync((ulong)uid, null, ct).ConfigureAwait(false);
-                        var isAdmin = role.HasValue && role.Value == _businessRules.SuperAdminRole;
-                        _adminCache[userId] = isAdmin;
-                    }
-                    else
-                    {
-                        _adminCache[userId] = false;
+                        if (long.TryParse(userId, out var uid))
+                        {
+                            var role = await accountRepository.GetRoleAsync((ulong)uid, null, ct).ConfigureAwait(false);
+                            var isAdmin = role.HasValue && role.Value == _businessRules.SuperAdminRole;
+                            _adminCache[userId] = isAdmin;
+                        }
+                        else
+                        {
+                            _adminCache[userId] = false;
+                        }
                     }
                 }
             }

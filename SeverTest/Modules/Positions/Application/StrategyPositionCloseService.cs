@@ -120,8 +120,8 @@ namespace ServerTest.Modules.Positions.Application
 
                 foreach (var position in group)
                 {
-                    // 手动平仓需要记录 close_reason=Manual
-                    await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "Manual", ct)
+                    // 手动批量平仓需要记录 close_reason=ManualBatch
+                    await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "ManualBatch", ct)
                         .ConfigureAwait(false);
                     _riskConfigStore.Remove(position.PositionId);
                     closedPositions++;
@@ -136,6 +136,98 @@ namespace ServerTest.Modules.Positions.Application
                 TotalPositions = positions.Count,
                 ClosedPositions = closedPositions,
                 FailedGroups = failedGroups
+            };
+        }
+
+        public async Task<PositionCloseResult> CloseByPositionAsync(long uid, long positionId, CancellationToken ct)
+        {
+            if (uid <= 0 || positionId <= 0)
+            {
+                return new PositionCloseResult
+                {
+                    PositionId = positionId,
+                    Success = false,
+                    Error = "无效的仓位ID"
+                };
+            }
+
+            var position = await _positionRepository.GetByIdAsync(positionId, uid, ct).ConfigureAwait(false);
+            if (position == null)
+            {
+                return new PositionCloseResult
+                {
+                    PositionId = positionId,
+                    Success = false,
+                    Error = "未找到仓位"
+                };
+            }
+
+            if (!string.Equals(position.Status, "Open", StringComparison.OrdinalIgnoreCase))
+            {
+                return new PositionCloseResult
+                {
+                    PositionId = position.PositionId,
+                    Success = false,
+                    Error = "仓位已平或不可平"
+                };
+            }
+
+            if (position.Qty <= 0)
+            {
+                return new PositionCloseResult
+                {
+                    PositionId = position.PositionId,
+                    Success = false,
+                    Error = "仓位数量无效"
+                };
+            }
+
+            var orderSide = ResolveCloseOrderSide(position.Side);
+            if (string.IsNullOrWhiteSpace(orderSide))
+            {
+                return new PositionCloseResult
+                {
+                    PositionId = position.PositionId,
+                    Success = false,
+                    Error = "仓位方向无效"
+                };
+            }
+
+            _logger.LogInformation("手动平仓开始: uid={Uid} positionId={PositionId} {Exchange} {Symbol} {Side} qty={Qty}",
+                uid, position.PositionId, position.Exchange, position.Symbol, position.Side, position.Qty);
+
+            var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+            {
+                Uid = position.Uid,
+                ExchangeApiKeyId = position.ExchangeApiKeyId,
+                Exchange = position.Exchange,
+                Symbol = position.Symbol,
+                Side = orderSide,
+                Qty = position.Qty,
+                ReduceOnly = true
+            }, ct).ConfigureAwait(false);
+
+            if (!orderResult.Success)
+            {
+                return new PositionCloseResult
+                {
+                    PositionId = position.PositionId,
+                    Success = false,
+                    Error = orderResult.ErrorMessage ?? "平仓失败"
+                };
+            }
+
+            // 手动单仓平仓需要记录 close_reason=ManualSingle
+            await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "ManualSingle", ct)
+                .ConfigureAwait(false);
+            _riskConfigStore.Remove(position.PositionId);
+
+            _logger.LogInformation("手动平仓完成: uid={Uid} positionId={PositionId}", uid, position.PositionId);
+
+            return new PositionCloseResult
+            {
+                PositionId = position.PositionId,
+                Success = true
             };
         }
 

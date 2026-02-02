@@ -29,7 +29,7 @@
 **文件**: `SeverTest/Modules/AdminBroadcast/Infrastructure/AdminLogBroadcastProvider.cs`
 
 **功能**:
-- 拦截系统日志（Warning、Error、Critical 级别）
+- 拦截系统日志（Information 及以上级别）
 - 自动推送给所有管理员用户
 - 异步处理，不阻塞日志记录
 
@@ -42,7 +42,7 @@
 **推送时机**:
 - WebSocket 连接建立后 200ms 推送统计信息
 - WebSocket 连接断开后 200ms 推送统计信息
-- 系统日志记录时自动推送（Warning/Error/Critical）
+- 系统日志记录时自动推送（Information 及以上）
 
 ### 2. 前端修复
 
@@ -56,8 +56,9 @@
 #### 2.2 LogConsole.tsx
 **功能**:
 - ✅ 监听 `admin.log` WebSocket 消息
-- ✅ 自动显示 Warning、Error、Critical 级别的日志
-- ✅ 日志进入动画效果
+- ✅ 默认显示 INFO/INFORMATION/WARNING/ERROR/CRITICAL 级别日志
+- ✅ 支持点击日志弹窗查看详情
+- ✅ 列表样式优化，长消息不再挤压布局
 
 ## WebSocket 消息格式
 
@@ -126,7 +127,7 @@
 ## 注意事项
 
 1. **权限检查**: 只有角色为 255（超级管理员）的用户才能收到推送
-2. **日志级别**: 只推送 Warning、Error、Critical 级别的日志
+2. **日志级别**: 只推送 Information 及以上级别的日志
 3. **错误处理**: 推送失败不会影响主流程，只记录警告日志
 4. **循环依赖**: 使用 `IServiceProvider` 延迟获取服务，避免循环依赖
 
@@ -134,6 +135,7 @@
 
 1. 测试连接建立/断开时的推送
 2. 测试多个管理员同时在线时的推送
-3. 测试日志推送功能（触发 Warning/Error 级别日志）
-4. 测试非管理员用户是否不会收到推送
-5. 测试网络断开重连后的推送恢复
+3. 测试日志推送功能（触发 Information/Warning/Error 级别日志）
+4. 测试日志详情弹窗展示内容是否完整
+5. 测试非管理员用户是否不会收到推送
+6. 测试网络断开重连后的推送恢复

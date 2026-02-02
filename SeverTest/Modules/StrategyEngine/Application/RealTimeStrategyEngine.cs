@@ -6,8 +6,10 @@ using ServerTest.Modules.StrategyEngine.Domain;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 using ServerTest.Modules.MarketStreaming.Application;
+using ServerTest.Modules.StrategyEngine.Infrastructure;
 
 namespace ServerTest.Modules.StrategyEngine.Application
 {
@@ -23,6 +25,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private readonly IndicatorEngine? _indicatorEngine;
         private readonly ConditionEvaluator _conditionEvaluator;
         private readonly ConditionUsageTracker _conditionUsageTracker;
+        private readonly TestStrategyCheckLogRepository? _testCheckLogRepository; // 测试用：策略检查日志仓储（后续会删除）
         private readonly string _engineInstanceId;
 
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, StrategyModel>> _strategiesByKey = new();
@@ -38,6 +41,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             IndicatorEngine? indicatorEngine = null,
             ConditionEvaluator? conditionEvaluator = null,
             ConditionUsageTracker? conditionUsageTracker = null,
+            TestStrategyCheckLogRepository? testCheckLogRepository = null, // 测试用：策略检查日志仓储（后续会删除）
             int? maxParallelism = null)
         {
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
@@ -49,6 +53,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _indicatorEngine = indicatorEngine;
             _conditionEvaluator = conditionEvaluator ?? throw new ArgumentNullException(nameof(conditionEvaluator));
             _conditionUsageTracker = conditionUsageTracker ?? throw new ArgumentNullException(nameof(conditionUsageTracker));
+            _testCheckLogRepository = testCheckLogRepository; // 测试用：可选依赖，避免非测试环境报错
             _maxParallelism = maxParallelism ?? Environment.ProcessorCount;
             _engineInstanceId = $"{Environment.MachineName}:{Environment.ProcessId}";
         }
@@ -468,6 +473,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         result.Success,
                         result.Message);
 
+                    // 测试用：记录检查过程（后续会删除）
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await LogCheckResultAsync(context, stage, groupIndex, condition, result, true, ct: default).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "记录测试检查日志失败（忽略）");
+                        }
+                    });
+
                     if (!result.Success)
                     {
                         _logger.LogDebug(
@@ -515,6 +533,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         condition.Required,
                         result.Success,
                         result.Message);
+
+                    // 测试用：记录检查过程（后续会删除）
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await LogCheckResultAsync(context, stage, groupIndex, condition, result, false, ct: default).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "记录测试检查日志失败（忽略）");
+                        }
+                    });
 
                     if (result.Success)
                     {
@@ -987,6 +1018,101 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         yield return action;
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// 测试用：记录策略检查结果到数据库（后续会删除）
+        /// </summary>
+        private async Task LogCheckResultAsync(
+            StrategyExecutionContext context,
+            string stage,
+            int groupIndex,
+            StrategyMethod condition,
+            ConditionEvaluationResult result,
+            bool isRequired,
+            CancellationToken ct)
+        {
+            if (_testCheckLogRepository == null)
+            {
+                return; // 非测试环境，跳过记录
+            }
+
+            try
+            {
+                var trade = context.StrategyConfig?.Trade;
+                if (trade == null)
+                {
+                    return;
+                }
+
+                // 构建条件键
+                var conditionKey = ConditionKeyBuilder.BuildKey(trade, condition);
+
+                // 构建检查过程详情（JSON格式）
+                var checkProcess = new
+                {
+                    stage = stage,
+                    groupIndex = groupIndex,
+                    conditionKey = conditionKey.Text,
+                    conditionKeyId = conditionKey.Id,
+                    method = condition.Method,
+                    isRequired = isRequired,
+                    enabled = condition.Enabled,
+                    result = new
+                    {
+                        success = result.Success,
+                        message = result.Message,
+                        key = result.Key
+                    },
+                    strategy = new
+                    {
+                        uidCode = context.Strategy.UidCode,
+                        state = context.Strategy.State.ToString()
+                    },
+                    task = new
+                    {
+                        exchange = context.Task.Exchange,
+                        symbol = context.Task.Symbol,
+                        timeframe = context.Task.Timeframe,
+                        candleTimestamp = context.Task.CandleTimestamp,
+                        isBarClose = context.Task.IsBarClose
+                    },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                var checkProcessJson = JsonSerializer.Serialize(checkProcess, new JsonSerializerOptions
+                {
+                    WriteIndented = false,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+
+                var log = new TestStrategyCheckLog
+                {
+                    Uid = context.Strategy.CreatorUserId,
+                    UsId = context.Strategy.Id,
+                    Exchange = trade.Exchange,
+                    Symbol = trade.Symbol,
+                    Timeframe = trade.TimeframeSec.ToString(),
+                    CandleTimestamp = context.Task.CandleTimestamp,
+                    Stage = stage,
+                    GroupIndex = groupIndex,
+                    ConditionKey = conditionKey.Id,
+                    Method = condition.Method,
+                    IsRequired = isRequired,
+                    Success = result.Success,
+                    Message = result.Message ?? string.Empty,
+                    CheckProcess = checkProcessJson,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _testCheckLogRepository.InsertAsync(log, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // 记录失败不影响主流程，只记录警告日志
+                _logger.LogWarning(ex, "记录测试检查日志失败: uid={Uid} usId={UsId} stage={Stage}", 
+                    context.Strategy.CreatorUserId, context.Strategy.Id, stage);
             }
         }
     }

@@ -126,6 +126,39 @@ namespace ServerTest.Controllers
             return Ok(ApiResponse<StrategyClosePositionsResult>.Ok(result));
         }
 
+        [ProtocolType("position.close.by_id")]
+        [HttpPost("close-by-id")]
+        public async Task<IActionResult> CloseById([FromBody] ProtocolRequest<PositionCloseByIdRequest> request)
+        {
+            var payload = request.Data;
+            if (payload == null)
+            {
+                return BadRequest(ApiResponse<object>.Error("缺少请求数据"));
+            }
+
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            if (payload.PositionId <= 0)
+            {
+                return BadRequest(ApiResponse<object>.Error("无效的仓位ID"));
+            }
+
+            var result = await _closeService
+                .CloseByPositionAsync(uid.Value, payload.PositionId, HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
+            if (!result.Success)
+            {
+                return BadRequest(ApiResponse<PositionCloseResult>.Error(result.Error ?? "平仓失败"));
+            }
+
+            return Ok(ApiResponse<PositionCloseResult>.Ok(result, "已发起平仓"));
+        }
+
         private async Task<long?> GetUserIdAsync()
         {
             var token = GetBearerToken(Request.Headers.Authorization.ToString());
@@ -201,6 +234,7 @@ namespace ServerTest.Controllers
                 TrailingEnabled = position.TrailingEnabled,
                 TrailingTriggered = position.TrailingTriggered,
                 TrailingStopPrice = position.TrailingStopPrice,
+                CloseReason = position.CloseReason,
                 OpenedAt = position.OpenedAt,
                 ClosedAt = position.ClosedAt
             };
@@ -225,5 +259,10 @@ namespace ServerTest.Controllers
     public sealed class PositionCloseByStrategyRequest
     {
         public long UsId { get; set; }
+    }
+
+    public sealed class PositionCloseByIdRequest
+    {
+        public long PositionId { get; set; }
     }
 }
