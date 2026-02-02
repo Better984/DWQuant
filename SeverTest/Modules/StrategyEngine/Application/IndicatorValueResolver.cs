@@ -34,8 +34,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
             left = double.NaN;
             right = double.NaN;
 
-            if (method.Args == null || method.Args.Count < 2)
+            if (method.Args == null || method.Args.Count == 0)
             {
+                // 条件未配置参数时，尝试使用 Param 作为常量对比值
+                if (TryResolveParamPair(context, method, out left, out right))
+                {
+                    return true;
+                }
+
                 _logger.LogInformation(
                     "策略参数不足，无法解析条件: {Uid} Method={Method} ArgsCount={Count}",
                     context.Strategy.UidCode,
@@ -49,7 +55,62 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
-            return TryResolveValue(context, method.Args[1], offset, out right);
+            if (method.Args.Count >= 2)
+            {
+                return TryResolveValue(context, method.Args[1], offset, out right);
+            }
+
+            // 只有一个参数时，允许 Param[0] 作为右侧常量
+            if (TryResolveParamValue(context, method, 0, out right))
+            {
+                return true;
+            }
+
+            _logger.LogInformation(
+                "策略参数不足，无法解析右侧条件值: {Uid} Method={Method} ArgsCount={Count}",
+                context.Strategy.UidCode,
+                method.Method,
+                method.Args?.Count ?? 0);
+            return false;
+        }
+
+        private bool TryResolveParamPair(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            out double left,
+            out double right)
+        {
+            left = double.NaN;
+            right = double.NaN;
+
+            if (!TryResolveParamValue(context, method, 0, out left))
+            {
+                return false;
+            }
+
+            return TryResolveParamValue(context, method, 1, out right);
+        }
+
+        private bool TryResolveParamValue(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            int paramIndex,
+            out double value)
+        {
+            value = double.NaN;
+            if (method.Param == null || method.Param.Length <= paramIndex)
+            {
+                return false;
+            }
+
+            var raw = method.Param[paramIndex];
+            var reference = new StrategyValueRef
+            {
+                RefType = "Const",
+                Input = raw ?? string.Empty
+            };
+
+            return TryResolveConstant(context, reference, out value);
         }
 
         private bool TryResolveValue(

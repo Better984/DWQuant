@@ -97,6 +97,17 @@ const buildIndicatorRefKey = (ref: StrategyValueRef) => {
   return `${ref.indicator}|${ref.timeframe}|${ref.input}|${ref.output}|${paramsKey}`;
 };
 
+const normalizeConditionMethod = (raw?: string) => {
+  const value = (raw || '').trim();
+  if (!value) {
+    return '';
+  }
+  if (value === 'CrossOver') {
+    return 'CrossUp';
+  }
+  return value;
+};
+
 const createDefaultConditionContainers = (): ConditionContainer[] => ([
   { id: 'open-long', title: '开多条件', enabled: true, required: false, groups: [] },
   { id: 'open-short', title: '开空条件', enabled: true, required: false, groups: [] },
@@ -267,6 +278,7 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
       const conditions: ConditionItem[] = (groupConfig.conditions || []).map((conditionConfig) => {
         conditionCounter++;
         const conditionId = `${groupId}-condition-${conditionCounter}`;
+        const resolvedMethod = normalizeConditionMethod(conditionConfig.method) || 'GreaterThanOrEqual';
         const args = conditionConfig.args || [];
         const leftArg = args[0];
         const rightArg = args[1];
@@ -312,7 +324,7 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
           id: conditionId,
           enabled: conditionConfig.enabled !== false,
           required: conditionConfig.required || false,
-          method: conditionConfig.method || 'GreaterThanOrEqual',
+          method: resolvedMethod,
           leftValueId,
           rightValueType,
           rightValueId,
@@ -1099,10 +1111,13 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
   const methodOptions: MethodOption[] = [
     { value: 'GreaterThanOrEqual', label: '大于等于 (>=)' },
+    { value: 'GreaterThan', label: '大于 (>)' },
     { value: 'LessThan', label: '小于 (<)' },
     { value: 'LessThanOrEqual', label: '小于等于 (<=)' },
     { value: 'Equal', label: '等于 (=)' },
-    { value: 'CrossOver', label: '上穿 (CrossOver)' },
+    { value: 'CrossUp', label: '上穿 (CrossUp)' },
+    { value: 'CrossDown', label: '下穿 (CrossDown)' },
+    { value: 'CrossAny', label: '任意穿越 (CrossAny)' },
   ];
 
   // 创建指标引用到指标值 ID 的映射

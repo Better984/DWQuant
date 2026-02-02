@@ -7,12 +7,15 @@ namespace ServerTest.Modules.StrategyEngine.Domain
     {
         private static readonly Dictionary<string, ExecuteAction> Methods = new(StringComparer.Ordinal)
         {
-            { "GreaterThanOrEqual", GreaterThanOrEqual },   // ���ڵ��ڣ�A >= B
-            { "LessThan",           LessThan },             // С�ڣ�A < B
-            { "LessThanOrEqual",    LessThanOrEqual },      // С�ڵ��ڣ�A <= B
-            { "Equal",              Equal },                // ���ڣ�A == B
-            { "CrossOver",          CrossOver },            // ���棺A �� B �������ⷽ�򽻲�
-            { "CrossUp",            CrossOver }             // �ϴ���A �������ϴ�Խ B����ǰʵ���� CrossOver ���ã�
+            { "GreaterThanOrEqual", GreaterThanOrEqual },   // 大于等于：A >= B
+            { "GreaterThan",        GreaterThan },          // 大于：A > B
+            { "LessThan",           LessThan },             // 小于：A < B
+            { "LessThanOrEqual",    LessThanOrEqual },      // 小于等于：A <= B
+            { "Equal",              Equal },                // 等于：A == B
+            { "CrossUp",            CrossUp },              // 上穿：A 从下向上穿越 B
+            { "CrossOver",          CrossUp },              // 上穿别名（兼容旧配置）
+            { "CrossDown",          CrossDown },            // 下穿：A 从上向下穿越 B
+            { "CrossAny",           CrossAny }              // 任意穿越：上穿或下穿都算
         };
 
         public static ExecuteAction? Get(string methodId)
@@ -30,7 +33,7 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             var action = Get(method.Method);
             if (action == null)
             {
-                return BuildResult(method.Method, false, "Unknown condition method");
+                return BuildResult(method.Method, false, "未知的条件检测方法");
             }
 
             return action(context, method, triggerResults);
@@ -42,6 +45,14 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             IReadOnlyList<ConditionEvaluationResult> triggerResults)
         {
             return CompareValues(context, method, ">=", (left, right) => left >= right);
+        }
+
+        private static (bool Success, StringBuilder Message) GreaterThan(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            IReadOnlyList<ConditionEvaluationResult> triggerResults)
+        {
+            return CompareValues(context, method, ">", (left, right) => left > right);
         }
 
         private static (bool Success, StringBuilder Message) LessThan(
@@ -68,19 +79,19 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             return CompareValues(context, method, "==", (left, right) => Math.Abs(left - right) < 1e-10);
         }
 
-        private static (bool Success, StringBuilder Message) CrossOver(
+        private static (bool Success, StringBuilder Message) CrossUp(
             StrategyExecutionContext context,
             StrategyMethod method,
             IReadOnlyList<ConditionEvaluationResult> triggerResults)
         {
             if (!context.ValueResolver.TryResolvePair(context, method, 0, out var left, out var right))
             {
-                return BuildResult(method.Method, false, "Value resolver not configured");
+                return BuildResult(method.Method, false, "未配置取值解析器");
             }
 
             if (!context.ValueResolver.TryResolvePair(context, method, 1, out var prevLeft, out var prevRight))
             {
-                return BuildResult(method.Method, false, "Value resolver not configured for offset");
+                return BuildResult(method.Method, false, "未配置偏移取值解析器");
             }
 
             bool crossed = prevLeft <= prevRight && left > right;
@@ -90,7 +101,71 @@ namespace ServerTest.Modules.StrategyEngine.Domain
                 .Append(prevLeft.ToString("F4"))
                 .Append("->")
                 .Append(left.ToString("F4"))
-                .Append(" crossed above ")
+                .Append(" 上穿 ")
+                .Append(prevRight.ToString("F4"))
+                .Append("->")
+                .Append(right.ToString("F4"))
+                .Append(" = ")
+                .Append(crossed);
+            return (crossed, message);
+        }
+
+        private static (bool Success, StringBuilder Message) CrossDown(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            IReadOnlyList<ConditionEvaluationResult> triggerResults)
+        {
+            if (!context.ValueResolver.TryResolvePair(context, method, 0, out var left, out var right))
+            {
+                return BuildResult(method.Method, false, "未配置取值解析器");
+            }
+
+            if (!context.ValueResolver.TryResolvePair(context, method, 1, out var prevLeft, out var prevRight))
+            {
+                return BuildResult(method.Method, false, "未配置偏移取值解析器");
+            }
+
+            bool crossed = prevLeft >= prevRight && left < right;
+            var message = new StringBuilder()
+                .Append(method.Method)
+                .Append(": ")
+                .Append(prevLeft.ToString("F4"))
+                .Append("->")
+                .Append(left.ToString("F4"))
+                .Append(" 下穿 ")
+                .Append(prevRight.ToString("F4"))
+                .Append("->")
+                .Append(right.ToString("F4"))
+                .Append(" = ")
+                .Append(crossed);
+            return (crossed, message);
+        }
+
+        private static (bool Success, StringBuilder Message) CrossAny(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            IReadOnlyList<ConditionEvaluationResult> triggerResults)
+        {
+            if (!context.ValueResolver.TryResolvePair(context, method, 0, out var left, out var right))
+            {
+                return BuildResult(method.Method, false, "未配置取值解析器");
+            }
+
+            if (!context.ValueResolver.TryResolvePair(context, method, 1, out var prevLeft, out var prevRight))
+            {
+                return BuildResult(method.Method, false, "未配置偏移取值解析器");
+            }
+
+            bool crossed =
+                (prevLeft <= prevRight && left > right) ||
+                (prevLeft >= prevRight && left < right);
+            var message = new StringBuilder()
+                .Append(method.Method)
+                .Append(": ")
+                .Append(prevLeft.ToString("F4"))
+                .Append("->")
+                .Append(left.ToString("F4"))
+                .Append(" 任意穿越 ")
                 .Append(prevRight.ToString("F4"))
                 .Append("->")
                 .Append(right.ToString("F4"))
@@ -107,7 +182,7 @@ namespace ServerTest.Modules.StrategyEngine.Domain
         {
             if (!context.ValueResolver.TryResolvePair(context, method, 0, out var left, out var right))
             {
-                return BuildResult(method.Method, false, "Value resolver not configured");
+                return BuildResult(method.Method, false, "未配置取值解析器");
             }
 
             bool success = comparison(left, right);
