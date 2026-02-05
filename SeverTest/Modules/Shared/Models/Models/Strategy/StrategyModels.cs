@@ -106,6 +106,108 @@ namespace ServerTest.Models.Strategy
     {
         public TradeConfig Trade { get; set; } = new();
         public StrategyLogic Logic { get; set; } = new();
+        /// <summary>
+        /// 策略运行时间配置
+        /// </summary>
+        public StrategyRuntimeConfig Runtime { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 策略运行时间配置
+    /// </summary>
+    public sealed class StrategyRuntimeConfig
+    {
+        /// <summary>
+        /// 运行时间类型：Always / Template / Custom
+        /// </summary>
+        public string ScheduleType { get; set; } = "Always";
+
+        /// <summary>
+        /// 非运行时间的处理策略：BlockEntryAllowExit / BlockAll
+        /// </summary>
+        public string OutOfSessionPolicy { get; set; } = "BlockEntryAllowExit";
+        /// <summary>
+        /// ?? ID ??????????
+        /// </summary>
+        public List<string> TemplateIds { get; set; } = new();
+
+        /// <summary>
+        /// ????????????????????
+        /// </summary>
+        public List<StrategyRuntimeTemplateConfig> Templates { get; set; } = new();
+
+        /// <summary>
+        /// 自定义时间配置
+        /// </summary>
+        public StrategyRuntimeCustomConfig Custom { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 自定义运行时间配置
+    /// </summary>
+    public sealed class StrategyRuntimeCustomConfig
+    {
+        /// <summary>
+        /// 模式：Allow / Deny
+        /// </summary>
+        public string Mode { get; set; } = "Deny";
+
+        /// <summary>
+        /// 时区（IANA 或 Windows 时区 ID）
+        /// </summary>
+        public string Timezone { get; set; } = "Asia/Shanghai";
+
+        /// <summary>
+        /// 启用的星期（如 mon/tue/…）
+        /// </summary>
+        public List<string> Days { get; set; } = new();
+
+        /// <summary>
+        /// 时间段列表
+        /// </summary>
+        public List<StrategyRuntimeTimeRange> TimeRanges { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 模板运行时间配置
+    /// </summary>
+    public sealed class StrategyRuntimeTemplateConfig
+    {
+        /// <summary>
+        /// 模板名称
+        /// </summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 模板时区（IANA 或 Windows 时区 ID）
+        /// </summary>
+        public string Timezone { get; set; } = "Asia/Shanghai";
+
+        /// <summary>
+        /// 启用的星期（如 mon/tue/…）
+        /// </summary>
+        public List<string> Days { get; set; } = new();
+
+        /// <summary>
+        /// 时间段列表
+        /// </summary>
+        public List<StrategyRuntimeTimeRange> TimeRanges { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 运行时间段
+    /// </summary>
+    public sealed class StrategyRuntimeTimeRange
+    {
+        /// <summary>
+        /// 开始时间（HH:mm）
+        /// </summary>
+        public string Start { get; set; } = "00:00";
+
+        /// <summary>
+        /// 结束时间（HH:mm）
+        /// </summary>
+        public string End { get; set; } = "23:59";
     }
 
     public sealed class TradeConfig

@@ -9,7 +9,8 @@ import {
   WifiOutlined,
   UserOutlined,
   LogoutOutlined,
-  CloudServerOutlined
+  CloudServerOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { clearToken } from '../network';
@@ -19,15 +20,39 @@ import HistoricalData from './HistoricalData';
 import NetworkStatus from './NetworkStatus';
 import UniversalSearch from './UniversalSearch';
 import ServerList from './ServerList';
+import ServerConfig from './ServerConfig';
 import { PageTransition, FadeIn } from '../components/animations';
 import './Dashboard.css';
 
 const { Header, Sider, Content } = Layout;
 
+const formatNow = () => {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  return `${y}-${m}-${day} ${h}:${min}:${s}`;
+};
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const profile = getAuthProfile();
+
+  // 顶部栏左侧实时时间
+  const [now, setNow] = React.useState(() => formatNow());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(formatNow());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   const handleLogout = () => {
     clearToken();
@@ -72,6 +97,12 @@ const Dashboard: React.FC = () => {
       label: '服务器列表',
       onClick: () => navigate('/server-list'),
     },
+    {
+      key: '/server-config',
+      icon: <SettingOutlined />,
+      label: '服务器配置',
+      onClick: () => navigate('/server-config'),
+    },
   ];
 
   const userMenuItems: MenuProps['items'] = [
@@ -84,7 +115,7 @@ const Dashboard: React.FC = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh', background: 'var(--color-background)' }}>
+    <Layout style={{ minHeight: '100vh', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--color-background)' }}>
       <motion.div
         initial={{ y: -100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -95,7 +126,7 @@ const Dashboard: React.FC = () => {
           alignItems: 'center', 
           justifyContent: 'space-between',
           background: 'var(--color-primary)',
-          padding: '0 24px',
+          padding: '0 16px',
           boxShadow: 'var(--shadow-md)',
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
           position: 'sticky',
@@ -103,21 +134,31 @@ const Dashboard: React.FC = () => {
           zIndex: 1030,
         }}
         >
-        <motion.h1
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.1, duration: 0.4 }}
-          style={{ 
-            color: '#fff', 
-            margin: 0, 
-            fontSize: '18px', 
-            fontWeight: 600,
-            fontFamily: 'var(--font-heading)',
-            letterSpacing: '-0.02em',
-          }}
-        >
-          DWQuant 后台管理系统
-        </motion.h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <motion.h1
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1, duration: 0.4 }}
+            style={{ 
+              color: '#fff', 
+              margin: 0, 
+              fontSize: '18px', 
+              fontWeight: 600,
+              fontFamily: 'var(--font-heading)',
+              letterSpacing: '-0.02em',
+            }}
+          >
+            DWQuant 后台管理系统
+          </motion.h1>
+          <span
+            style={{
+              color: 'rgba(255, 255, 255, 0.75)',
+              fontSize: 12,
+            }}
+          >
+            {now}
+          </span>
+        </div>
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
@@ -163,7 +204,7 @@ const Dashboard: React.FC = () => {
         </motion.div>
       </Header>
       </motion.div>
-      <Layout>
+      <Layout style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <motion.div
           initial={{ x: -100, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
@@ -175,6 +216,7 @@ const Dashboard: React.FC = () => {
               background: 'var(--color-surface)',
               boxShadow: 'var(--shadow-soft)',
               borderRight: '1px solid var(--color-border)',
+              height: '100%',
             }}
             breakpoint="lg"
             collapsedWidth={80}
@@ -192,13 +234,15 @@ const Dashboard: React.FC = () => {
             />
           </Sider>
         </motion.div>
-        <Layout style={{ padding: '24px', background: 'transparent' }}>
+        <Layout style={{ flex: 1, padding: '24px', background: 'transparent', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <Content
             style={{
               padding: 0,
               margin: 0,
               minHeight: 280,
               background: 'transparent',
+              overflowY: 'auto',
+              flex: 1,
             }}
           >
             <AnimatePresence mode="wait">
@@ -261,6 +305,11 @@ const Dashboard: React.FC = () => {
               {location.pathname === '/server-list' && (
                 <PageTransition key="server-list">
                   <ServerList />
+                </PageTransition>
+              )}
+              {location.pathname === '/server-config' && (
+                <PageTransition key="server-config">
+                  <ServerConfig />
                 </PageTransition>
               )}
             </AnimatePresence>

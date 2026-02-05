@@ -1,6 +1,13 @@
 import React from 'react';
 
-import type { ConditionSummarySection, StrategyTradeConfig, TimeframeOption, TradeOption } from './StrategyModule.types';
+import type {
+  ConditionSummarySection,
+  StrategyRuntimeConfig,
+  StrategyRuntimeTemplateConfig,
+  StrategyTradeConfig,
+  TimeframeOption,
+  TradeOption,
+} from './StrategyModule.types';
 import { Dialog } from './ui';
 import TradeConfigForm from './TradeConfigForm';
 
@@ -27,6 +34,10 @@ interface StrategyConfigDialogProps {
   codeThumbRef: React.RefObject<HTMLDivElement>;
   tradeConfigRef: React.RefObject<HTMLDivElement>;
   tradeConfig: StrategyTradeConfig;
+  runtimeConfig: StrategyRuntimeConfig;
+  runtimeTemplateOptions: StrategyRuntimeTemplateConfig[];
+  runtimeTimezoneOptions: { value: string; label: string }[];
+  onRuntimeConfigChange: (config: StrategyRuntimeConfig) => void;
   strategyName: string;
   strategyDescription: string;
   exchangeOptions: TradeOption[];
@@ -77,6 +88,10 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
   codeThumbRef,
   tradeConfigRef,
   tradeConfig,
+  runtimeConfig,
+  runtimeTemplateOptions,
+  runtimeTimezoneOptions,
+  onRuntimeConfigChange,
   strategyName,
   strategyDescription,
   exchangeOptions,
@@ -230,6 +245,10 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
         <TradeConfigForm
           configStep={configStep}
           tradeConfig={tradeConfig}
+          runtimeConfig={runtimeConfig}
+          runtimeTemplateOptions={runtimeTemplateOptions}
+          runtimeTimezoneOptions={runtimeTimezoneOptions}
+          onRuntimeConfigChange={onRuntimeConfigChange}
           strategyName={strategyName}
           strategyDescription={strategyDescription}
           exchangeOptions={exchangeOptions}

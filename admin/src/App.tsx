@@ -60,8 +60,9 @@ function App() {
           Layout: {
             bodyBg: '#F8FAFC',
             headerBg: '#0F172A',
-            headerHeight: 64,
-            headerPadding: '0 24px',
+            // 顶部导航条略微收窄
+            headerHeight: 56,
+            headerPadding: '0 16px',
             siderBg: '#FFFFFF',
           },
           Menu: {
@@ -135,6 +136,14 @@ function App() {
             />
             <Route
               path="/server-list"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/server-config"
               element={
                 <ProtectedRoute>
                   <Dashboard />

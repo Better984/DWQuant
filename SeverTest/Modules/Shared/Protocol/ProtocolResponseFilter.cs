@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Options;
+using ServerTest.Infrastructure.Config;
 using ServerTest.Models;
 using ServerTest.Options;
 
@@ -14,10 +15,12 @@ namespace ServerTest.Protocol
     public sealed class ProtocolResponseFilter : IAsyncResultFilter
     {
         private readonly RequestLimitsOptions _requestLimits;
+        private readonly ServerConfigStore _configStore;
 
-        public ProtocolResponseFilter(IOptions<RequestLimitsOptions> requestLimits)
+        public ProtocolResponseFilter(IOptions<RequestLimitsOptions> requestLimits, ServerConfigStore configStore)
         {
             _requestLimits = requestLimits?.Value ?? new RequestLimitsOptions();
+            _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
         }
 
         public async Task OnResultExecutionAsync(ResultExecutingContext context, ResultExecutionDelegate next)
@@ -44,7 +47,8 @@ namespace ServerTest.Protocol
                 var reqId = ProtocolContext.GetReqId(context.HttpContext);
                 if (string.IsNullOrWhiteSpace(reqId))
                 {
-                    reqId = await ProtocolRequestIdResolver.ResolveAsync(context.HttpContext, _requestLimits.DefaultMaxBodyBytes)
+                    var maxBytes = _configStore.GetInt("RequestLimits:DefaultMaxBodyBytes", _requestLimits.DefaultMaxBodyBytes);
+                    reqId = await ProtocolRequestIdResolver.ResolveAsync(context.HttpContext, maxBytes)
                         .ConfigureAwait(false);
                 }
                 var requestType = ProtocolContext.GetType(context.HttpContext) ?? string.Empty;
@@ -81,7 +85,8 @@ namespace ServerTest.Protocol
                 var reqId = ProtocolContext.GetReqId(context.HttpContext);
                 if (string.IsNullOrWhiteSpace(reqId))
                 {
-                    reqId = await ProtocolRequestIdResolver.ResolveAsync(context.HttpContext, _requestLimits.DefaultMaxBodyBytes)
+                    var maxBytes = _configStore.GetInt("RequestLimits:DefaultMaxBodyBytes", _requestLimits.DefaultMaxBodyBytes);
+                    reqId = await ProtocolRequestIdResolver.ResolveAsync(context.HttpContext, maxBytes)
                         .ConfigureAwait(false);
                 }
                 var traceId = context.HttpContext.TraceIdentifier;
@@ -101,7 +106,8 @@ namespace ServerTest.Protocol
                 var reqId = ProtocolContext.GetReqId(context.HttpContext);
                 if (string.IsNullOrWhiteSpace(reqId))
                 {
-                    reqId = await ProtocolRequestIdResolver.ResolveAsync(context.HttpContext, _requestLimits.DefaultMaxBodyBytes)
+                    var maxBytes = _configStore.GetInt("RequestLimits:DefaultMaxBodyBytes", _requestLimits.DefaultMaxBodyBytes);
+                    reqId = await ProtocolRequestIdResolver.ResolveAsync(context.HttpContext, maxBytes)
                         .ConfigureAwait(false);
                 }
                 var requestType = ProtocolContext.GetType(context.HttpContext) ?? string.Empty;

@@ -1,4 +1,6 @@
+using System;
 using Microsoft.Extensions.Options;
+using ServerTest.Infrastructure.Config;
 using ServerTest.Options;
 using StackExchange.Redis;
 
@@ -34,12 +36,17 @@ return 1
 ";
 
         private readonly IDatabase _db;
-        private readonly RateLimitOptions _options;
+        private readonly RateLimitOptions _fallbackOptions;
+        private readonly ServerConfigStore _configStore;
 
-        public RedisRateLimiter(IConnectionMultiplexer redis, IOptions<RateLimitOptions> options)
+        public RedisRateLimiter(
+            IConnectionMultiplexer redis,
+            IOptions<RateLimitOptions> options,
+            ServerConfigStore configStore)
         {
             _db = redis.GetDatabase();
-            _options = options.Value;
+            _fallbackOptions = options.Value;
+            _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
         }
 
         public bool Allow(string userId, Protocol protocol)
@@ -49,7 +56,9 @@ return 1
                 return true;
             }
 
-            var rate = protocol == Protocol.Http ? _options.HttpRps : _options.WsRps;
+            var rate = protocol == Protocol.Http
+                ? _configStore.GetInt("RateLimit:HttpRps", _fallbackOptions.HttpRps)
+                : _configStore.GetInt("RateLimit:WsRps", _fallbackOptions.WsRps);
             if (rate <= 0)
             {
                 return true;

@@ -135,9 +135,46 @@ export interface StrategyTradeConfig {
   };
 }
 
+export interface StrategyRuntimeTimeRange {
+  start: string;
+  end: string;
+}
+
+export interface StrategyRuntimeCustomConfig {
+  mode: 'Allow' | 'Deny';
+  timezone: string;
+  days: string[];
+  timeRanges: StrategyRuntimeTimeRange[];
+}
+
+export interface StrategyRuntimeCalendarException {
+  date: string;
+  type: string;
+  name?: string;
+  timeRanges: StrategyRuntimeTimeRange[];
+}
+
+export interface StrategyRuntimeTemplateConfig {
+  id: string;
+  name: string;
+  timezone: string;
+  days: string[];
+  timeRanges: StrategyRuntimeTimeRange[];
+  calendar?: StrategyRuntimeCalendarException[];
+}
+
+export interface StrategyRuntimeConfig {
+  scheduleType: 'Always' | 'Template' | 'Custom';
+  outOfSessionPolicy: 'BlockEntryAllowExit' | 'BlockAll';
+  templateIds: string[];
+  templates?: StrategyRuntimeTemplateConfig[];
+  custom: StrategyRuntimeCustomConfig;
+}
+
 export interface StrategyConfig {
   trade: StrategyTradeConfig;
   logic: StrategyLogicConfig;
+  runtime?: StrategyRuntimeConfig;
 }
 
 export interface MethodOption {

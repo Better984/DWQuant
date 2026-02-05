@@ -13,6 +13,7 @@ namespace ServerTest.Modules.StrategyRuntime.Application
         private readonly StrategyRuntimeLoader _runtimeLoader;
         private readonly StrategyOwnershipService _ownership;
         private readonly RealTimeStrategyEngine _strategyEngine;
+        private readonly ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateStore _templateStore;
         private readonly ILogger<StrategyRuntimeBootstrapHostedService> _logger;
 
         public StrategyRuntimeBootstrapHostedService(
@@ -20,12 +21,14 @@ namespace ServerTest.Modules.StrategyRuntime.Application
             StrategyRuntimeLoader runtimeLoader,
             StrategyOwnershipService ownership,
             RealTimeStrategyEngine strategyEngine,
+            ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateStore templateStore,
             ILogger<StrategyRuntimeBootstrapHostedService> logger)
         {
             _runtimeRepository = runtimeRepository ?? throw new ArgumentNullException(nameof(runtimeRepository));
             _runtimeLoader = runtimeLoader ?? throw new ArgumentNullException(nameof(runtimeLoader));
             _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
             _strategyEngine = strategyEngine ?? throw new ArgumentNullException(nameof(strategyEngine));
+            _templateStore = templateStore ?? throw new ArgumentNullException(nameof(templateStore));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -35,6 +38,7 @@ namespace ServerTest.Modules.StrategyRuntime.Application
 
             try
             {
+                await _templateStore.ReloadAsync(cancellationToken).ConfigureAwait(false);
                 var rows = await _runtimeRepository.GetRunnableAsync(RunnableStates, cancellationToken).ConfigureAwait(false);
 
                 var loaded = 0;

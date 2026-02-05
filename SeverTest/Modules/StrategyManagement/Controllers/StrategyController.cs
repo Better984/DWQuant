@@ -90,6 +90,13 @@ namespace ServerTest.Controllers
             return WithUserAsync(request, uid => _strategyService.ListTemplate(uid));
         }
 
+        [ProtocolType("strategy.runtime.template.list")]
+        [HttpPost("runtime/templates")]
+        public Task<IActionResult> ListRuntimeTemplates([FromBody] ProtocolRequest<object> request)
+        {
+            return WithUserAsync(request, uid => _strategyService.GetRuntimeTemplates(uid));
+        }
+
         [ProtocolType("strategy.market.list")]
         [HttpPost("market/list")]
         public Task<IActionResult> ListMarket([FromBody] ProtocolRequest<object> request)

@@ -15,6 +15,7 @@ using ServerTest.Services;
 using ServerTest.Modules.StrategyEngine.Application.RunChecks;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 using ServerTest.Modules.StrategyEngine.Application;
+using ServerTest.Modules.StrategyEngine.Domain;
 using ServerTest.Modules.StrategyRuntime.Application;
 using ServerTest.Options;
 
@@ -52,6 +53,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
         private readonly UserExchangeApiKeyRepository _apiKeyRepository;
         private readonly StrategyRunCheckService _runCheckService;
         private readonly StrategyRunCheckLogRepository _runCheckLogRepository;
+        private readonly IStrategyRuntimeTemplateProvider _runtimeTemplateProvider;
         private readonly BusinessRulesOptions _businessRules;
 
         private sealed class StrategyListItem
@@ -121,6 +123,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             UserExchangeApiKeyRepository apiKeyRepository,
             StrategyRunCheckService runCheckService,
             StrategyRunCheckLogRepository runCheckLogRepository,
+            IStrategyRuntimeTemplateProvider runtimeTemplateProvider,
             IOptions<BusinessRulesOptions> businessRules,
             ILogger<StrategyRepository> logger)
             : base(logger)
@@ -132,6 +135,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             _apiKeyRepository = apiKeyRepository ?? throw new ArgumentNullException(nameof(apiKeyRepository));
             _runCheckService = runCheckService ?? throw new ArgumentNullException(nameof(runCheckService));
             _runCheckLogRepository = runCheckLogRepository ?? throw new ArgumentNullException(nameof(runCheckLogRepository));
+            _runtimeTemplateProvider = runtimeTemplateProvider ?? throw new ArgumentNullException(nameof(runtimeTemplateProvider));
             _businessRules = businessRules?.Value ?? new BusinessRulesOptions();
         }
 
@@ -173,6 +177,15 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
 
             var configJson = JsonSerializer.Serialize(request.ConfigJson);
             var contentHash = ComputeSha256(configJson);
+            var parsedConfig = _strategyLoader.ParseConfig(configJson);
+            if (parsedConfig == null)
+            {
+                return BadRequest(ApiResponse<object>.Error("策略配置解析失败"));
+            }
+            if (!StrategyRuntimeConfigValidator.TryValidate(parsedConfig.Runtime, _runtimeTemplateProvider, out var runtimeError))
+            {
+                return BadRequest(ApiResponse<object>.Error(runtimeError));
+            }
 
             await using var connection = await _db.GetConnectionAsync();
             await using var transaction = await connection.BeginTransactionAsync();
@@ -641,6 +654,16 @@ WHERE us_id = @us_id AND uid = @uid
             }
         }
 
+        public Task<IActionResult> GetRuntimeTemplates()
+        {
+            var data = new
+            {
+                templates = _runtimeTemplateProvider.Templates,
+                timezones = _runtimeTemplateProvider.Timezones
+            };
+            return Task.FromResult<IActionResult>(Ok(ApiResponse<object>.Ok(data)));
+        }
+
         public async Task<IActionResult> Update(long uid, StrategyUpdateRequest request)
         {
 
@@ -656,6 +679,15 @@ WHERE us_id = @us_id AND uid = @uid
 
             var configJson = JsonSerializer.Serialize(request.ConfigJson);
             var contentHash = ComputeSha256(configJson);
+            var parsedConfig = _strategyLoader.ParseConfig(configJson);
+            if (parsedConfig == null)
+            {
+                return BadRequest(ApiResponse<object>.Error("策略配置解析失败"));
+            }
+            if (!StrategyRuntimeConfigValidator.TryValidate(parsedConfig.Runtime, _runtimeTemplateProvider, out var runtimeError))
+            {
+                return BadRequest(ApiResponse<object>.Error(runtimeError));
+            }
             var changelog = request.Changelog?.Trim() ?? string.Empty;
             if (changelog.Length > 255)
             {

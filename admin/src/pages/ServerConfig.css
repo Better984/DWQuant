@@ -1,0 +1,52 @@
+.server-config {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.server-config-card {
+  background: var(--color-surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.server-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.server-config-header h2 {
+  margin: 0 0 4px;
+}
+
+.server-config-header p {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* 滚动条样式 */
+.server-config {
+  overflow-y: auto;
+}
+
+.server-config::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.server-config::-webkit-scrollbar-track {
+  background: var(--color-bg-layout, #f0f0f0);
+  border-radius: 4px;
+}
+
+.server-config::-webkit-scrollbar-thumb {
+  background: var(--color-border, #d9d9d9);
+  border-radius: 4px;
+}
+
+.server-config::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary, #999);
+}

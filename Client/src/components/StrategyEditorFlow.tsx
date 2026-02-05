@@ -19,6 +19,9 @@ import type {
   StrategyConfig,
   StrategyLogicBranchConfig,
   StrategyMethodConfig,
+  StrategyRuntimeCustomConfig,
+  StrategyRuntimeConfig,
+  StrategyRuntimeTemplateConfig,
   StrategyTradeConfig,
   StrategyValueRef,
   TimeframeOption,
@@ -140,6 +143,65 @@ const createDefaultTradeConfig = (): StrategyTradeConfig => ({
   },
 });
 
+const RUNTIME_TEMPLATE_OPTIONS: StrategyRuntimeTemplateConfig[] = [
+  {
+    id: 'cn.a_share.regular',
+    name: 'A?????',
+    timezone: 'Asia/Shanghai',
+    days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+    timeRanges: [
+      { start: '09:30', end: '11:30' },
+      { start: '13:00', end: '15:00' },
+    ],
+  },
+  {
+    id: 'us.equity.et.extended',
+    name: '???ET??? + ????',
+    timezone: 'America/New_York',
+    days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+    timeRanges: [
+      { start: '04:00', end: '09:30' },
+      { start: '09:30', end: '16:00' },
+    ],
+  },
+];
+
+const LEGACY_TEMPLATE_NAME_MAP: Record<string, string> = {
+  'A?????': 'cn.a_share.regular',
+  '??????': 'us.equity.et.extended',
+  '???ET??? + ????': 'us.equity.et.extended',
+};
+
+
+const RUNTIME_TIMEZONE_OPTIONS = [
+  { value: 'Asia/Shanghai', label: '中国/上海 (UTC+8)' },
+  { value: 'America/New_York', label: '美国/纽约 (UTC-5/-4)' },
+  { value: 'UTC', label: 'UTC' },
+];
+
+const resolveLocalTimezone = () => {
+  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') {
+    return 'Asia/Shanghai';
+  }
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+  return RUNTIME_TIMEZONE_OPTIONS.some((option) => option.value === timezone)
+    ? timezone
+    : 'Asia/Shanghai';
+};
+
+const createDefaultRuntimeConfig = (): StrategyRuntimeConfig => ({
+  scheduleType: 'Always',
+  outOfSessionPolicy: 'BlockEntryAllowExit',
+  templateIds: [],
+  templates: [],
+  custom: {
+    mode: 'Deny',
+    timezone: resolveLocalTimezone(),
+    days: [],
+    timeRanges: [],
+  },
+});
+
 const normalizePositionMode = (raw?: string) => {
   const value = (raw || '').trim().toLowerCase();
   if (!value) {
@@ -155,6 +217,44 @@ const normalizePositionMode = (raw?: string) => {
     return 'Cross';
   }
   return raw || '';
+};
+
+const normalizeRuntimeScheduleType = (raw?: string): StrategyRuntimeConfig['scheduleType'] => {
+  const value = (raw || '').trim().toLowerCase();
+  if (value === 'template') {
+    return 'Template';
+  }
+  if (value === 'custom') {
+    return 'Custom';
+  }
+  return 'Always';
+};
+
+const normalizeTemplateIds = (initial?: StrategyRuntimeConfig): string[] => {
+  if (!initial) {
+    return [];
+  }
+  if (Array.isArray(initial.templateIds) && initial.templateIds.length > 0) {
+    return initial.templateIds.filter((item) => typeof item === 'string' && item.trim());
+  }
+  if (Array.isArray(initial.templates)) {
+    return initial.templates
+      .map((template) => template.id || LEGACY_TEMPLATE_NAME_MAP[template.name] || '')
+      .filter((item) => item);
+  }
+  return [];
+};
+
+const normalizeRuntimeCustomMode = (raw?: string): StrategyRuntimeCustomConfig['mode'] => {
+  const value = (raw || '').trim().toLowerCase();
+  return value === 'allow' ? 'Allow' : 'Deny';
+};
+
+const normalizeOutOfSessionPolicy = (
+  raw?: string,
+): StrategyRuntimeConfig['outOfSessionPolicy'] => {
+  const value = (raw || '').trim().toLowerCase();
+  return value === 'blockall' ? 'BlockAll' : 'BlockEntryAllowExit';
 };
 
 const mergeTradeConfig = (initial?: StrategyTradeConfig): StrategyTradeConfig => {
@@ -178,6 +278,32 @@ const mergeTradeConfig = (initial?: StrategyTradeConfig): StrategyTradeConfig =>
         ...defaults.risk.trailing,
         ...initial.risk?.trailing,
       },
+    },
+  };
+};
+
+const mergeRuntimeConfig = (initial?: StrategyRuntimeConfig): StrategyRuntimeConfig => {
+  const defaults = createDefaultRuntimeConfig();
+  if (!initial) {
+    return defaults;
+  }
+
+  return {
+    ...defaults,
+    ...initial,
+    scheduleType: normalizeRuntimeScheduleType(initial.scheduleType),
+    outOfSessionPolicy: normalizeOutOfSessionPolicy(initial.outOfSessionPolicy),
+    templateIds: normalizeTemplateIds(initial),
+    templates: Array.isArray(initial.templates) ? initial.templates : defaults.templates,
+    custom: {
+      ...defaults.custom,
+      ...(initial.custom || {}),
+      mode: normalizeRuntimeCustomMode(initial.custom?.mode),
+      timezone: initial.custom?.timezone?.trim() || defaults.custom.timezone,
+      days: Array.isArray(initial.custom?.days) ? initial.custom?.days || [] : defaults.custom.days,
+      timeRanges: Array.isArray(initial.custom?.timeRanges)
+        ? initial.custom?.timeRanges || []
+        : defaults.custom.timeRanges,
     },
   };
 };
@@ -384,6 +510,33 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
   return containers;
 };
 
+const isHourTime = (value: string) => /^([01]\d|2[0-3]):00$/.test(value);
+
+const parseMinutes = (value: string) => {
+  const [hourText, minuteText] = value.split(':');
+  const hours = Number(hourText);
+  const minutes = Number(minuteText);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return null;
+  }
+  return hours * 60 + minutes;
+};
+
+const calcRangeDurationMinutes = (start: string, end: string) => {
+  const startMinutes = parseMinutes(start);
+  const endMinutes = parseMinutes(end);
+  if (startMinutes === null || endMinutes === null) {
+    return null;
+  }
+  if (startMinutes === endMinutes) {
+    return 24 * 60;
+  }
+  if (startMinutes < endMinutes) {
+    return endMinutes - startMinutes;
+  }
+  return 24 * 60 - startMinutes + endMinutes;
+};
+
 const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   onSubmit,
   onClose,
@@ -440,6 +593,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const [tradeConfig, setTradeConfig] = useState<StrategyTradeConfig>(() => 
     mergeTradeConfig(initialConfig?.trade || initialTradeConfig)
   );
+  const [runtimeConfig, setRuntimeConfig] = useState<StrategyRuntimeConfig>(() =>
+    mergeRuntimeConfig(initialConfig?.runtime)
+  );
   const [exchangeApiKeys, setExchangeApiKeys] = useState<ExchangeApiKeyItem[]>([]);
   const [selectedExchangeApiKeyId, setSelectedExchangeApiKeyId] = useState<number | null>(
     initialExchangeApiKeyId,
@@ -495,6 +651,69 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     { value: 'Cross', label: '全仓' },
     { value: 'Isolated', label: '逐仓' },
   ];
+
+  const [runtimeTemplateOptions, setRuntimeTemplateOptions] = useState<StrategyRuntimeTemplateConfig[]>(RUNTIME_TEMPLATE_OPTIONS);
+  const [runtimeTimezoneOptions, setRuntimeTimezoneOptions] = useState(RUNTIME_TIMEZONE_OPTIONS);
+
+  const validateRuntimeConfig = (config: StrategyRuntimeConfig): string | null => {
+    if (config.scheduleType === 'Always') {
+      return null;
+    }
+
+    if (config.scheduleType === 'Template') {
+      if (!config.templateIds || config.templateIds.length === 0) {
+        return '???????????';
+      }
+      return null;
+    }
+    if (config.scheduleType === 'Custom') {
+      if (!config.custom.days || config.custom.days.length === 0) {
+        return '自定义时间必须选择星期';
+      }
+      if (!config.custom.timeRanges || config.custom.timeRanges.length === 0) {
+        return '自定义时间必须配置时间段';
+      }
+      for (const range of config.custom.timeRanges) {
+        if (!isHourTime(range.start) || !isHourTime(range.end)) {
+          return '自定义时间仅支持整点';
+        }
+        const duration = calcRangeDurationMinutes(range.start, range.end);
+        if (duration === null || duration < 60) {
+          return '自定义时间段最小为 1 小时';
+        }
+      }
+      return null;
+    }
+
+    return null;
+  };
+
+  useEffect(() => {
+    let isActive = true;
+    const loadRuntimeTemplates = async () => {
+      try {
+        const data = await client.postProtocol<{ templates: StrategyRuntimeTemplateConfig[]; timezones: { value: string; label: string }[] }>(
+          '/api/strategy/runtime/templates',
+          'strategy.runtime.template.list',
+        );
+        if (!isActive) {
+          return;
+        }
+        setRuntimeTemplateOptions(Array.isArray(data?.templates) ? data.templates : RUNTIME_TEMPLATE_OPTIONS);
+        setRuntimeTimezoneOptions(Array.isArray(data?.timezones) ? data.timezones : RUNTIME_TIMEZONE_OPTIONS);
+      } catch (err) {
+        if (isActive) {
+          setRuntimeTemplateOptions(RUNTIME_TEMPLATE_OPTIONS);
+          setRuntimeTimezoneOptions(RUNTIME_TIMEZONE_OPTIONS);
+        }
+      }
+    };
+
+    loadRuntimeTemplates();
+    return () => {
+      isActive = false;
+    };
+  }, [client]);
 
   useEffect(() => {
     let isActive = true;
@@ -705,51 +924,16 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     };
   }, [isConfigReviewOpen, isLogicPreviewVisible]);
 
-  // 交易规则区域滚轮切换步骤
+  // 切换步骤时重置交易规则区滚动位置，避免显示错位
   useEffect(() => {
-    const tradeElement = tradeConfigRef.current;
-    if (!tradeElement || !isConfigReviewOpen) {
+    if (!isConfigReviewOpen) {
       return;
     }
-
-    let scrollTimeout: NodeJS.Timeout | null = null;
-    let isScrolling = false;
-
-    const handleWheel = (e: WheelEvent) => {
-      if (isScrolling) {
-        return;
-      }
-
-      const { scrollTop, scrollHeight, clientHeight } = tradeElement;
-      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
-      const isAtTop = scrollTop <= 10;
-
-      if (e.deltaY > 0 && isAtBottom && configStep === 0) {
-        e.preventDefault();
-        isScrolling = true;
-        setConfigStep(1);
-        if (scrollTimeout) clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-          isScrolling = false;
-        }, 500);
-      } else if (e.deltaY < 0 && isAtTop && configStep === 1) {
-        e.preventDefault();
-        isScrolling = true;
-        setConfigStep(0);
-        if (scrollTimeout) clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-          isScrolling = false;
-        }, 500);
-      }
-    };
-
-    tradeElement.addEventListener('wheel', handleWheel, { passive: false });
-
-    return () => {
-      tradeElement.removeEventListener('wheel', handleWheel);
-      if (scrollTimeout) clearTimeout(scrollTimeout);
-    };
-  }, [isConfigReviewOpen, configStep]);
+    const tradeElement = tradeConfigRef.current;
+    if (tradeElement) {
+      tradeElement.scrollTop = 0;
+    }
+  }, [configStep, isConfigReviewOpen]);
 
   const generateId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -1797,11 +1981,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         short: buildBranchConfig('close-short', 'CloseShort'),
       },
     },
+    runtime: runtimeConfig,
   });
 
   const configPreview = useMemo(() => {
     return buildStrategyConfig();
-  }, [conditionContainers, tradeConfig, indicatorValueMap]);
+  }, [conditionContainers, tradeConfig, runtimeConfig, indicatorValueMap]);
 
   const logicPreview = useMemo(() => {
     return JSON.stringify(configPreview.logic, null, 2);
@@ -1818,6 +2003,11 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     }
     if (exchangeApiKeyOptions.length > 1 && !selectedExchangeApiKeyId) {
       error('请选择交易所API');
+      return;
+    }
+    const runtimeError = validateRuntimeConfig(runtimeConfig);
+    if (runtimeError) {
+      error(runtimeError);
       return;
     }
     setIsSubmitting(true);
@@ -2189,6 +2379,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         codeThumbRef={codeThumbRef}
         tradeConfigRef={tradeConfigRef}
         tradeConfig={tradeConfig}
+        runtimeConfig={runtimeConfig}
+        runtimeTemplateOptions={runtimeTemplateOptions}
+        runtimeTimezoneOptions={runtimeTimezoneOptions}
+        onRuntimeConfigChange={setRuntimeConfig}
         strategyName={strategyName}
         strategyDescription={strategyDescription}
         exchangeOptions={exchangeOptions}

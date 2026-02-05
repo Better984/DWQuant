@@ -114,6 +114,11 @@ namespace ServerTest.Modules.StrategyManagement.Application
             return _repository.Delete(uid, request);
         }
 
+        public Task<IActionResult> GetRuntimeTemplates(long uid)
+        {
+            return _repository.GetRuntimeTemplates();
+        }
+
         public Task<IActionResult> UpdateInstanceState(long uid, long id, StrategyInstanceStateRequest request, CancellationToken ct)
         {
             return _repository.UpdateInstanceState(uid, id, request, ct);

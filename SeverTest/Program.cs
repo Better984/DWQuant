@@ -1,12 +1,14 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Infrastructure.Repositories;
+using ServerTest.Infrastructure.Config;
 using ServerTest.Middleware;
 using ServerTest.Models;
 using ServerTest.Modules.Accounts.Application;
@@ -39,6 +41,16 @@ using System.Text.Json;
 using AspNetWebSocketOptions = Microsoft.AspNetCore.Builder.WebSocketOptions;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// 服务器配置：从数据库加载覆盖 appsettings（失败则回退本地配置）
+var serverConfigConn = builder.Configuration.GetSection("Db")["ConnectionString"];
+if (string.IsNullOrWhiteSpace(serverConfigConn))
+{
+    serverConfigConn = builder.Configuration["ConnectionStrings:DefaultConnection"];
+}
+serverConfigConn ??= string.Empty;
+((Microsoft.Extensions.Configuration.IConfigurationBuilder)builder.Configuration)
+    .Add(new ServerConfigConfigurationSource(serverConfigConn));
 
 // ============================================================================
 // 第一阶段：基础服务注册
@@ -98,6 +110,10 @@ builder.Services.AddScoped<AuthTokenService>();
 builder.Services.AddScoped<VerificationCodeService>();
 builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
 builder.Services.AddDbInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<ServerConfigRepository>();
+builder.Services.AddSingleton<ServerConfigStore>();
+builder.Services.AddSingleton<ServerConfigService>();
+builder.Services.AddHostedService<ServerConfigBootstrapHostedService>();
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddSingleton<OSSService>();
@@ -118,7 +134,7 @@ builder.Services.AddSingleton<IConnectionManager, RedisConnectionManager>();
 // ============================================================================
 // 第四阶段：实盘交易系统服务注册
 // ============================================================================
-// 行情数据引擎
+// 行情数据引擎 
 builder.Services.AddSingleton<MarketDataEngine>();
 
 // 价格服务
@@ -139,6 +155,11 @@ builder.Services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecu
 builder.Services.AddSingleton<StrategyJsonLoader>();
 builder.Services.AddSingleton<StrategyEngineRunLogQueue>();
 builder.Services.AddSingleton<StrategyEngineRunLogRepository>();
+builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateRepository>();
+builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateStore>();
+builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Domain.IStrategyRuntimeTemplateProvider>(sp =>
+    sp.GetRequiredService<ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateStore>());
+builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Application.StrategyRuntimeTemplateService>();
 builder.Services.AddSingleton<RealTimeStrategyEngine>();
 builder.Services.AddSingleton<StrategyPositionRepository>();
 builder.Services.AddSingleton<UserExchangeApiKeyRepository>();

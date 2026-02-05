@@ -1,10 +1,21 @@
 import React from 'react';
 
-import type { StrategyTradeConfig, TimeframeOption, TradeOption } from './StrategyModule.types';
+import type {
+  StrategyRuntimeConfig,
+  StrategyRuntimeTemplateConfig,
+  StrategyTradeConfig,
+  TimeframeOption,
+  TradeOption,
+} from './StrategyModule.types';
+import StrategyRuntimeConfigForm from './StrategyRuntimeConfigForm';
 
 interface TradeConfigFormProps {
   configStep: number;
   tradeConfig: StrategyTradeConfig;
+  runtimeConfig: StrategyRuntimeConfig;
+  runtimeTemplateOptions: StrategyRuntimeTemplateConfig[];
+  runtimeTimezoneOptions: { value: string; label: string }[];
+  onRuntimeConfigChange: (config: StrategyRuntimeConfig) => void;
   strategyName: string;
   strategyDescription: string;
   exchangeOptions: TradeOption[];
@@ -65,6 +76,10 @@ const TradeOptionGrid: React.FC<TradeOptionGridProps> = ({ options, selectedValu
 const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
   configStep,
   tradeConfig,
+  runtimeConfig,
+  runtimeTemplateOptions,
+  runtimeTimezoneOptions,
+  onRuntimeConfigChange,
   strategyName,
   strategyDescription,
   exchangeOptions,
@@ -91,12 +106,10 @@ const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
   onExchangeApiKeyBack,
 }) => {
   return (
-    <div
-      className={`strategy-config-trade strategy-config-trade-step-${configStep}`}
-      ref={tradeConfigRef}
-    >
+    <div className={`strategy-config-trade strategy-config-trade-step-${configStep}`}>
       <div className="strategy-config-trade-title">交易规则</div>
-      {configStep === 0 ? (
+      <div className="strategy-config-trade-scroll" ref={tradeConfigRef}>
+        {configStep === 0 ? (
         <>
           <div className="trade-form-section">
             <div className="trade-form-label">策略名称</div>
@@ -166,6 +179,15 @@ const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
         </>
       ) : (
         <>
+          <div className="trade-form-section">
+            <div className="trade-form-label">策略运行时间</div>
+            <StrategyRuntimeConfigForm
+              config={runtimeConfig}
+              templateOptions={runtimeTemplateOptions}
+              timezoneOptions={runtimeTimezoneOptions}
+              onChange={onRuntimeConfigChange}
+            />
+          </div>
           <div className="trade-form-section">
             <div className="trade-form-label">交易周期</div>
             <div className="trade-chip-group">
@@ -287,56 +309,55 @@ const TradeConfigForm: React.FC<TradeConfigFormProps> = ({
               <span className="trade-toggle-indicator" />
               <span className="trade-toggle-label">启用移动止盈止损</span>
             </label>
-            <div
-              className={`trade-trailing-panel ${tradeConfig.risk.trailing.enabled ? '' : 'is-disabled'}`}
-            >
-              <div className="trade-form-row">
-                <div className="trade-form-field">
-                  <div className="trade-form-label">触发收益阈值</div>
-                  <div className="trade-input-group">
-                    <input
-                      className="trade-input"
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={tradeConfig.risk.trailing.activationProfitPct * 100}
-                      onChange={(event) =>
-                        updateTrailingRisk(
-                          'activationProfitPct',
-                          (Number(event.target.value) || 0) / 100,
-                        )
-                      }
-                      disabled={!tradeConfig.risk.trailing.enabled}
-                    />
-                    <span className="trade-input-suffix">%</span>
+            {tradeConfig.risk.trailing.enabled && (
+              <div className="trade-trailing-panel">
+                <div className="trade-form-row">
+                  <div className="trade-form-field">
+                    <div className="trade-form-label">触发收益阈值</div>
+                    <div className="trade-input-group">
+                      <input
+                        className="trade-input"
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={tradeConfig.risk.trailing.activationProfitPct * 100}
+                        onChange={(event) =>
+                          updateTrailingRisk(
+                            'activationProfitPct',
+                            (Number(event.target.value) || 0) / 100,
+                          )
+                        }
+                      />
+                      <span className="trade-input-suffix">%</span>
+                    </div>
+                  </div>
+                  <div className="trade-form-field">
+                    <div className="trade-form-label">回撤触发比例</div>
+                    <div className="trade-input-group">
+                      <input
+                        className="trade-input"
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={tradeConfig.risk.trailing.closeOnDrawdownPct * 100}
+                        onChange={(event) =>
+                          updateTrailingRisk(
+                            'closeOnDrawdownPct',
+                            (Number(event.target.value) || 0) / 100,
+                          )
+                        }
+                      />
+                      <span className="trade-input-suffix">%</span>
+                    </div>
                   </div>
                 </div>
-                <div className="trade-form-field">
-                  <div className="trade-form-label">回撤触发比例</div>
-                  <div className="trade-input-group">
-                    <input
-                      className="trade-input"
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      value={tradeConfig.risk.trailing.closeOnDrawdownPct * 100}
-                      onChange={(event) =>
-                        updateTrailingRisk(
-                          'closeOnDrawdownPct',
-                          (Number(event.target.value) || 0) / 100,
-                        )
-                      }
-                      disabled={!tradeConfig.risk.trailing.enabled}
-                    />
-                    <span className="trade-input-suffix">%</span>
-                  </div>
-                </div>
+                <div className="trade-form-hint">触发后按回撤比例自动止盈。</div>
               </div>
-              <div className="trade-form-hint">触发后按回撤比例自动止盈。</div>
-            </div>
+            )}
           </div>
         </>
       )}
+      </div>
     </div>
   );
 };

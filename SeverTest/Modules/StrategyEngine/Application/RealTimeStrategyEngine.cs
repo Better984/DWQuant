@@ -25,12 +25,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private readonly IndicatorEngine? _indicatorEngine;
         private readonly ConditionEvaluator _conditionEvaluator;
         private readonly ConditionUsageTracker _conditionUsageTracker;
+        private readonly IStrategyRuntimeTemplateProvider? _templateProvider;
         private readonly TestStrategyCheckLogRepository? _testCheckLogRepository; // 测试用：策略检查日志仓储（后续会删除）
         private readonly string _engineInstanceId;
 
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, StrategyModel>> _strategiesByKey = new();
         private readonly ConcurrentDictionary<string, string> _strategyKeyByUid = new();
         private readonly ConcurrentDictionary<string, List<IndicatorRequest>> _indicatorRequestsByStrategy = new();
+        private readonly ConcurrentDictionary<string, StrategyRuntimeSchedule> _runtimeSchedules = new();
 
         public RealTimeStrategyEngine(
             MarketDataEngine marketDataEngine,
@@ -41,6 +43,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             IndicatorEngine? indicatorEngine = null,
             ConditionEvaluator? conditionEvaluator = null,
             ConditionUsageTracker? conditionUsageTracker = null,
+            IStrategyRuntimeTemplateProvider? templateProvider = null,
             TestStrategyCheckLogRepository? testCheckLogRepository = null, // 测试用：策略检查日志仓储（后续会删除）
             int? maxParallelism = null)
         {
@@ -53,6 +56,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _indicatorEngine = indicatorEngine;
             _conditionEvaluator = conditionEvaluator ?? throw new ArgumentNullException(nameof(conditionEvaluator));
             _conditionUsageTracker = conditionUsageTracker ?? throw new ArgumentNullException(nameof(conditionUsageTracker));
+            _templateProvider = templateProvider;
             _testCheckLogRepository = testCheckLogRepository; // 测试用：可选依赖，避免非测试环境报错
             _maxParallelism = maxParallelism ?? Environment.ProcessorCount;
             _engineInstanceId = $"{Environment.MachineName}:{Environment.ProcessId}";
@@ -81,6 +85,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _strategyKeyByUid[strategy.UidCode] = key;
             _indicatorRequestsByStrategy[strategy.UidCode] = indicatorRequests;
             _conditionUsageTracker.UpsertStrategy(strategy);
+            var runtimeSchedule = new StrategyRuntimeSchedule(strategy.StrategyConfig?.Runtime, _templateProvider);
+            _runtimeSchedules[strategy.UidCode] = runtimeSchedule;
+            if (!string.IsNullOrWhiteSpace(runtimeSchedule.Error))
+            {
+                _logger.LogWarning(
+                    "策略运行时间配置异常: {Uid} 错误={Error}",
+                    strategy.UidCode,
+                    runtimeSchedule.Error);
+            }
 
             if (indicatorRequests.Count > 0)
             {
@@ -127,6 +140,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
 
             _indicatorRequestsByStrategy.TryRemove(uidCode, out _);
+            _runtimeSchedules.TryRemove(uidCode, out _);
             _conditionUsageTracker.RemoveStrategy(uidCode);
             return true;
         }
@@ -281,7 +295,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 }
 
                 var context = new StrategyExecutionContext(strategy, task, _valueResolver, _actionExecutor);
-                ExecuteLogic(context, metrics);
+                // 运行时间门禁：禁止时段按策略策略处理入口/出口
+                var runtimeGate = ResolveRuntimeGate(strategy, context.CurrentTime);
+                if (!runtimeGate.AllowEntry && !runtimeGate.AllowExit)
+                {
+                    Interlocked.Increment(ref metrics.SkippedCount);
+                    return;
+                }
+
+                ExecuteLogic(context, runtimeGate, metrics);
                 metrics.AddExecutedStrategy(strategy.UidCode);
                 Interlocked.Increment(ref metrics.ExecutedCount);
             });
@@ -290,7 +312,10 @@ namespace ServerTest.Modules.StrategyEngine.Application
             LogStrategyRun(task, matchedCount, metrics, stopwatch.ElapsedMilliseconds);
         }
 
-        private void ExecuteLogic(StrategyExecutionContext context, StrategyRunMetrics? metrics)
+        private void ExecuteLogic(
+            StrategyExecutionContext context,
+            StrategyRuntimeGate runtimeGate,
+            StrategyRunMetrics? metrics)
         {
             var logic = context.StrategyConfig.Logic;
             if (logic == null)
@@ -298,7 +323,10 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
-            ExecuteBranch(context, logic.Exit.Long, "Exit.Long", metrics);
+            if (runtimeGate.AllowExit)
+            {
+                ExecuteBranch(context, logic.Exit.Long, "Exit.Long", metrics);
+            }
             //ExecuteBranch(context, logic.Exit.Short, "Exit.Short");
 
             if (context.Strategy.State == StrategyState.PausedOpenPosition)
@@ -306,8 +334,42 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
+            if (!runtimeGate.AllowEntry)
+            {
+                return;
+            }
+
             ExecuteBranch(context, logic.Entry.Long, "Entry.Long", metrics);
             //ExecuteBranch(context, logic.Entry.Short, "Entry.Short");
+        }
+
+        private StrategyRuntimeGate ResolveRuntimeGate(StrategyModel strategy, DateTimeOffset currentTime)
+        {
+            if (!_runtimeSchedules.TryGetValue(strategy.UidCode, out var schedule))
+            {
+                schedule = new StrategyRuntimeSchedule(strategy.StrategyConfig?.Runtime, _templateProvider);
+                _runtimeSchedules[strategy.UidCode] = schedule;
+            }
+
+            var evaluation = schedule.Evaluate(currentTime);
+            if (evaluation.Changed)
+            {
+                _logger.LogInformation(
+                    "策略运行时间切换: {Uid} 允许={Allowed} 模式={Summary} 时间={Time}",
+                    strategy.UidCode,
+                    evaluation.Allowed,
+                    schedule.Summary,
+                    FormatTimestampIso(currentTime.ToUnixTimeMilliseconds()));
+            }
+
+            if (evaluation.Allowed)
+            {
+                return StrategyRuntimeGate.AllowAll;
+            }
+
+            return schedule.Policy == StrategyRuntimeOutOfSessionPolicy.BlockAll
+                ? StrategyRuntimeGate.BlockAll
+                : StrategyRuntimeGate.BlockEntryAllowExit;
         }
 
         private void ExecuteBranch(
@@ -838,6 +900,25 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return DateTimeOffset.FromUnixTimeMilliseconds(timestamp)
                 .ToLocalTime()
                 .ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private readonly struct StrategyRuntimeGate
+        {
+            private StrategyRuntimeGate(bool allowEntry, bool allowExit)
+            {
+                AllowEntry = allowEntry;
+                AllowExit = allowExit;
+            }
+
+            public bool AllowEntry { get; }
+
+            public bool AllowExit { get; }
+
+            public static StrategyRuntimeGate AllowAll => new(true, true);
+
+            public static StrategyRuntimeGate BlockEntryAllowExit => new(false, true);
+
+            public static StrategyRuntimeGate BlockAll => new(false, false);
         }
 
         private void UpdateIndicatorsBeforeExecute(IEnumerable<StrategyModel> strategies, MarketDataTask task)
