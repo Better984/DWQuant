@@ -257,13 +257,16 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return result;
             }
 
-            var param = new string[argsArray.Count];
-            for (var i = 0; i < argsArray.Count; i++)
+            if (result.Param == null || result.Param.Length == 0)
             {
-                param[i] = argsArray[i]?.ToString() ?? string.Empty;
-            }
+                var param = new string[argsArray.Count];
+                for (var i = 0; i < argsArray.Count; i++)
+                {
+                    param[i] = argsArray[i]?.ToString() ?? string.Empty;
+                }
 
-            result.Param = param;
+                result.Param = param;
+            }
             return result;
         }
 
@@ -276,13 +279,21 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
 
             var obj = JObject.FromObject(value, serializer);
-            if (value.Args != null && value.Args.Count > 0)
+            var hasArgs = value.Args != null && value.Args.Count > 0;
+            var hasParam = value.Param != null && value.Param.Length > 0;
+
+            if (hasArgs)
             {
                 obj["args"] = JArray.FromObject(value.Args, serializer);
             }
-            else if (value.Param != null && value.Param.Length > 0)
+            else if (hasParam)
             {
                 obj["args"] = JArray.FromObject(value.Param, serializer);
+            }
+
+            if (hasParam)
+            {
+                obj["param"] = JArray.FromObject(value.Param, serializer);
             }
 
             obj.WriteTo(writer);

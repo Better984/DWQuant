@@ -93,8 +93,19 @@ const formatCondition = (condition: StrategyMethodConfig) => {
   const args = condition.args ?? [];
   const left = formatValueRef(args[0] as StrategyValueRef | string | undefined);
   const right = formatValueRef(args[1] as StrategyValueRef | string | undefined);
+  const extra = formatValueRef(args[2] as StrategyValueRef | string | undefined);
   const method = condition.method || 'Unknown';
-  return `${left} ${method} ${right}`.trim();
+  let text = `${left} ${method}`;
+  if (args.length >= 2) {
+    text = `${text} ${right}`.trim();
+  }
+  if (args.length >= 3) {
+    text = `${text} ${extra}`.trim();
+  }
+  if (condition.param && condition.param.length > 0) {
+    text = `${text} (参数:${condition.param.join(',')})`;
+  }
+  return text.trim();
 };
 
 const buildGroups = (branch?: StrategyLogicBranchConfig): GroupDisplay[] => {

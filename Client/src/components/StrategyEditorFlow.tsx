@@ -105,6 +105,9 @@ const normalizeConditionMethod = (raw?: string) => {
   if (value === 'CrossOver') {
     return 'CrossUp';
   }
+  if (value === 'CrossUnder') {
+    return 'CrossDown';
+  }
   return value;
 };
 
@@ -280,13 +283,18 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
         const conditionId = `${groupId}-condition-${conditionCounter}`;
         const resolvedMethod = normalizeConditionMethod(conditionConfig.method) || 'GreaterThanOrEqual';
         const args = conditionConfig.args || [];
+        const paramValues = Array.isArray(conditionConfig.param) ? conditionConfig.param.map((item) => String(item)) : [];
         const leftArg = args[0];
         const rightArg = args[1];
+        const extraArg = args[2];
 
         let leftValueId = '';
         let rightValueType: 'field' | 'number' = 'number';
         let rightValueId: string | undefined;
         let rightNumber: string | undefined;
+        let extraValueType: 'field' | 'number' = 'number';
+        let extraValueId: string | undefined;
+        let extraNumber: string | undefined;
 
         if (leftArg && typeof leftArg === 'object' && 'refType' in leftArg) {
           const ref = leftArg as StrategyValueRef;
@@ -320,6 +328,26 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
           }
         }
 
+        if (extraArg) {
+          if (typeof extraArg === 'string') {
+            extraValueType = 'number';
+            extraNumber = extraArg;
+          } else if (typeof extraArg === 'object' && 'refType' in extraArg) {
+            const ref = extraArg as StrategyValueRef;
+            const refType = (ref.refType || '').toLowerCase();
+            if (refType === 'const' || refType === 'number') {
+              extraValueType = 'number';
+              extraNumber = ref.input?.trim() || '';
+            } else if (refType === 'field') {
+              extraValueType = 'field';
+              extraValueId = buildFieldValueId(ref.input);
+            } else {
+              extraValueType = 'field';
+              extraValueId = buildIndicatorRefKey(ref);
+            }
+          }
+        }
+
         return {
           id: conditionId,
           enabled: conditionConfig.enabled !== false,
@@ -329,6 +357,10 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
           rightValueType,
           rightValueId,
           rightNumber,
+          extraValueType,
+          extraValueId,
+          extraNumber,
+          paramValues,
         };
       });
 
@@ -801,6 +833,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           if (condition.rightValueType === 'field') {
             addUsage(condition.rightValueId, '右值');
           }
+          if (condition.extraValueType === 'field') {
+            addUsage(condition.extraValueId, '第三参数');
+          }
         });
       });
     });
@@ -823,6 +858,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           conditions: group.conditions.map((condition) => {
             let leftValueId = condition.leftValueId;
             let rightValueId = condition.rightValueId;
+            let extraValueId = condition.extraValueId;
 
             if (leftValueId?.startsWith(`${indicator.id}:`)) {
               const outputKey = leftValueId.split(':')[1] || '';
@@ -838,13 +874,25 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
               }
             }
 
-            if (leftValueId === condition.leftValueId && rightValueId === condition.rightValueId) {
+            if (condition.extraValueType === 'field' && extraValueId?.startsWith(`${indicator.id}:`)) {
+              const outputKey = extraValueId.split(':')[1] || '';
+              if (!outputKeys.has(outputKey)) {
+                extraValueId = `${indicator.id}:${fallbackKey}`;
+              }
+            }
+
+            if (
+              leftValueId === condition.leftValueId &&
+              rightValueId === condition.rightValueId &&
+              extraValueId === condition.extraValueId
+            ) {
               return condition;
             }
             return {
               ...condition,
               leftValueId,
               rightValueId,
+              extraValueId,
             };
           }),
         })),
@@ -873,19 +921,28 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           conditions: group.conditions.map((condition) => {
             let leftValueId = condition.leftValueId;
             let rightValueId = condition.rightValueId;
+            let extraValueId = condition.extraValueId;
             if (leftValueId?.startsWith(`${indicatorId}:`)) {
               leftValueId = '';
             }
             if (rightValueId?.startsWith(`${indicatorId}:`)) {
               rightValueId = '';
             }
-            if (leftValueId === condition.leftValueId && rightValueId === condition.rightValueId) {
+            if (extraValueId?.startsWith(`${indicatorId}:`)) {
+              extraValueId = '';
+            }
+            if (
+              leftValueId === condition.leftValueId &&
+              rightValueId === condition.rightValueId &&
+              extraValueId === condition.extraValueId
+            ) {
               return condition;
             }
             return {
               ...condition,
               leftValueId,
               rightValueId,
+              extraValueId,
             };
           }),
         })),
@@ -1110,15 +1167,140 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const methodOptions: MethodOption[] = [
-    { value: 'GreaterThanOrEqual', label: '大于等于 (>=)' },
-    { value: 'GreaterThan', label: '大于 (>)' },
-    { value: 'LessThan', label: '小于 (<)' },
-    { value: 'LessThanOrEqual', label: '小于等于 (<=)' },
-    { value: 'Equal', label: '等于 (=)' },
-    { value: 'CrossUp', label: '上穿 (CrossUp)' },
-    { value: 'CrossDown', label: '下穿 (CrossDown)' },
-    { value: 'CrossAny', label: '任意穿越 (CrossAny)' },
+    { value: 'GreaterThanOrEqual', label: '大于等于 (>=)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'GreaterThan', label: '大于 (>)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'LessThan', label: '小于 (<)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'LessThanOrEqual', label: '小于等于 (<=)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'Equal', label: '等于 (=)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'NotEqual', label: '不等于 (!=)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'CrossUp', label: '上穿 (CrossUp)', category: 'cross', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'CrossDown', label: '下穿 (CrossDown)', category: 'cross', argsCount: 2, argValueTypes: ['field', 'both'] },
+    { value: 'CrossAny', label: '任意穿越 (CrossAny)', category: 'cross', argsCount: 2, argValueTypes: ['field', 'both'] },
+    {
+      value: 'Between',
+      label: '区间内 (Between)',
+      category: 'range',
+      argsCount: 3,
+      argLabels: ['数值', '下界', '上界'],
+      argValueTypes: ['field', 'both', 'both'],
+    },
+    {
+      value: 'Outside',
+      label: '区间外 (Outside)',
+      category: 'range',
+      argsCount: 3,
+      argLabels: ['数值', '下界', '上界'],
+      argValueTypes: ['field', 'both', 'both'],
+    },
+    {
+      value: 'Rising',
+      label: '连续上升 (Rising)',
+      category: 'trend',
+      argsCount: 1,
+      argLabels: ['数值'],
+      argValueTypes: ['field'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 3', required: true, defaultValue: '3' }],
+    },
+    {
+      value: 'Falling',
+      label: '连续下降 (Falling)',
+      category: 'trend',
+      argsCount: 1,
+      argLabels: ['数值'],
+      argValueTypes: ['field'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 3', required: true, defaultValue: '3' }],
+    },
+    {
+      value: 'AboveFor',
+      label: '连续高于阈值 (AboveFor)',
+      category: 'trend',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'both'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 3', required: true, defaultValue: '3' }],
+    },
+    {
+      value: 'BelowFor',
+      label: '连续低于阈值 (BelowFor)',
+      category: 'trend',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'both'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 3', required: true, defaultValue: '3' }],
+    },
+    {
+      value: 'ROC',
+      label: '变化率大于阈值 (ROC)',
+      category: 'change',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'number'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 14', required: true, defaultValue: '14' }],
+    },
+    {
+      value: 'Slope',
+      label: '斜率大于阈值 (Slope)',
+      category: 'change',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'number'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 14', required: true, defaultValue: '14' }],
+    },
+    {
+      value: 'ZScore',
+      label: 'ZScore大于阈值',
+      category: 'stats',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'number'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 20', required: true, defaultValue: '20' }],
+    },
+    {
+      value: 'StdDevGreater',
+      label: '标准差大于阈值',
+      category: 'stats',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'number'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 20', required: true, defaultValue: '20' }],
+    },
+    {
+      value: 'StdDevLess',
+      label: '标准差小于阈值',
+      category: 'stats',
+      argsCount: 2,
+      argLabels: ['数值', '阈值'],
+      argValueTypes: ['field', 'number'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 20', required: true, defaultValue: '20' }],
+    },
+    { value: 'TouchUpper', label: '触碰上轨 (>=)', category: 'channel', argsCount: 2, argLabels: ['数值', '上轨'], argValueTypes: ['field', 'field'] },
+    { value: 'TouchLower', label: '触碰下轨 (<=)', category: 'channel', argsCount: 2, argLabels: ['数值', '下轨'], argValueTypes: ['field', 'field'] },
+    { value: 'BreakoutUp', label: '突破上轨 (>)', category: 'channel', argsCount: 2, argLabels: ['数值', '上轨'], argValueTypes: ['field', 'field'] },
+    { value: 'BreakoutDown', label: '突破下轨 (<)', category: 'channel', argsCount: 2, argLabels: ['数值', '下轨'], argValueTypes: ['field', 'field'] },
+    {
+      value: 'BandwidthExpand',
+      label: '带宽扩张 (BandwidthExpand)',
+      category: 'bandwidth',
+      argsCount: 3,
+      argLabels: ['上轨', '下轨', '中轨'],
+      argValueTypes: ['field', 'field', 'field'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 3', required: true, defaultValue: '3' }],
+    },
+    {
+      value: 'BandwidthContract',
+      label: '带宽收敛 (BandwidthContract)',
+      category: 'bandwidth',
+      argsCount: 3,
+      argLabels: ['上轨', '下轨', '中轨'],
+      argValueTypes: ['field', 'field', 'field'],
+      params: [{ key: 'period', label: '窗口长度N', placeholder: '例如 3', required: true, defaultValue: '3' }],
+    },
   ];
+
+  const resolveMethodMeta = (method?: string) => {
+    const resolved = methodOptions.find((option) => option.value === method);
+    return resolved || methodOptions[0];
+  };
 
   // 创建指标引用到指标值 ID 的映射
   const indicatorRefToValueIdMap = useMemo(() => {
@@ -1161,6 +1343,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           const updatedConditions = group.conditions.map((condition) => {
             let updatedLeftValueId = condition.leftValueId;
             let updatedRightValueId = condition.rightValueId;
+            let updatedExtraValueId = condition.extraValueId;
 
             // 映射左侧值 ID
             if (condition.leftValueId && indicatorRefToValueIdMap.has(condition.leftValueId)) {
@@ -1172,10 +1355,16 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
               updatedRightValueId = indicatorRefToValueIdMap.get(condition.rightValueId) || condition.rightValueId;
             }
 
+            // 映射第三参数值 ID
+            if (condition.extraValueType === 'field' && condition.extraValueId && indicatorRefToValueIdMap.has(condition.extraValueId)) {
+              updatedExtraValueId = indicatorRefToValueIdMap.get(condition.extraValueId) || condition.extraValueId;
+            }
+
             return {
               ...condition,
               leftValueId: updatedLeftValueId,
               rightValueId: updatedRightValueId,
+              extraValueId: updatedExtraValueId,
             };
           });
 
@@ -1330,9 +1519,56 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return `${indicatorLabel}${timeframeLabel} (${paramsLabel}) ${outputLabel}`.trim();
   };
 
-  const getMethodLabel = (method: string) => {
-    const rawLabel = methodOptions.find((option) => option.value === method)?.label || method;
-    return rawLabel.split(' ')[0];
+  const buildConditionPreview = (draft: ConditionItem | null) => {
+    if (!draft) {
+      return '请先配置字段与操作符';
+    }
+    const leftLabel =
+      indicatorValueMap.get(draft.leftValueId)?.fullLabel ||
+      indicatorValueMap.get(draft.leftValueId)?.label ||
+      '未选择字段';
+    const methodMeta = resolveMethodMeta(draft.method);
+    const methodLabel = methodMeta.label || draft.method;
+    const argsCount = methodMeta.argsCount ?? 2;
+
+    const rightLabel =
+      draft.rightValueType === 'number'
+        ? draft.rightNumber || '未填写数值'
+        : indicatorValueMap.get(draft.rightValueId || '')?.fullLabel ||
+          indicatorValueMap.get(draft.rightValueId || '')?.label ||
+          '未选择字段';
+    const extraLabel =
+      draft.extraValueType === 'number'
+        ? draft.extraNumber || '未填写数值'
+        : indicatorValueMap.get(draft.extraValueId || '')?.fullLabel ||
+          indicatorValueMap.get(draft.extraValueId || '')?.label ||
+          '未选择字段';
+
+    let text = `${leftLabel} ${methodLabel}`;
+    if (argsCount >= 2) {
+      text = `${text} ${rightLabel}`;
+    }
+    if (argsCount >= 3) {
+      text = `${text} ${extraLabel}`;
+    }
+
+    const paramDefs = methodMeta.params || [];
+    if (paramDefs.length > 0) {
+      const paramValues = draft.paramValues || [];
+      const paramText = paramDefs
+        .map((param, index) => {
+          const rawValue = paramValues[index];
+          const value =
+            rawValue !== undefined && rawValue !== ''
+              ? rawValue
+              : param.defaultValue ?? '未填写';
+          return `${param.label}:${value}`;
+        })
+        .join('，');
+      text = `${text}（${paramText}）`;
+    }
+
+    return text;
   };
 
   const conditionSummarySections = useMemo<ConditionSummarySection[]>(() => {
@@ -1347,20 +1583,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       const container = conditionContainers.find((item) => item.id === section.id);
       const groups = container?.groups ?? [];
       const groupSummaries = groups.map((group) => {
-        const lines = group.conditions.map((condition) => {
-          const leftLabel =
-            indicatorValueMap.get(condition.leftValueId)?.label ||
-            indicatorValueMap.get(condition.leftValueId)?.fullLabel ||
-            '未选择字段';
-          const methodLabel = getMethodLabel(condition.method);
-          const rightLabel =
-            condition.rightValueType === 'number'
-              ? condition.rightNumber || '未填写数值'
-              : indicatorValueMap.get(condition.rightValueId || '')?.label ||
-                indicatorValueMap.get(condition.rightValueId || '')?.fullLabel ||
-                '未选择字段';
-          return `${leftLabel} ${methodLabel} ${rightLabel}`;
-        });
+        const lines = group.conditions.map((condition) => buildConditionPreview(condition));
         return {
           title: `${group.name}${group.enabled ? '' : ' (未启用)'}`,
           conditions: lines,
@@ -1396,6 +1619,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           if (condition.rightValueType === 'field') {
             addIndicator(indicatorValueMap.get(condition.rightValueId || '')?.ref);
           }
+          if (condition.extraValueType === 'field') {
+            addIndicator(indicatorValueMap.get(condition.extraValueId || '')?.ref);
+          }
         });
       });
     });
@@ -1420,25 +1646,75 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const buildStrategyMethod = (condition: ConditionItem): StrategyMethodConfig | null => {
+    const methodMeta = resolveMethodMeta(condition.method);
+    const argsCount = methodMeta.argsCount ?? 2;
     const leftOption = indicatorValueMap.get(condition.leftValueId);
-    if (!leftOption) {
+    if (argsCount >= 1 && !leftOption) {
       return null;
     }
-    let rightRef: StrategyValueRef | null = null;
-    if (condition.rightValueType === 'number') {
-      rightRef = buildConstantValueRef(condition.rightNumber, leftOption.ref);
-    } else {
-      const rightOption = indicatorValueMap.get(condition.rightValueId || '');
-      if (!rightOption) {
-        return null;
-      }
-      rightRef = rightOption.ref;
+    const args: StrategyValueRef[] = [];
+    if (leftOption && argsCount >= 1) {
+      args.push(leftOption.ref);
     }
+
+    if (argsCount >= 2) {
+      let rightRef: StrategyValueRef | null = null;
+      const rightValueType = condition.rightValueType || 'number';
+      if (rightValueType === 'number') {
+        if (!condition.rightNumber || condition.rightNumber.trim() === '') {
+          return null;
+        }
+        rightRef = buildConstantValueRef(condition.rightNumber, leftOption?.ref);
+      } else {
+        const rightOption = indicatorValueMap.get(condition.rightValueId || '');
+        if (!rightOption) {
+          return null;
+        }
+        rightRef = rightOption.ref;
+      }
+      if (rightRef) {
+        args.push(rightRef);
+      }
+    }
+
+    if (argsCount >= 3) {
+      let extraRef: StrategyValueRef | null = null;
+      const extraValueType = condition.extraValueType || 'number';
+      if (extraValueType === 'number') {
+        if (!condition.extraNumber || condition.extraNumber.trim() === '') {
+          return null;
+        }
+        extraRef = buildConstantValueRef(condition.extraNumber, leftOption?.ref);
+      } else {
+        const extraOption = indicatorValueMap.get(condition.extraValueId || '');
+        if (!extraOption) {
+          return null;
+        }
+        extraRef = extraOption.ref;
+      }
+      if (extraRef) {
+        args.push(extraRef);
+      }
+    }
+
+    const paramDefs = methodMeta.params || [];
+    const rawParamValues = condition.paramValues || [];
+    const paramValues = paramDefs.map((def, index) => {
+      const rawValue = rawParamValues[index];
+      const value =
+        rawValue !== undefined && rawValue !== ''
+          ? rawValue
+          : def.defaultValue ?? '';
+      return String(value).trim();
+    });
+    const hasParam = paramValues.some((value) => value.length > 0);
+
     return {
       enabled: condition.enabled,
       required: condition.required,
       method: condition.method,
-      args: [leftOption.ref, rightRef],
+      args,
+      param: hasParam ? paramValues : undefined,
     };
   };
 
@@ -1698,15 +1974,21 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
     const defaultLeft = indicatorOutputOptions[0]?.id || '';
     const defaultRight = indicatorOutputOptions[1]?.id || defaultLeft;
+    const defaultMethod = methodOptions[0];
+    const defaultParams = defaultMethod.params?.map((param) => param.defaultValue || '') || [];
     setConditionDraft({
       id: generateId(),
       enabled: true,
       required: false,
-      method: methodOptions[0].value,
+      method: defaultMethod.value,
       leftValueId: defaultLeft,
       rightValueType: 'field',
       rightValueId: defaultRight,
       rightNumber: '',
+      extraValueType: 'field',
+      extraValueId: defaultRight,
+      extraNumber: '',
+      paramValues: defaultParams,
     });
     setIsConditionModalOpen(true);
   };
@@ -1718,41 +2000,54 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     setConditionError('');
   };
 
-  const buildConditionPreview = (draft: ConditionItem | null) => {
-    if (!draft) {
-      return '请先配置字段与操作符';
-    }
-    const leftLabel =
-      indicatorValueMap.get(draft.leftValueId)?.fullLabel ||
-      indicatorValueMap.get(draft.leftValueId)?.label ||
-      '未选择字段';
-    const methodLabel = methodOptions.find((opt) => opt.value === draft.method)?.label || draft.method;
-    const rightLabel =
-      draft.rightValueType === 'number'
-        ? draft.rightNumber || '未填写数值'
-        : indicatorValueMap.get(draft.rightValueId || '')?.fullLabel ||
-          indicatorValueMap.get(draft.rightValueId || '')?.label ||
-          '未选择字段';
-    return `${leftLabel} ${methodLabel} ${rightLabel}`;
-  };
-
   const handleSaveCondition = () => {
     if (!conditionDraft || !conditionEditTarget) {
       return;
     }
-    if (!conditionDraft.leftValueId) {
+    const methodMeta = resolveMethodMeta(conditionDraft.method);
+    const argsCount = methodMeta.argsCount ?? 2;
+    const paramDefs = methodMeta.params || [];
+
+    if (argsCount >= 1 && !conditionDraft.leftValueId) {
       setConditionError('请选择字段');
       return;
     }
-    if (conditionDraft.rightValueType === 'field' && !conditionDraft.rightValueId) {
+    if (argsCount >= 2 && conditionDraft.rightValueType === 'field' && !conditionDraft.rightValueId) {
       setConditionError('请选择比较字段');
       return;
     }
-    if (conditionDraft.rightValueType === 'number') {
+    if (argsCount >= 2 && conditionDraft.rightValueType === 'number') {
       const numberValue = conditionDraft.rightNumber?.trim() || '';
       if (!numberValue || Number.isNaN(Number(numberValue))) {
         setConditionError('请输入有效数值');
         return;
+      }
+    }
+    if (argsCount >= 3 && conditionDraft.extraValueType === 'field' && !conditionDraft.extraValueId) {
+      setConditionError('请选择第三参数字段');
+      return;
+    }
+    if (argsCount >= 3 && conditionDraft.extraValueType === 'number') {
+      const numberValue = conditionDraft.extraNumber?.trim() || '';
+      if (!numberValue || Number.isNaN(Number(numberValue))) {
+        setConditionError('请输入有效的第三参数数值');
+        return;
+      }
+    }
+
+    if (paramDefs.length > 0) {
+      const paramValues = conditionDraft.paramValues || [];
+      for (let i = 0; i < paramDefs.length; i += 1) {
+        const def = paramDefs[i];
+        const value = (paramValues[i] || def.defaultValue || '').trim();
+        if (def.required && !value) {
+          setConditionError(`请填写${def.label}`);
+          return;
+        }
+        if (value && Number.isNaN(Number(value))) {
+          setConditionError(`${def.label}必须为数值`);
+          return;
+        }
       }
     }
 

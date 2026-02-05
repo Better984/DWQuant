@@ -23,6 +23,19 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             int offset,
             out double left,
             out double right);
+
+        bool TryResolveValue(
+            StrategyExecutionContext context,
+            StrategyValueRef reference,
+            int offset,
+            out double value);
+
+        bool TryResolveValues(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            int offset,
+            int requiredCount,
+            out double[] values);
     }
 
     public sealed class NoopStrategyValueResolver : IStrategyValueResolver
@@ -42,6 +55,27 @@ namespace ServerTest.Modules.StrategyEngine.Domain
         {
             left = double.NaN;
             right = double.NaN;
+            return false;
+        }
+
+        public bool TryResolveValue(
+            StrategyExecutionContext context,
+            StrategyValueRef reference,
+            int offset,
+            out double value)
+        {
+            value = double.NaN;
+            return false;
+        }
+
+        public bool TryResolveValues(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            int offset,
+            int requiredCount,
+            out double[] values)
+        {
+            values = Array.Empty<double>();
             return false;
         }
     }

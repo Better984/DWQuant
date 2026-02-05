@@ -33,45 +33,66 @@ namespace ServerTest.Modules.StrategyEngine.Application
         {
             left = double.NaN;
             right = double.NaN;
-
-            if (method.Args == null || method.Args.Count == 0)
-            {
-                // 条件未配置参数时，尝试使用 Param 作为常量对比值
-                if (TryResolveParamPair(context, method, out left, out right))
-                {
-                    return true;
-                }
-
-                _logger.LogInformation(
-                    "策略参数不足，无法解析条件: {Uid} Method={Method} ArgsCount={Count}",
-                    context.Strategy.UidCode,
-                    method.Method,
-                    method.Args?.Count ?? 0);
-                return false;
-            }
-
-            if (!TryResolveValue(context, method.Args[0], offset, out left))
+            if (!TryResolveValues(context, method, offset, 2, out var values))
             {
                 return false;
             }
 
-            if (method.Args.Count >= 2)
-            {
-                return TryResolveValue(context, method.Args[1], offset, out right);
-            }
+            left = values[0];
+            right = values[1];
+            return true;
+        }
 
-            // 只有一个参数时，允许 Param[0] 作为右侧常量
-            if (TryResolveParamValue(context, method, 0, out right))
+        public bool TryResolveValues(
+            StrategyExecutionContext context,
+            StrategyMethod method,
+            int offset,
+            int requiredCount,
+            out double[] values)
+        {
+            values = Array.Empty<double>();
+            if (requiredCount <= 0)
             {
+                values = Array.Empty<double>();
                 return true;
             }
 
-            _logger.LogInformation(
-                "策略参数不足，无法解析右侧条件值: {Uid} Method={Method} ArgsCount={Count}",
-                context.Strategy.UidCode,
-                method.Method,
-                method.Args?.Count ?? 0);
-            return false;
+            var result = new double[requiredCount];
+            var argCount = method.Args?.Count ?? 0;
+            var paramCount = method.Param?.Length ?? 0;
+
+            for (var i = 0; i < requiredCount; i++)
+            {
+                if (method.Args != null && i < method.Args.Count)
+                {
+                    if (!TryResolveValue(context, method.Args[i], offset, out result[i]))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+
+                var paramIndex = i - argCount;
+                if (paramIndex < 0)
+                {
+                    paramIndex = 0;
+                }
+
+                if (!TryResolveParamValue(context, method, paramIndex, out result[i]))
+                {
+                    _logger.LogInformation(
+                        "策略参数不足，无法解析条件: {Uid} Method={Method} ArgsCount={ArgsCount} ParamCount={ParamCount} Need={Need}",
+                        context.Strategy.UidCode,
+                        method.Method,
+                        argCount,
+                        paramCount,
+                        requiredCount);
+                    return false;
+                }
+            }
+
+            values = result;
+            return true;
         }
 
         private bool TryResolveParamPair(
@@ -113,7 +134,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return TryResolveConstant(context, reference, out value);
         }
 
-        private bool TryResolveValue(
+        public bool TryResolveValue(
             StrategyExecutionContext context,
             StrategyValueRef reference,
             int offsetAdd,

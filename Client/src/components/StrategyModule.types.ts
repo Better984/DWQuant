@@ -24,6 +24,10 @@ export interface ConditionItem {
   rightValueType: 'field' | 'number';
   rightValueId?: string;
   rightNumber?: string;
+  extraValueType?: 'field' | 'number';
+  extraValueId?: string;
+  extraNumber?: string;
+  paramValues?: string[];
 }
 
 export interface ConditionGroup {
@@ -66,6 +70,7 @@ export interface StrategyMethodConfig {
   required: boolean;
   method: string;
   args?: Array<StrategyValueRef | string>;
+  param?: string[];
 }
 
 export interface ConditionGroupConfig {
@@ -138,6 +143,18 @@ export interface StrategyConfig {
 export interface MethodOption {
   value: string;
   label: string;
+  category?: string;
+  categoryLabel?: string;
+  argsCount?: number;
+  argLabels?: string[];
+  argValueTypes?: Array<'field' | 'number' | 'both'>;
+  params?: Array<{
+    key: string;
+    label: string;
+    placeholder?: string;
+    required?: boolean;
+    defaultValue?: string;
+  }>;
 }
 
 export interface TradeOption {
