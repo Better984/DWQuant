@@ -12,6 +12,7 @@ interface StrategyEditorShellProps {
   onOpenIndicatorGenerator: () => void;
   onEditIndicator: (indicatorId: string) => void;
   onRemoveIndicator: (indicatorId: string) => void;
+  filterContainers: ConditionContainer[];
   conditionContainers: ConditionContainer[];
   maxGroupsPerContainer: number;
   buildConditionPreview: (condition: ConditionItem | null) => string;
@@ -38,6 +39,7 @@ const StrategyEditorShell: React.FC<StrategyEditorShellProps> = ({
   onOpenIndicatorGenerator,
   onEditIndicator,
   onRemoveIndicator,
+  filterContainers,
   conditionContainers,
   maxGroupsPerContainer,
   buildConditionPreview,
@@ -66,7 +68,24 @@ const StrategyEditorShell: React.FC<StrategyEditorShellProps> = ({
           formatIndicatorName={formatIndicatorName}
           formatIndicatorMeta={formatIndicatorMeta}
         />
+        {filterContainers.length > 0 && (
+          <ConditionContainerList
+            sectionTitle="开仓筛选器"
+            sectionHint="仅用于开多/开空开仓前的过滤，不影响平仓流程。"
+            conditionContainers={filterContainers}
+            maxGroupsPerContainer={maxGroupsPerContainer}
+            buildConditionPreview={buildConditionPreview}
+            onAddConditionGroup={onAddConditionGroup}
+            onToggleGroupFlag={onToggleGroupFlag}
+            onOpenConditionModal={onOpenConditionModal}
+            onRemoveGroup={onRemoveGroup}
+            onToggleConditionFlag={onToggleConditionFlag}
+            onRemoveCondition={onRemoveCondition}
+            renderToggle={renderToggle}
+          />
+        )}
         <ConditionContainerList
+          sectionTitle="开仓/平仓条件"
           conditionContainers={conditionContainers}
           maxGroupsPerContainer={maxGroupsPerContainer}
           buildConditionPreview={buildConditionPreview}

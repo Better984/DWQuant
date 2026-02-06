@@ -339,8 +339,56 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
+            if (!EvaluateEntryFilters(context, logic.Entry.Long, "Entry.Long", metrics))
+            {
+                return;
+            }
+
             ExecuteBranch(context, logic.Entry.Long, "Entry.Long", metrics);
             //ExecuteBranch(context, logic.Entry.Short, "Entry.Short");
+        }
+
+        private bool EvaluateEntryFilters(
+            StrategyExecutionContext context,
+            StrategyLogicBranch branch,
+            string stage,
+            StrategyRunMetrics? metrics)
+        {
+            if (branch == null || !branch.Enabled)
+            {
+                return true;
+            }
+
+            var filters = branch.Filters;
+            if (filters == null || !filters.Enabled)
+            {
+                return true;
+            }
+
+            if (filters.Groups == null || filters.Groups.Count == 0)
+            {
+                return true;
+            }
+
+            PrecomputeRequiredConditions(context, filters, metrics);
+            var results = new List<ConditionEvaluationResult>();
+            var stageLabel = $"{stage}.Filter";
+            var pass = EvaluateChecks(context, filters, results, stageLabel, metrics);
+            if (!pass && metrics != null)
+            {
+                Interlocked.Increment(ref metrics.SkippedCount);
+            }
+
+            if (!pass)
+            {
+                _logger.LogDebug(
+                    "筛选器未通过: {Uid} {Stage} 时间={Time}",
+                    context.Strategy.UidCode,
+                    stageLabel,
+                    FormatTimestamp(context.Task.CandleTimestamp));
+            }
+
+            return pass;
         }
 
         private StrategyRuntimeGate ResolveRuntimeGate(StrategyModel strategy, DateTimeOffset currentTime)
@@ -480,6 +528,36 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         _conditionEvaluator.Evaluate(context, condition);
                         metrics?.IncrementConditionEval();
                     }
+                }
+            }
+        }
+
+        private void PrecomputeRequiredConditions(
+            StrategyExecutionContext context,
+            ConditionGroupSet? checks,
+            StrategyRunMetrics? metrics)
+        {
+            if (checks == null || !checks.Enabled || checks.Groups == null || checks.Groups.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var group in checks.Groups)
+            {
+                if (group?.Conditions == null || !group.Enabled)
+                {
+                    continue;
+                }
+
+                foreach (var condition in group.Conditions)
+                {
+                    if (condition == null || !condition.Enabled || !condition.Required)
+                    {
+                        continue;
+                    }
+
+                    _conditionEvaluator.Evaluate(context, condition);
+                    metrics?.IncrementConditionEval();
                 }
             }
         }
@@ -1058,6 +1136,25 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (branch == null)
             {
                 yield break;
+            }
+
+            if (branch.Filters?.Groups != null)
+            {
+                foreach (var group in branch.Filters.Groups)
+                {
+                    if (group?.Conditions == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var condition in group.Conditions)
+                    {
+                        if (condition != null)
+                        {
+                            yield return condition;
+                        }
+                    }
+                }
             }
 
             if (branch.Containers != null)

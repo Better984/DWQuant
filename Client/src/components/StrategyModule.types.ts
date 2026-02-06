@@ -99,6 +99,7 @@ export interface StrategyLogicBranchConfig {
   enabled: boolean;
   minPassConditionContainer: number;
   containers: ConditionContainerConfig[];
+  filters?: ConditionGroupSetConfig;
   onPass: ActionSetConfig;
 }
 

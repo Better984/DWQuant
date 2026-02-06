@@ -114,7 +114,11 @@ const normalizeConditionMethod = (raw?: string) => {
   return value;
 };
 
+const FILTER_CONTAINER_IDS = new Set(['open-long-filter', 'open-short-filter']);
+
 const createDefaultConditionContainers = (): ConditionContainer[] => ([
+  { id: 'open-long-filter', title: '开多筛选器', enabled: false, required: false, groups: [] },
+  { id: 'open-short-filter', title: '开空筛选器', enabled: false, required: false, groups: [] },
   { id: 'open-long', title: '开多条件', enabled: true, required: false, groups: [] },
   { id: 'open-short', title: '开空条件', enabled: true, required: false, groups: [] },
   { id: 'close-long', title: '平多条件', enabled: true, required: false, groups: [] },
@@ -350,8 +354,23 @@ const extractIndicatorsFromConfig = (config: StrategyConfig): GeneratedIndicator
     }
   };
 
+  const traverseGroupSet = (groupSet?: ConditionGroupSetConfig) => {
+    groupSet?.groups?.forEach((group) => {
+      group.conditions?.forEach((condition) => {
+        if (condition.args) {
+          condition.args.forEach((arg) => {
+            if (typeof arg === 'object' && 'refType' in arg) {
+              addIndicator(arg as StrategyValueRef);
+            }
+          });
+        }
+      });
+    });
+  };
+
   // 遍历所有条件
   const traverseBranch = (branch: StrategyLogicBranchConfig) => {
+    traverseGroupSet(branch.filters);
     branch.containers?.forEach((container) => {
       container.checks?.groups?.forEach((group) => {
         group.conditions?.forEach((condition) => {
@@ -380,26 +399,30 @@ const extractIndicatorsFromConfig = (config: StrategyConfig): GeneratedIndicator
 // 从配置中解析条件容器
 const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionContainer[] => {
   const containers: ConditionContainer[] = [
+    { id: 'open-long-filter', title: '开多筛选器', enabled: false, required: false, groups: [] },
+    { id: 'open-short-filter', title: '开空筛选器', enabled: false, required: false, groups: [] },
     { id: 'open-long', title: '开多条件', enabled: false, required: false, groups: [] },
     { id: 'open-short', title: '开空条件', enabled: false, required: false, groups: [] },
     { id: 'close-long', title: '平多条件', enabled: false, required: false, groups: [] },
     { id: 'close-short', title: '平空条件', enabled: false, required: false, groups: [] },
   ];
 
-  const parseBranch = (branch: StrategyLogicBranchConfig, containerId: string) => {
+  const parseGroupSet = (
+    containerId: string,
+    groupSet?: ConditionGroupSetConfig,
+    enabledFlag?: boolean,
+  ) => {
     const container = containers.find((c) => c.id === containerId);
-    if (!container || !branch.containers || branch.containers.length === 0) {
+    if (!container || !groupSet || !groupSet.groups) {
+      if (container && enabledFlag !== undefined) {
+        container.enabled = enabledFlag;
+      }
       return;
     }
 
-    container.enabled = branch.enabled || false;
-    const checks = branch.containers[0]?.checks;
-    if (!checks || !checks.groups) {
-      return;
-    }
-
+    container.enabled = enabledFlag ?? groupSet.enabled ?? false;
     let groupCounter = 0;
-    container.groups = checks.groups.map((groupConfig, index) => {
+    container.groups = groupSet.groups.map((groupConfig, index) => {
       groupCounter++;
       const groupId = `${containerId}-group-${groupCounter}`;
       let conditionCounter = 0;
@@ -500,9 +523,17 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
     });
   };
 
+  const parseBranch = (branch: StrategyLogicBranchConfig, containerId: string, filterContainerId?: string) => {
+    const checks = branch.containers?.[0]?.checks;
+    parseGroupSet(containerId, checks, branch.enabled || false);
+    if (filterContainerId) {
+      parseGroupSet(filterContainerId, branch.filters, branch.filters?.enabled ?? false);
+    }
+  };
+
   if (config.logic) {
-    parseBranch(config.logic.entry.long, 'open-long');
-    parseBranch(config.logic.entry.short, 'open-short');
+    parseBranch(config.logic.entry.long, 'open-long', 'open-long-filter');
+    parseBranch(config.logic.entry.short, 'open-short', 'open-short-filter');
     parseBranch(config.logic.exit.long, 'close-long');
     parseBranch(config.logic.exit.short, 'close-short');
   }
@@ -590,6 +621,14 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const codeThumbRef = useRef<HTMLDivElement>(null);
   const tradeConfigRef = useRef<HTMLDivElement>(null);
   const [conditionContainers, setConditionContainers] = useState<ConditionContainer[]>(loadedContainers);
+  const filterContainers = useMemo(
+    () => conditionContainers.filter((item) => FILTER_CONTAINER_IDS.has(item.id)),
+    [conditionContainers],
+  );
+  const logicContainers = useMemo(
+    () => conditionContainers.filter((item) => !FILTER_CONTAINER_IDS.has(item.id)),
+    [conditionContainers],
+  );
   const [tradeConfig, setTradeConfig] = useState<StrategyTradeConfig>(() => 
     mergeTradeConfig(initialConfig?.trade || initialTradeConfig)
   );
@@ -1757,6 +1796,8 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
   const conditionSummarySections = useMemo<ConditionSummarySection[]>(() => {
     const sections = [
+      { id: 'open-long-filter', label: '开多筛选器' },
+      { id: 'open-short-filter', label: '开空筛选器' },
       { id: 'open-long', label: '开多' },
       { id: 'open-short', label: '开空' },
       { id: 'close-long', label: '平多' },
@@ -1766,6 +1807,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return sections.map((section) => {
       const container = conditionContainers.find((item) => item.id === section.id);
       const groups = container?.groups ?? [];
+      const isFilterSection = FILTER_CONTAINER_IDS.has(section.id);
+      const sectionEnabled = isFilterSection
+        ? groups.some((group) => group.enabled)
+        : container?.enabled ?? false;
       const groupSummaries = groups.map((group) => {
         const lines = group.conditions.map((condition) => buildConditionPreview(condition));
         return {
@@ -1774,7 +1819,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         };
       });
       return {
-        title: `${section.label} 共${groups.length}个条件组${container?.enabled ? '' : ' (未启用)'}`,
+        title: `${section.label} 共${groups.length}个条件组${sectionEnabled ? '' : ' (未启用)'}`,
         groups: groupSummaries.length > 0 ? groupSummaries : [{ title: '暂无条件组', conditions: [] }],
       };
     });
@@ -1928,6 +1973,27 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     };
   };
 
+  const buildFilterGroupSetConfig = (containerId: string): ConditionGroupSetConfig | undefined => {
+    const container = conditionContainers.find((item) => item.id === containerId);
+    if (!container) {
+      return undefined;
+    }
+
+    const enabledGroups = container.groups.filter((group) => group.enabled);
+    if (enabledGroups.length === 0) {
+      return undefined;
+    }
+
+    const groups = enabledGroups.map(buildConditionGroupConfig);
+    const requiredGroupsCount = enabledGroups.filter((group) => group.required).length;
+    const minPassGroups = requiredGroupsCount > 0 ? requiredGroupsCount : 1;
+    return {
+      enabled: true,
+      minPassGroups,
+      groups,
+    };
+  };
+
   const buildActionSetConfig = (action: string): ActionSetConfig => ({
     enabled: true,
     minPassConditions: 1,
@@ -1944,15 +2010,18 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const buildBranchConfig = (
     containerId: string,
     action: string,
+    filterContainerId?: string,
   ): StrategyLogicBranchConfig => {
     const container = conditionContainers.find((item) => item.id === containerId);
     const checks = container
       ? buildConditionGroupSetConfig(container)
       : { enabled: false, minPassGroups: 1, groups: [] };
+    const filters = filterContainerId ? buildFilterGroupSetConfig(filterContainerId) : undefined;
     return {
       enabled: container?.enabled ?? false,
       minPassConditionContainer: 1,
       containers: [{ checks }],
+      filters,
       onPass: buildActionSetConfig(action),
     };
   };
@@ -1973,8 +2042,8 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     },
     logic: {
       entry: {
-        long: buildBranchConfig('open-long', 'Long'),
-        short: buildBranchConfig('open-short', 'Short'),
+        long: buildBranchConfig('open-long', 'Long', 'open-long-filter'),
+        short: buildBranchConfig('open-short', 'Short', 'open-short-filter'),
       },
       exit: {
         long: buildBranchConfig('close-long', 'CloseLong'),
@@ -2289,7 +2358,8 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           onOpenIndicatorGenerator={openCreateIndicator}
           onEditIndicator={requestEditIndicator}
           onRemoveIndicator={requestRemoveIndicator}
-          conditionContainers={conditionContainers}
+          filterContainers={filterContainers}
+          conditionContainers={logicContainers}
           maxGroupsPerContainer={MAX_GROUPS_PER_CONTAINER}
           buildConditionPreview={buildConditionPreview}
           onAddConditionGroup={addConditionGroup}

@@ -261,6 +261,10 @@ namespace ServerTest.Models.Strategy
         public bool Enabled { get; set; } = true;
         public int MinPassConditionContainer { get; set; } = 1;
         public List<ConditionContainer> Containers { get; set; } = new();
+        /// <summary>
+        /// 开仓筛选器（仅用于 Entry 分支）
+        /// </summary>
+        public ConditionGroupSet? Filters { get; set; }
         public ActionSet OnPass { get; set; } = new();
     }
 

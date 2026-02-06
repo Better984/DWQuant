@@ -129,7 +129,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
         {
             if (branch == null || branch.Containers == null)
             {
+                if (branch != null)
+                {
+                    foreach (var key in EnumerateKeys(trade, branch.Filters))
+                    {
+                        yield return key;
+                    }
+                }
                 yield break;
+            }
+
+            foreach (var key in EnumerateKeys(trade, branch.Filters))
+            {
+                yield return key;
             }
 
             foreach (var container in branch.Containers)
@@ -156,6 +168,33 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         var key = ConditionKeyBuilder.BuildKey(trade, condition);
                         yield return key.Id;
                     }
+                }
+            }
+        }
+
+        private static IEnumerable<string> EnumerateKeys(TradeConfig trade, ConditionGroupSet? checks)
+        {
+            if (checks?.Groups == null)
+            {
+                yield break;
+            }
+
+            foreach (var group in checks.Groups)
+            {
+                if (group?.Conditions == null)
+                {
+                    continue;
+                }
+
+                foreach (var condition in group.Conditions)
+                {
+                    if (condition == null)
+                    {
+                        continue;
+                    }
+
+                    var key = ConditionKeyBuilder.BuildKey(trade, condition);
+                    yield return key.Id;
                 }
             }
         }

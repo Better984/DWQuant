@@ -130,6 +130,55 @@
                       }
                   }
               ],
+              "filters": {
+                  "enabled": true,
+                  "groups": [
+                      {
+                          "enabled": true,
+                          "conditions": [
+                              {
+                                  "args": [
+                                      {
+                                          "input": "CLOSE",
+                                          "output": "Value",
+                                          "params": [
+
+                                          ],
+                                          "refType": "Field",
+                                          "calcMode": "OnBarClose",
+                                          "indicator": "",
+                                          "timeframe": "",
+                                          "offsetRange": [
+                                              0,
+                                              0
+                                          ]
+                                      },
+                                      {
+                                          "input": "OPEN",
+                                          "output": "Value",
+                                          "params": [
+
+                                          ],
+                                          "refType": "Field",
+                                          "calcMode": "OnBarClose",
+                                          "indicator": "",
+                                          "timeframe": "",
+                                          "offsetRange": [
+                                              0,
+                                              0
+                                          ]
+                                      }
+                                  ],
+                                  "method": "GreaterThanOrEqual",
+                                  "enabled": true,
+                                  "required": false
+                              }
+                          ],
+                          "minPassConditions": 1
+                      }
+                  ],
+                  "minPassGroups": 1
+              },
               "minPassConditionContainer": 1
           },
           "short": {
@@ -159,6 +208,55 @@
                       }
                   }
               ],
+              "filters": {
+                  "enabled": true,
+                  "groups": [
+                      {
+                          "enabled": true,
+                          "conditions": [
+                              {
+                                  "args": [
+                                      {
+                                          "input": "CLOSE",
+                                          "output": "Value",
+                                          "params": [
+
+                                          ],
+                                          "refType": "Field",
+                                          "calcMode": "OnBarClose",
+                                          "indicator": "",
+                                          "timeframe": "",
+                                          "offsetRange": [
+                                              0,
+                                              0
+                                          ]
+                                      },
+                                      {
+                                          "input": "OPEN",
+                                          "output": "Value",
+                                          "params": [
+
+                                          ],
+                                          "refType": "Field",
+                                          "calcMode": "OnBarClose",
+                                          "indicator": "",
+                                          "timeframe": "",
+                                          "offsetRange": [
+                                              0,
+                                              0
+                                          ]
+                                      }
+                                  ],
+                                  "method": "LessThanOrEqual",
+                                  "enabled": true,
+                                  "required": false
+                              }
+                          ],
+                          "minPassConditions": 1
+                      }
+                  ],
+                  "minPassGroups": 1
+              },
               "minPassConditionContainer": 1
           }
       }

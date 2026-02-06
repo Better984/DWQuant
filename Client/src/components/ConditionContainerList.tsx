@@ -3,6 +3,8 @@ import React from 'react';
 import type { ConditionContainer, ConditionItem } from './StrategyModule.types';
 
 interface ConditionContainerListProps {
+  sectionTitle?: string;
+  sectionHint?: string;
   conditionContainers: ConditionContainer[];
   maxGroupsPerContainer: number;
   buildConditionPreview: (condition: ConditionItem | null) => string;
@@ -21,6 +23,8 @@ interface ConditionContainerListProps {
 }
 
 const ConditionContainerList: React.FC<ConditionContainerListProps> = ({
+  sectionTitle,
+  sectionHint,
   conditionContainers,
   maxGroupsPerContainer,
   buildConditionPreview,
@@ -34,7 +38,8 @@ const ConditionContainerList: React.FC<ConditionContainerListProps> = ({
 }) => {
   return (
     <div className="strategy-condition-section">
-      <div className="strategy-condition-title">条件容器</div>
+      <div className="strategy-condition-title">{sectionTitle || '条件容器'}</div>
+      {sectionHint ? <div className="strategy-condition-hint">{sectionHint}</div> : null}
       <div className="strategy-condition-grid">
         {conditionContainers.map((container) => (
           <div key={container.id} className="condition-container-card">
