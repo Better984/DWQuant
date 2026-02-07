@@ -585,65 +585,20 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     continue;
                 }
 
-                var hasEnabled = false;
-                var requiredFailed = false;
-                foreach (var condition in group.Conditions ?? new List<StrategyMethod>())
-                {
-                    if (condition == null || !condition.Enabled)
-                    {
-                        continue;
-                    }
+                var crossRequired = new List<StrategyMethod>();
+                var crossOptional = new List<StrategyMethod>();
+                var required = new List<StrategyMethod>();
+                var optional = new List<StrategyMethod>();
 
-                    hasEnabled = true;
-                    if (!condition.Required)
-                    {
-                        continue;
-                    }
+                // 重要：优先级拆分仅调整“评估顺序”，不改变 Required/Optional 语义。
+                ConditionPriorityHelper.SplitByPriority(
+                    group.Conditions ?? new List<StrategyMethod>(),
+                    crossRequired,
+                    crossOptional,
+                    required,
+                    optional);
 
-                    var result = _conditionEvaluator.Evaluate(context, condition);
-                    metrics?.IncrementConditionEval();
-                    results.Add(result);
-                    _logger.LogDebug(
-                        "条件检查: {Uid} {Stage} 组={Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
-                        context.Strategy.UidCode,
-                        stage,
-                        groupIndex,
-                        condition.Method,
-                        condition.Required,
-                        result.Success,
-                        result.Message);
-
-                    // 测试用：记录检查过程（后续会删除）
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await LogCheckResultAsync(context, stage, groupIndex, condition, result, true, ct: default).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "记录测试检查日志失败（忽略）");
-                        }
-                    });
-
-                    if (!result.Success)
-                    {
-                        _logger.LogDebug(
-                            "必需条件失败: {Uid} {Stage} 组={Group} 方法={Method}",
-                            context.Strategy.UidCode,
-                            stage,
-                            groupIndex,
-                            condition.Method);
-                        requiredFailed = true;
-                        break;
-                    }
-                }
-
-                if (requiredFailed)
-                {
-                    continue;
-                }
-
+                var hasEnabled = crossRequired.Count + crossOptional.Count + required.Count + optional.Count > 0;
                 if (!hasEnabled)
                 {
                     if (group.MinPassConditions <= 0)
@@ -653,19 +608,16 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     continue;
                 }
 
+                var requiredFailed = false;
                 var optionalPassCount = 0;
-                foreach (var condition in group.Conditions ?? new List<StrategyMethod>())
-                {
-                    if (condition == null || !condition.Enabled || condition.Required)
-                    {
-                        continue;
-                    }
 
+                bool EvaluateCondition(StrategyMethod condition, bool isRequired)
+                {
                     var result = _conditionEvaluator.Evaluate(context, condition);
                     metrics?.IncrementConditionEval();
                     results.Add(result);
                     _logger.LogDebug(
-                        "条件检查: {Uid} {Stage} 组={Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
+                        "条件检查: {Uid} {Stage} 组{Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
                         context.Strategy.UidCode,
                         stage,
                         groupIndex,
@@ -679,7 +631,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     {
                         try
                         {
-                            await LogCheckResultAsync(context, stage, groupIndex, condition, result, false, ct: default).ConfigureAwait(false);
+                            await LogCheckResultAsync(context, stage, groupIndex, condition, result, isRequired, ct: default).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
@@ -687,9 +639,71 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         }
                     });
 
-                    if (result.Success)
+                    if (isRequired && !result.Success)
+                    {
+                        _logger.LogDebug(
+                            "必需条件失败: {Uid} {Stage} 组{Group} 方法={Method}",
+                            context.Strategy.UidCode,
+                            stage,
+                            groupIndex,
+                            condition.Method);
+                        requiredFailed = true;
+                        return false;
+                    }
+
+                    if (!isRequired && result.Success)
                     {
                         optionalPassCount++;
+                    }
+
+                    return result.Success;
+                }
+
+                // P0：Cross/穿透类优先评估
+                foreach (var condition in crossRequired)
+                {
+                    EvaluateCondition(condition, isRequired: true);
+                    if (requiredFailed)
+                    {
+                        break;
+                    }
+                }
+
+                if (requiredFailed)
+                {
+                    continue;
+                }
+
+                foreach (var condition in crossOptional)
+                {
+                    EvaluateCondition(condition, isRequired: false);
+                }
+
+                // P1?Required ??
+                foreach (var condition in required)
+                {
+                    EvaluateCondition(condition, isRequired: true);
+                    if (requiredFailed)
+                    {
+                        break;
+                    }
+                }
+
+                if (requiredFailed)
+                {
+                    continue;
+                }
+
+                // P2：Optional 条件（达到最小通过数后提前结束）
+                if (optionalPassCount < group.MinPassConditions)
+                {
+                    foreach (var condition in optional)
+                    {
+                        EvaluateCondition(condition, isRequired: false);
+                        if (optionalPassCount >= group.MinPassConditions)
+                        {
+                            break;
+                        }
                     }
                 }
 
@@ -697,7 +711,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 if (!pass)
                 {
                     _logger.LogDebug(
-                        "条件组数量不足: {Uid} {Stage} 组={Group} 需要={Need} 通过={Pass}",
+                        "条件组数量不足: {Uid} {Stage} 组{Group} 需要{Need} 通过={Pass}",
                         context.Strategy.UidCode,
                         stage,
                         groupIndex,

@@ -10,16 +10,16 @@ namespace ServerTest.Modules.StrategyEngine.Application
 {
     public sealed class IndicatorValueResolver : IStrategyValueResolver
     {
-        private readonly MarketDataEngine _marketDataEngine;
+        private readonly IMarketDataProvider _marketDataProvider;
         private readonly IndicatorEngine _indicatorEngine;
         private readonly ILogger<IndicatorValueResolver> _logger;
 
         public IndicatorValueResolver(
-            MarketDataEngine marketDataEngine,
+            IMarketDataProvider marketDataProvider,
             IndicatorEngine indicatorEngine,
             ILogger<IndicatorValueResolver> logger)
         {
-            _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
+            _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _indicatorEngine = indicatorEngine ?? throw new ArgumentNullException(nameof(indicatorEngine));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -250,7 +250,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 ? context.Task.CandleTimestamp
                 : null;
 
-            var candles = _marketDataEngine.GetHistoryKlines(
+            var candles = _marketDataProvider.GetHistoryKlines(
                 exchange,
                 timeframe,
                 symbol,
@@ -368,17 +368,17 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var low = candle?.low ?? 0;
             var close = candle?.close ?? 0;
 
-            _logger.LogInformation(
-                "条件检测取值 K线: {Uid} field={Field} time={Time} open={Open:F4} high={High:F4} low={Low:F4} close={Close:F4} value={Value:F6} offset={Offset}",
-                context.Strategy.UidCode,
-                reference?.Input,
-                timeText,
-                open,
-                high,
-                low,
-                close,
-                value,
-                offset);
+            //_logger.LogInformation(
+            //    "条件检测取值 K线: {Uid} field={Field} time={Time} open={Open:F4} high={High:F4} low={Low:F4} close={Close:F4} value={Value:F6} offset={Offset}",
+            //    context.Strategy.UidCode,
+            //    reference?.Input,
+            //    timeText,
+            //    open,
+            //    high,
+            //    low,
+            //    close,
+            //    value,
+            //    offset);
         }
 
         private void LogResolvedIndicator(

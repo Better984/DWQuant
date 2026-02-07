@@ -241,7 +241,7 @@ namespace ServerTest.Modules.MarketData.Application
             }
 
             // 命中缓存直接返回
-            if (TryGetFromCache(cacheKey, startMs, endMs, safeCount, out var cached))
+            if (TryGetFromCache(cacheKey, startMs, endMs, safeCount, out var cached, out _))
             {
                 return cached;
             }
@@ -269,6 +269,23 @@ namespace ServerTest.Modules.MarketData.Application
             }
         }
 
+        /// <summary>
+        /// 仅从历史行情缓存中读取（不回表、不触发数据库访问）
+        /// </summary>
+        public bool TryGetHistoryFromCache(
+            string exchangeId,
+            string timeframe,
+            string symbol,
+            long? startMs,
+            long? endMs,
+            int? count,
+            out List<OHLCV> result,
+            out string missReason)
+        {
+            var cacheKey = BuildCacheKey(exchangeId, symbol, timeframe);
+            return TryGetFromCache(cacheKey, startMs, endMs, count, out result, out missReason);
+        }
+
         private int NormalizeCount(int? count)
         {
             var max = _options.MaxQueryBars <= 0 ? 2000 : _options.MaxQueryBars;
@@ -289,12 +306,15 @@ namespace ServerTest.Modules.MarketData.Application
             string cacheKey,
             long? startMs,
             long? endMs,
-            int count,
-            out List<OHLCV> result)
+            int? count,
+            out List<OHLCV> result,
+            out string missReason)
         {
             result = new List<OHLCV>();
+            missReason = string.Empty;
             if (!_cache.TryGetValue(cacheKey, out var cache))
             {
+                missReason = "cache_key_not_found";
                 return false;
             }
 
@@ -303,6 +323,7 @@ namespace ServerTest.Modules.MarketData.Application
                 // 缓存为空或范围不覆盖则需要回表
                 if (cache.Items.Count == 0)
                 {
+                    missReason = "cache_empty";
                     return false;
                 }
 
@@ -311,6 +332,7 @@ namespace ServerTest.Modules.MarketData.Application
 
                 if (cache.StartMs > rangeStart || cache.EndMs < rangeEnd)
                 {
+                    missReason = $"range_not_covered(cache={cache.StartMs}-{cache.EndMs},request={rangeStart}-{rangeEnd})";
                     return false;
                 }
 
@@ -319,13 +341,14 @@ namespace ServerTest.Modules.MarketData.Application
                 var endIndex = FindLastIndex(cache.Items, rangeEnd);
                 if (startIndex < 0 || endIndex < startIndex)
                 {
+                    missReason = "range_index_not_found";
                     return false;
                 }
 
                 var slice = cache.Items.GetRange(startIndex, endIndex - startIndex + 1);
-                if (slice.Count > count)
+                if (count.HasValue && count.Value > 0 && slice.Count > count.Value)
                 {
-                    slice = slice.Skip(slice.Count - count).ToList();
+                    slice = slice.Skip(slice.Count - count.Value).ToList();
                 }
 
                 result = slice;

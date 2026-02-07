@@ -18,6 +18,9 @@ const HistoricalData: React.FC = () => {
   const [snapshots, setSnapshots] = useState<CacheSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [selectedExchanges, setSelectedExchanges] = useState<string[]>([]);
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
+  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>([]);
   const client = new HttpClient();
   client.setTokenProvider(getToken);
   const { success, error: showError } = useNotification();
@@ -65,6 +68,41 @@ const HistoricalData: React.FC = () => {
     }
   };
 
+  const uniqueExchanges = Array.from(new Set(snapshots.map((s) => s.exchange))).sort();
+  const uniqueSymbols = Array.from(new Set(snapshots.map((s) => s.symbol))).sort();
+  const uniqueTimeframes = Array.from(new Set(snapshots.map((s) => s.timeframe))).sort();
+
+  const handleExchangeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const values = Array.from(e.target.selectedOptions, (opt) => opt.value);
+    setSelectedExchanges(values);
+  };
+
+  const handleSymbolChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const values = Array.from(e.target.selectedOptions, (opt) => opt.value);
+    setSelectedSymbols(values);
+  };
+
+  const handleTimeframeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const values = Array.from(e.target.selectedOptions, (opt) => opt.value);
+    setSelectedTimeframes(values);
+  };
+
+  const clearFilters = () => {
+    setSelectedExchanges([]);
+    setSelectedSymbols([]);
+    setSelectedTimeframes([]);
+  };
+
+  const filteredSnapshots = snapshots.filter((s) => {
+    const matchExchange =
+      selectedExchanges.length === 0 || selectedExchanges.includes(s.exchange);
+    const matchSymbol = selectedSymbols.length === 0 || selectedSymbols.includes(s.symbol);
+    const matchTimeframe =
+      selectedTimeframes.length === 0 || selectedTimeframes.includes(s.timeframe);
+
+    return matchExchange && matchSymbol && matchTimeframe;
+  });
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -95,14 +133,60 @@ const HistoricalData: React.FC = () => {
         transition={{ delay: 0.15 }}
         className="historical-data-actions"
       >
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => refreshCache({})}
-          disabled={refreshing !== null}
-        >
-          {refreshing === 'all_all_all' ? '刷新中...' : '刷新所有缓存'}
-        </motion.button>
+        <div className="historical-data-filters">
+          <div className="historical-data-filter-group">
+            <label>交易所（多选）</label>
+            <select
+              multiple
+              value={selectedExchanges}
+              onChange={handleExchangeChange}
+            >
+              {uniqueExchanges.map((ex) => (
+                <option key={ex} value={ex}>
+                  {ex}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="historical-data-filter-group">
+            <label>币对（多选）</label>
+            <select multiple value={selectedSymbols} onChange={handleSymbolChange}>
+              {uniqueSymbols.map((symbol) => (
+                <option key={symbol} value={symbol}>
+                  {symbol}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="historical-data-filter-group">
+            <label>周期（多选）</label>
+            <select
+              multiple
+              value={selectedTimeframes}
+              onChange={handleTimeframeChange}
+            >
+              {uniqueTimeframes.map((tf) => (
+                <option key={tf} value={tf}>
+                  {tf}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="historical-data-actions-buttons">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => refreshCache({})}
+            disabled={refreshing !== null}
+          >
+            {refreshing === 'all_all_all' ? '刷新中...' : '刷新所有缓存'}
+          </motion.button>
+          <button onClick={clearFilters} disabled={loading || snapshots.length === 0}>
+            清空筛选
+          </button>
+        </div>
       </motion.div>
 
       <div className="historical-data-table">
@@ -119,14 +203,14 @@ const HistoricalData: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {snapshots.length === 0 ? (
+            {filteredSnapshots.length === 0 ? (
               <tr>
                 <td colSpan={7} className="empty-cell">
                   {loading ? '加载中...' : '暂无数据'}
                 </td>
               </tr>
             ) : (
-              snapshots.map((snapshot, index) => (
+              filteredSnapshots.map((snapshot, index) => (
                 <tr key={`${snapshot.exchange}-${snapshot.symbol}-${snapshot.timeframe}-${index}`}>
                   <td>{snapshot.exchange}</td>
                   <td>{snapshot.symbol}</td>

@@ -50,6 +50,9 @@
 
 .historical-data-actions {
   margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .historical-data-actions button {
@@ -75,6 +78,49 @@
 .historical-data-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.historical-data-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.historical-data-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.historical-data-filter-group label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-body);
+}
+
+.historical-data-filter-group select {
+  min-height: 40px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: var(--font-body);
+}
+
+.historical-data-filter-group select:focus {
+  outline: none;
+  border-color: var(--color-cta);
+  box-shadow: 0 0 0 1px var(--color-cta);
+}
+
+.historical-data-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .historical-data-table {

@@ -25,7 +25,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
     /// <summary>
     /// 实时行情引擎：使用 WebSocket 订阅 1 分钟 K 线，实时维护历史行情缓存
     /// </summary>
-    public class MarketDataEngine : BaseService
+    public class MarketDataEngine : BaseService, IMarketDataProvider
     {
         // 缓存结构：Exchange -> Symbol -> SymbolCache（包含独立锁和所有周期数据）
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SymbolCache>> _cache = new();
@@ -289,7 +289,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
                 List<MarketDataConfig.ExchangeEnum> initTasks = new List<MarketDataConfig.ExchangeEnum>();
                 initTasks.Add(MarketDataConfig.ExchangeEnum.Bitget);
 
-                foreach (var exchangeEnum in initTasks)//Enum.GetValues<MarketDataConfig.ExchangeEnum>())
+                foreach (var exchangeEnum in Enum.GetValues<MarketDataConfig.ExchangeEnum>()) // initTasks)//
                 {
                     var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
                     var options = MarketDataConfig.GetExchangeOptions(exchangeEnum);

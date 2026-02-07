@@ -58,7 +58,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         public bool Update(
             MarketDataTask task,
-            MarketDataEngine marketDataEngine,
+            IMarketDataProvider marketDataProvider,
             TalibIndicatorCalculator calculator,
             ILogger logger)
         {
@@ -97,7 +97,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 _series.EnsureCapacity(requiredBars);
 
                 var endTimestamp = calculator.ResolveEndTimestamp(Key.CalcMode, task.CandleTimestamp);
-                var candles = marketDataEngine.GetHistoryKlines(
+                var candles = marketDataProvider.GetHistoryKlines(
                     Key.Exchange,
                     Key.Timeframe,
                     Key.Symbol,

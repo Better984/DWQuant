@@ -5,14 +5,13 @@ using ServerTest.Models.Indicator;
 using ServerTest.Options;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
-using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Services;
 
 namespace ServerTest.Modules.StrategyEngine.Application
 {
     public sealed class IndicatorEngine
     {
-        private readonly MarketDataEngine _marketDataEngine;
+        private readonly IMarketDataProvider _marketDataProvider;
         private readonly ILogger<IndicatorEngine> _logger;
         private readonly TalibIndicatorCatalog? _catalog;
         private readonly TalibIndicatorCalculator _calculator;
@@ -22,11 +21,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private readonly ConcurrentDictionary<IndicatorKey, IndicatorHandle> _handles = new();
 
         public IndicatorEngine(
-            MarketDataEngine marketDataEngine,
+            IMarketDataProvider marketDataProvider,
             ILogger<IndicatorEngine> logger,
             IOptions<RuntimeQueueOptions> queueOptions)
         {
-            _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
+            _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var options = queueOptions?.Value ?? new RuntimeQueueOptions();
             // 初始化队列，启用有界通道与背压策略
@@ -110,7 +109,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return true;
             }
 
-            if (!handle.Update(normalizedTask, _marketDataEngine, _calculator, _logger))
+            if (!handle.Update(normalizedTask, _marketDataProvider, _calculator, _logger))
             {
                 return false;
             }
@@ -171,7 +170,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             {
                 var handle = GetOrCreateHandle(request);
                 handle.UpdateMaxOffset(request.MaxOffset);
-                if (handle.Update(normalizedTask, _marketDataEngine, _calculator, _logger))
+                if (handle.Update(normalizedTask, _marketDataProvider, _calculator, _logger))
                 {
                     successCount++;
                 }

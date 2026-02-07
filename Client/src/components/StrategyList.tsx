@@ -5,7 +5,12 @@ import StrategyEditorFlow, { type StrategyEditorSubmitPayload } from './Strategy
 import StrategyHistoryDialog, { type StrategyHistoryVersion } from './StrategyHistoryDialog';
 import StrategyShareDialog, { type SharePolicyPayload } from './StrategyShareDialog';
 import StrategyShareImportDialog from './StrategyShareImportDialog';
-import StrategyDetailDialog, { type StrategyDetailRecord, type StrategyPositionRecord } from './StrategyDetailDialog';
+import StrategyDetailDialog, {
+  type StrategyDetailRecord,
+  type StrategyPositionRecord,
+  type BacktestRunPayload,
+  type BacktestRunResult,
+} from './StrategyDetailDialog';
 import type { StrategyConfig, StrategyTradeConfig } from './StrategyModule.types';
 import AvatarByewind from '../assets/SnowUI/head/AvatarByewind.svg';
 import { Dialog, useNotification } from './ui';
@@ -203,6 +208,14 @@ const StrategyList: React.FC = () => {
   const closeStrategyPosition = async (positionId: number) => {
     await client.postProtocol('/api/positions/close-by-id', 'position.close.by_id', { positionId });
     await fetchStrategies();
+  };
+
+  const runBacktest = async (payload: BacktestRunPayload, reqId?: string) => {
+    const data = await client.postProtocol<BacktestRunResult>('/api/backtest/run', 'backtest.run', payload, {
+      timeoutMs: 120000,
+      reqId,
+    });
+    return data;
   };
 
   const handleViewHistory = async (usId: number) => {
@@ -529,6 +542,7 @@ const StrategyList: React.FC = () => {
             onSyncMarket={handleSyncMarket}
             onRemoveOfficial={handleRemoveOfficial}
             onRemoveTemplate={handleRemoveTemplate}
+            onRunBacktest={runBacktest}
           />
         )}
       </Dialog>

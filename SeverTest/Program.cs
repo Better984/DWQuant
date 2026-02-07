@@ -13,6 +13,7 @@ using ServerTest.Middleware;
 using ServerTest.Models;
 using ServerTest.Modules.Accounts.Application;
 using ServerTest.Modules.Accounts.Infrastructure;
+using ServerTest.Modules.Backtest.Application;
 using ServerTest.Modules.ExchangeApiKeys.Infrastructure;
 using ServerTest.Modules.MarketData.Application;
 using ServerTest.Modules.MarketStreaming.Application;
@@ -123,6 +124,10 @@ builder.Services.AddSingleton<HistoricalMarketDataCache>();
 builder.Services.AddSingleton<HistoricalMarketDataSyncService>();
 builder.Services.AddSingleton<BinanceHistoricalDataDownloader>();
 builder.Services.AddHostedService<HistoricalMarketDataSyncHostedService>();
+// 合约详情缓存服务
+builder.Services.AddSingleton<ServerTest.Modules.MarketData.Infrastructure.ContractDetailsRepository>();
+builder.Services.AddSingleton<ServerTest.Modules.MarketData.Application.ContractDetailsCacheService>();
+builder.Services.AddHostedService<ServerTest.Modules.MarketData.Application.ContractDetailsCacheHostedService>();
 
 // Redis 连接（用于速率限制和连接管理）
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
@@ -136,6 +141,8 @@ builder.Services.AddSingleton<IConnectionManager, RedisConnectionManager>();
 // ============================================================================
 // 行情数据引擎 
 builder.Services.AddSingleton<MarketDataEngine>();
+// 行情数据提供接口（用于指标/条件统一取数）
+builder.Services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
 
 // 价格服务
 builder.Services.AddSingleton<ExchangePriceService>();
@@ -191,6 +198,9 @@ builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.T
 // 策略管理相关
 builder.Services.AddScoped<StrategyRepository>();
 builder.Services.AddScoped<StrategyService>();
+builder.Services.AddSingleton<BacktestProgressPushService>();
+builder.Services.AddScoped<BacktestRunner>();
+builder.Services.AddScoped<BacktestService>();
 
 builder.Services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
 builder.Services.AddHostedService<TradeActionConsumer>();
