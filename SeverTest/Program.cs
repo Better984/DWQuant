@@ -199,8 +199,15 @@ builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.T
 builder.Services.AddScoped<StrategyRepository>();
 builder.Services.AddScoped<StrategyService>();
 builder.Services.AddSingleton<BacktestProgressPushService>();
+builder.Services.AddSingleton<BacktestObjectPoolManager>();
+builder.Services.AddScoped<BacktestMainLoop>();
 builder.Services.AddScoped<BacktestRunner>();
 builder.Services.AddScoped<BacktestService>();
+builder.Services.AddHostedService<BacktestObjectPoolWarmupHostedService>();
+// 回测任务队列
+builder.Services.AddScoped<ServerTest.Modules.Backtest.Infrastructure.BacktestTaskRepository>();
+builder.Services.AddScoped<ServerTest.Modules.Backtest.Application.BacktestTaskService>();
+builder.Services.AddHostedService<ServerTest.Modules.Backtest.Application.BacktestTaskWorker>();
 
 builder.Services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
 builder.Services.AddHostedService<TradeActionConsumer>();

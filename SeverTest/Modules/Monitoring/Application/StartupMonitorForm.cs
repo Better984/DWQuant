@@ -1704,7 +1704,7 @@ private Panel BuildNetworkPanel()
                     () => _downloader.DownloadAsync(symbolEnum, timeframeEnum, startDate, AppendDownloadLog, _downloadCts.Token, forceDailyOnly),
                     _downloadCts.Token);
 
-                _downloadStatusLabel.Text = $"状态：完成, 澶╂暟={summary.DaysProcessed}, 涓嬭浇={summary.DaysDownloaded}, 鍏ュ簱={summary.RowsInserted}";
+                _downloadStatusLabel.Text = $"状态：完成, 天数={summary.DaysProcessed}, 下载={summary.DaysDownloaded}, 入库={summary.RowsInserted}";
             }
             catch (OperationCanceledException)
             {
@@ -2435,7 +2435,7 @@ private Panel BuildNetworkPanel()
                 AppendDownloadLog(new DownloadLogEntry
                 {
                     Level = DownloadLogLevel.Error,
-                    Message = $"琛ラ綈澶辫触: {ex.Message}"
+                    Message = $"补齐失败: {ex.Message}"
                 });
             }
         }

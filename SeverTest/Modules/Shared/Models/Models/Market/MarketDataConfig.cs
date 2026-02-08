@@ -107,7 +107,7 @@ namespace ServerTest.Models
                 TimeframeEnum.d3 => "3d",
                 TimeframeEnum.w1 => "1w",
                 TimeframeEnum.mo1 => "1mo",
-                _ => throw new ArgumentException($"??????????????????: {timeframe}")
+                _ => throw new ArgumentException($"不支持的周期: {timeframe}")
             };
         }
 
@@ -133,7 +133,7 @@ namespace ServerTest.Models
                 "3d" => 3L * 24 * 60 * 60 * 1000,
                 "1w" => 7L * 24 * 60 * 60 * 1000,
                 "1mo" => 30L * 24 * 60 * 60 * 1000,
-                _ => throw new ArgumentException($"??????????????????: {timeframe}")
+                _ => throw new ArgumentException($"不支持的周期: {timeframe}")
             };
         }
 

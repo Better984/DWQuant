@@ -1,12 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
 using ccxt;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using ServerTest.Infrastructure.Config;
 using ServerTest.Models;
 using ServerTest.Models.Indicator;
 using ServerTest.Models.Strategy;
@@ -23,31 +22,16 @@ namespace ServerTest.Modules.Backtest.Application
 {
     public sealed class BacktestRunner
     {
-        private const int DefaultBarCount = 1000;
-        private static readonly long MainLoopProgressIntervalTicks = System.Diagnostics.Stopwatch.Frequency / 2;
-        private static readonly long PositionProgressIntervalTicks = System.Diagnostics.Stopwatch.Frequency / 10;
-        private static readonly Regex SafeIdentifier = new("^[a-z0-9_]+$", RegexOptions.Compiled);
-        private static readonly string[] SupportedEquityGranularities = { "1m", "15m", "1h", "4h", "1d", "3d", "7d" };
-        private static readonly Dictionary<string, long> EquityGranularityToMs = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["1m"] = 60_000L,
-            ["15m"] = 15 * 60_000L,
-            ["1h"] = 60 * 60_000L,
-            ["4h"] = 4 * 60 * 60_000L,
-            ["1d"] = 24 * 60 * 60_000L,
-            ["3d"] = 3 * 24 * 60 * 60_000L,
-            ["7d"] = 7 * 24 * 60 * 60_000L
-        };
-
         private readonly HistoricalMarketDataRepository _repository;
         private readonly HistoricalMarketDataCache _historicalCache;
         private readonly IMarketDataProvider _marketDataProvider;
         private readonly ContractDetailsCacheService _contractCache;
         private readonly IStrategyRuntimeTemplateProvider _templateProvider;
-        private readonly RuntimeQueueOptions _queueOptions;
         private readonly HistoricalMarketDataOptions _historyOptions;
+        private readonly BacktestMainLoop _mainLoop;
+        private readonly BacktestObjectPoolManager _objectPoolManager;
+        private readonly ServerConfigStore _configStore;
         private readonly BacktestProgressPushService _progressPushService;
-        private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger<BacktestRunner> _logger;
 
         // 统一回测日志前缀，便于排查性能问题
@@ -66,12 +50,12 @@ namespace ServerTest.Modules.Backtest.Application
             var logic = config?.Logic;
             if (logic == null)
             {
-                return "logic=null";
+                return "逻辑配置=空";
             }
 
             var entry = BuildBranchSummary(logic.Entry?.Long);
             var exit = BuildBranchSummary(logic.Exit?.Long);
-            return $"entry={entry} exit={exit}";
+            return $"开仓={entry} 平仓={exit}";
         }
 
         private static string BuildBranchSummary(StrategyLogicBranch? branch)
@@ -108,17 +92,7 @@ namespace ServerTest.Modules.Backtest.Application
             }
 
             var actionCount = branch.OnPass?.Conditions?.Count ?? 0;
-            return $"containers={containerCount} groups={groupCount} conditions={conditionCount} actions={actionCount} enabled={branch.Enabled}";
-        }
-
-        private static long ToMs(long ticks)
-        {
-            if (ticks <= 0)
-            {
-                return 0;
-            }
-
-            return (long)(ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+            return $"容器数={containerCount} 分组数={groupCount} 条件数={conditionCount} 动作数={actionCount} 已启用={branch.Enabled}";
         }
 
         private static bool ShouldPublishProgress(ref long nextTick, long intervalTicks)
@@ -133,160 +107,17 @@ namespace ServerTest.Modules.Backtest.Application
             return true;
         }
 
-        private enum LogicBranchKind
-        {
-            Entry,
-            Exit
-        }
-
-        private sealed class LogicTiming
-        {
-            public long ExitTicks { get; set; }
-            public long EntryTicks { get; set; }
-            public long EntryFilterTicks { get; set; }
-            public long ExitCheckTicks { get; set; }
-            public long EntryCheckTicks { get; set; }
-            public long ExitActionTicks { get; set; }
-            public long EntryActionTicks { get; set; }
-
-            public void AddBranch(LogicBranchKind kind, long ticks)
-            {
-                if (kind == LogicBranchKind.Exit)
-                {
-                    ExitTicks += ticks;
-                }
-                else
-                {
-                    EntryTicks += ticks;
-                }
-            }
-
-            public void AddCheck(LogicBranchKind kind, long ticks)
-            {
-                if (kind == LogicBranchKind.Exit)
-                {
-                    ExitCheckTicks += ticks;
-                }
-                else
-                {
-                    EntryCheckTicks += ticks;
-                }
-            }
-
-            public void AddAction(LogicBranchKind kind, long ticks)
-            {
-                if (kind == LogicBranchKind.Exit)
-                {
-                    ExitActionTicks += ticks;
-                }
-                else
-                {
-                    EntryActionTicks += ticks;
-                }
-            }
-        }
-
-        private sealed class EquityCurveAggregator
-        {
-            private readonly long _intervalMs;
-            private readonly List<BacktestEquityPoint> _points;
-            private BacktestEquityPoint? _previousPoint;
-            private BacktestEquityPoint? _bucketLastPoint;
-            private decimal _bucketStartRealized;
-            private decimal _bucketStartUnrealized;
-            private long _bucketStart;
-            private bool _hasBucket;
-
-            public EquityCurveAggregator(long intervalMs, int totalBarsHint)
-            {
-                _intervalMs = intervalMs <= 0 ? 60_000L : intervalMs;
-                var divider = Math.Max(1L, _intervalMs / 60_000L);
-                var estimatedCount = totalBarsHint > 0
-                    ? (int)Math.Min(totalBarsHint, totalBarsHint / divider + 4)
-                    : 16;
-                _points = new List<BacktestEquityPoint>(Math.Max(16, estimatedCount));
-            }
-
-            public void Add(BacktestEquityPoint point)
-            {
-                var bucketStart = AlignBucketStart(point.Timestamp, _intervalMs);
-                if (!_hasBucket)
-                {
-                    StartBucket(bucketStart, point);
-                    _previousPoint = point;
-                    return;
-                }
-
-                if (bucketStart != _bucketStart)
-                {
-                    FlushBucket();
-                    StartBucket(bucketStart, point);
-                    _previousPoint = point;
-                    return;
-                }
-
-                _bucketLastPoint = point;
-                _previousPoint = point;
-            }
-
-            public List<BacktestEquityPoint> Build()
-            {
-                FlushBucket();
-                return _points;
-            }
-
-            private void StartBucket(long bucketStart, BacktestEquityPoint point)
-            {
-                _bucketStart = bucketStart;
-                _bucketLastPoint = point;
-                _hasBucket = true;
-
-                if (_previousPoint == null)
-                {
-                    // 第一桶以 0 作为起点，便于直接观察回测起始后的区间变化。
-                    _bucketStartRealized = 0m;
-                    _bucketStartUnrealized = 0m;
-                }
-                else
-                {
-                    _bucketStartRealized = _previousPoint.RealizedPnl;
-                    _bucketStartUnrealized = _previousPoint.UnrealizedPnl;
-                }
-            }
-
-            private void FlushBucket()
-            {
-                if (!_hasBucket || _bucketLastPoint == null)
-                {
-                    return;
-                }
-
-                var last = _bucketLastPoint;
-                _points.Add(new BacktestEquityPoint
-                {
-                    Timestamp = last.Timestamp,
-                    Equity = last.Equity,
-                    RealizedPnl = last.RealizedPnl,
-                    UnrealizedPnl = last.UnrealizedPnl,
-                    PeriodRealizedPnl = last.RealizedPnl - _bucketStartRealized,
-                    PeriodUnrealizedPnl = last.UnrealizedPnl - _bucketStartUnrealized
-                });
-
-                _bucketLastPoint = null;
-                _hasBucket = false;
-            }
-        }
-
         public BacktestRunner(
             HistoricalMarketDataRepository repository,
             HistoricalMarketDataCache historicalCache,
             IMarketDataProvider marketDataProvider,
             ContractDetailsCacheService contractCache,
             IStrategyRuntimeTemplateProvider templateProvider,
-            IOptions<RuntimeQueueOptions> queueOptions,
             IOptions<HistoricalMarketDataOptions> historyOptions,
+            BacktestMainLoop mainLoop,
+            BacktestObjectPoolManager objectPoolManager,
+            ServerConfigStore configStore,
             BacktestProgressPushService progressPushService,
-            ILoggerFactory loggerFactory,
             ILogger<BacktestRunner> logger)
         {
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -294,10 +125,11 @@ namespace ServerTest.Modules.Backtest.Application
             _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _contractCache = contractCache ?? throw new ArgumentNullException(nameof(contractCache));
             _templateProvider = templateProvider;
-            _queueOptions = queueOptions?.Value ?? new RuntimeQueueOptions();
             _historyOptions = historyOptions?.Value ?? new HistoricalMarketDataOptions();
+            _mainLoop = mainLoop ?? throw new ArgumentNullException(nameof(mainLoop));
+            _objectPoolManager = objectPoolManager ?? throw new ArgumentNullException(nameof(objectPoolManager));
+            _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
             _progressPushService = progressPushService ?? throw new ArgumentNullException(nameof(progressPushService));
-            _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -318,42 +150,23 @@ namespace ServerTest.Modules.Backtest.Application
                 throw new ArgumentNullException(nameof(config));
             }
 
-            var trade = config.Trade ?? throw new InvalidOperationException("策略配置缺少 Trade 信息");
-            var exchange = MarketDataKeyNormalizer.NormalizeExchange(
-                !string.IsNullOrWhiteSpace(request.Exchange) ? request.Exchange : trade.Exchange);
-            if (string.IsNullOrWhiteSpace(exchange))
-            {
-                throw new InvalidOperationException("交易所不能为空");
-            }
-
-            var timeframe = MarketDataKeyNormalizer.NormalizeTimeframe(
-                !string.IsNullOrWhiteSpace(request.Timeframe)
-                    ? request.Timeframe
-                    : MarketDataKeyNormalizer.TimeframeFromSeconds(trade.TimeframeSec));
-            if (string.IsNullOrWhiteSpace(timeframe))
-            {
-                throw new InvalidOperationException("策略周期不能为空");
-            }
-
-            var timeframeMs = MarketDataConfig.TimeframeToMs(timeframe);
-            var symbols = NormalizeSymbols(request.Symbols, trade.Symbol);
-            if (symbols.Count == 0)
-            {
-                throw new InvalidOperationException("回测标的不能为空");
-            }
-
-            var (startTime, endTime) = ParseRange(request.StartTime, request.EndTime);
-            var useRange = startTime.HasValue || endTime.HasValue;
-            if (useRange && (!startTime.HasValue || !endTime.HasValue))
-            {
-                throw new InvalidOperationException("起止时间需同时提供，或改用 BarCount");
-            }
-
-            var barCount = ResolveBarCount(useRange, request.BarCount);
-
-            var output = request.Output ?? new BacktestOutputOptions();
-            var (equityCurveGranularity, equityCurveGranularityMs) = ResolveEquityCurveGranularity(output.EquityCurveGranularity);
-            var runtimeConfig = request.Runtime ?? config.Runtime;
+            var parseSw = System.Diagnostics.Stopwatch.StartNew();
+            // 委托给 BacktestParameterParser 解析参数
+            var maxQueryBars = _historyOptions.MaxQueryBars > 0 ? _historyOptions.MaxQueryBars : 1000;
+            var ctx = BacktestParameterParser.Parse(request, config, maxQueryBars);
+            var exchange = ctx.Exchange;
+            var timeframe = ctx.Timeframe;
+            var timeframeMs = ctx.TimeframeMs;
+            var symbols = ctx.Symbols;
+            var startTime = ctx.StartTime;
+            var endTime = ctx.EndTime;
+            var useRange = ctx.UseRange;
+            var barCount = ctx.BarCount;
+            var output = ctx.Output;
+            var equityCurveGranularity = ctx.EquityCurveGranularity;
+            var equityCurveGranularityMs = ctx.EquityCurveGranularityMs;
+            var runtimeConfig = ctx.RuntimeConfig;
+            parseSw.Stop();
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
@@ -368,20 +181,22 @@ namespace ServerTest.Modules.Backtest.Application
                 .ConfigureAwait(false);
 
             LogSystemInfo(
-                "回测开始: exchange={Exchange} timeframe={Timeframe} symbols={Symbols} range={Range} bars={Bars}",
+                "回测开始：交易所={Exchange} 周期={Timeframe} 标的={Symbols} 回测范围={Range} K线数量={Bars}",
                 exchange,
                 timeframe,
                 string.Join(",", symbols),
-                useRange ? $"{startTime:yyyy-MM-dd HH:mm:ss}~{endTime:yyyy-MM-dd HH:mm:ss}" : "BarCount",
+                useRange ? $"{startTime:yyyy-MM-dd HH:mm:ss}~{endTime:yyyy-MM-dd HH:mm:ss}" : $"最近{barCount}根K线",
                 barCount);
             LogSystemInfo(
-                "参数解析完成: useRange={UseRange} outputTrades={IncludeTrades} outputEquity={IncludeEquity} outputEvents={IncludeEvents} useRuntimeGate={UseRuntimeGate} equityGranularity={Granularity}",
+                "参数解析完成：范围模式={UseRange} 输出交易明细={IncludeTrades} 输出资金曲线={IncludeEquity} 输出事件={IncludeEvents} 启用运行时间门禁={UseRuntimeGate} 资金曲线粒度={Granularity} 参数阶段耗时={Elapsed}ms 累计耗时={TotalElapsed}ms",
                 useRange,
                 output.IncludeTrades,
                 output.IncludeEquityCurve,
                 output.IncludeEvents,
                 request.UseStrategyRuntime,
-                equityCurveGranularity);
+                equityCurveGranularity,
+                parseSw.ElapsedMilliseconds,
+                stopwatch.ElapsedMilliseconds);
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
@@ -411,20 +226,21 @@ namespace ServerTest.Modules.Backtest.Application
             }
             var totalIndicatorRequests = symbolRuntimes.Values.Sum(r => r.IndicatorRequests.Count);
             LogSystemInfo(
-                "策略实例构建完成: symbols={Symbols} indicatorRequests={IndicatorRequests} 耗时={Elapsed}ms",
+                "策略实例构建完成：标的数={Symbols} 指标请求数={IndicatorRequests} 阶段耗时={Elapsed}ms 平均每标的耗时={AvgElapsed}ms",
                 symbolRuntimes.Count,
                 totalIndicatorRequests,
-                buildRuntimeSw.ElapsedMilliseconds);
+                buildRuntimeSw.ElapsedMilliseconds,
+                symbolRuntimes.Count > 0 ? buildRuntimeSw.ElapsedMilliseconds / (decimal)symbolRuntimes.Count : 0m);
             foreach (var runtime in symbolRuntimes.Values)
             {
                 LogSystemInfo(
-                    "运行时间配置: symbol={Symbol} type={Type} policy={Policy} summary={Summary}",
+                    "运行时间配置：标的={Symbol} 调度类型={Type} 门禁策略={Policy} 配置摘要={Summary}",
                     runtime.Symbol,
                     runtime.RuntimeSchedule.ScheduleType,
                     runtime.RuntimeSchedule.Policy,
                     runtime.RuntimeSchedule.Summary);
                 LogSystemInfo(
-                    "策略结构: symbol={Symbol} {Summary}",
+                    "策略结构：标的={Symbol} {Summary}",
                     runtime.Symbol,
                     BuildLogicSummary(runtime.Strategy.StrategyConfig));
             }
@@ -445,43 +261,56 @@ namespace ServerTest.Modules.Backtest.Application
             var warmupByTimeframe = BuildWarmupMap(sampleRequests);
             var requiredTimeframes = BuildRequiredTimeframes(sampleRequests, timeframe);
 
+            // 使用 BacktestDataLoader 加载 K 线数据
+            var dataLoader = new BacktestDataLoader(
+                _repository, _historicalCache, _marketDataProvider,
+                _historyOptions.MaxQueryBars, _logger);
+
             var series = new Dictionary<string, List<OHLCV>>();
             var drivingTimestampsBySymbol = new Dictionary<string, List<long>>(StringComparer.OrdinalIgnoreCase);
+            var loadPrimaryStageSw = System.Diagnostics.Stopwatch.StartNew();
+            var loadedPrimaryBars = 0L;
+            var loadedDrivingBars = 0L;
 
             foreach (var runtime in symbolRuntimes.Values)
             {
                 var warmupBars = warmupByTimeframe.TryGetValue(timeframe, out var warmup) ? warmup : 0;
                 var loadSw = System.Diagnostics.Stopwatch.StartNew();
-                var bars = await LoadPrimaryBarsAsync(
-                    exchange,
-                    runtime.Symbol,
-                    timeframe,
-                    startTime,
-                    endTime,
-                    barCount,
-                    warmupBars,
-                    ct);
+                var bars = await dataLoader.LoadPrimaryBarsAsync(
+                    exchange, runtime.Symbol, timeframe,
+                    startTime, endTime, barCount, warmupBars, ct);
                 loadSw.Stop();
+                loadedPrimaryBars += bars.Count;
                 LogSystemInfo(
-                    "加载主周期K线: symbol={Symbol} timeframe={Timeframe} bars={Bars} warmup={Warmup} 耗时={Elapsed}ms",
-                    runtime.Symbol,
-                    timeframe,
-                    bars.Count,
-                    warmupBars,
-                    loadSw.ElapsedMilliseconds);
+                    "加载主周期K线：标的={Symbol} 周期={Timeframe} 原始K线={Bars} 预热K线={Warmup} 阶段耗时={Elapsed}ms 累计已加载K线={LoadedBars}",
+                    runtime.Symbol, timeframe, bars.Count, warmupBars, loadSw.ElapsedMilliseconds, loadedPrimaryBars);
 
                 if (bars.Count == 0)
-                {
                     LogSystemWarning("回测标的无主周期K线: {Symbol}", runtime.Symbol);
-                }
 
                 series[BacktestMarketDataProvider.BuildKey(exchange, runtime.Symbol, timeframe)] = bars;
-                var drivingBars = SelectDrivingBars(bars, startTime, endTime, barCount);
-                drivingTimestampsBySymbol[runtime.Symbol] = drivingBars
-                    .Select(b => (long)(b.timestamp ?? 0))
-                    .Where(ts => ts > 0)
-                    .ToList();
+                var drivingBars = BacktestDataLoader.SelectDrivingBars(bars, startTime, endTime, barCount);
+                loadedDrivingBars += drivingBars.Count;
+                var symbolDrivingTimestamps = new List<long>(drivingBars.Count);
+                foreach (var bar in drivingBars)
+                {
+                    var timestamp = (long)(bar.timestamp ?? 0);
+                    if (timestamp > 0)
+                    {
+                        symbolDrivingTimestamps.Add(timestamp);
+                    }
+                }
+
+                drivingTimestampsBySymbol[runtime.Symbol] = symbolDrivingTimestamps;
             }
+            loadPrimaryStageSw.Stop();
+            LogSystemInfo(
+                "主周期K线阶段完成：标的数={Symbols} 原始K线总数={PrimaryBars} 驱动K线总数={DrivingBars} 阶段耗时={Elapsed}ms 平均每标的耗时={AvgElapsed}ms",
+                symbolRuntimes.Count,
+                loadedPrimaryBars,
+                loadedDrivingBars,
+                loadPrimaryStageSw.ElapsedMilliseconds,
+                symbolRuntimes.Count > 0 ? loadPrimaryStageSw.ElapsedMilliseconds / (decimal)symbolRuntimes.Count : 0m);
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
@@ -496,19 +325,27 @@ namespace ServerTest.Modules.Backtest.Application
                 .ConfigureAwait(false);
 
             var intersectionSw = System.Diagnostics.Stopwatch.StartNew();
-            var drivingTimestamps = BuildIntersection(drivingTimestampsBySymbol.Values);
+            var drivingTimestamps = BacktestDataLoader.BuildIntersection(drivingTimestampsBySymbol.Values, _objectPoolManager);
             intersectionSw.Stop();
+            var intersectionStart = drivingTimestamps.Count > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(drivingTimestamps[0]).ToString("yyyy-MM-dd HH:mm:ss")
+                : "-";
+            var intersectionEnd = drivingTimestamps.Count > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(drivingTimestamps[^1]).ToString("yyyy-MM-dd HH:mm:ss")
+                : "-";
             LogSystemInfo(
-                "交集时间轴构建完成: bars={Bars} symbols={Symbols} 耗时={Elapsed}ms",
+                "交集时间轴构建完成：交集K线数={Bars} 标的数={Symbols} 起始时间={Start} 结束时间={End} 阶段耗时={Elapsed}ms",
                 drivingTimestamps.Count,
                 symbols.Count,
+                intersectionStart,
+                intersectionEnd,
                 intersectionSw.ElapsedMilliseconds);
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
                     "build_intersection",
                     "构建交集时间轴",
-                    $"交集时间轴构建完成，bars={drivingTimestamps.Count}",
+                    $"交集时间轴构建完成，交集K线数={drivingTimestamps.Count}",
                     drivingTimestamps.Count,
                     drivingTimestamps.Count,
                     intersectionSw.ElapsedMilliseconds,
@@ -517,7 +354,13 @@ namespace ServerTest.Modules.Backtest.Application
                 .ConfigureAwait(false);
             if (drivingTimestamps.Count == 0)
             {
-                LogSystemWarning("回测时间轴为空，直接返回空结果");
+                LogSystemWarning(
+                    "交集时间轴为空，返回空结果：参数={ParseElapsed}ms 构建策略={BuildElapsed}ms 主周期加载={LoadPrimaryElapsed}ms 交集构建={IntersectionElapsed}ms 累计={TotalElapsed}ms",
+                    parseSw.ElapsedMilliseconds,
+                    buildRuntimeSw.ElapsedMilliseconds,
+                    loadPrimaryStageSw.ElapsedMilliseconds,
+                    intersectionSw.ElapsedMilliseconds,
+                    stopwatch.ElapsedMilliseconds);
                 stopwatch.Stop();
                 await _progressPushService
                     .PublishStageAsync(
@@ -547,28 +390,23 @@ namespace ServerTest.Modules.Backtest.Application
 
             var drivingStart = drivingTimestamps[0];
             var drivingEnd = drivingTimestamps[^1];
-            var equityCurveCollectors = output.IncludeEquityCurve
-                ? symbolRuntimes.Values.ToDictionary(
-                    r => r.Symbol,
-                    _ => new EquityCurveAggregator(equityCurveGranularityMs, drivingTimestamps.Count),
-                    StringComparer.OrdinalIgnoreCase)
-                : null;
 
+            var supplementarySeriesBefore = series.Count;
+            var supplementaryBarsBefore = series.Values.Sum(item => item.Count);
             var supplementSw = System.Diagnostics.Stopwatch.StartNew();
-            await LoadSupplementaryTimeframesAsync(
-                exchange,
-                requiredTimeframes,
-                symbols,
-                drivingStart,
-                drivingEnd,
-                warmupByTimeframe,
-                series,
-                ct);
+            await dataLoader.LoadSupplementaryTimeframesAsync(
+                exchange, requiredTimeframes, symbols,
+                drivingStart, drivingEnd, warmupByTimeframe, series, ct);
             supplementSw.Stop();
+            var supplementarySeriesAfter = series.Count;
+            var supplementaryBarsAfter = series.Values.Sum(item => item.Count);
             LogSystemInfo(
-                "补充周期加载完成: timeframes={Timeframes} series={SeriesCount} 耗时={Elapsed}ms",
+                "补充周期加载完成：补充周期={Timeframes} 新增序列={AddedSeries} 总序列={SeriesCount} 新增K线={AddedBars} 总K线={TotalBars} 阶段耗时={Elapsed}ms",
                 requiredTimeframes.Count == 0 ? "-" : string.Join(",", requiredTimeframes),
-                series.Count,
+                supplementarySeriesAfter - supplementarySeriesBefore,
+                supplementarySeriesAfter,
+                supplementaryBarsAfter - supplementaryBarsBefore,
+                supplementaryBarsAfter,
                 supplementSw.ElapsedMilliseconds);
             await _progressPushService
                 .PublishStageAsync(
@@ -584,216 +422,75 @@ namespace ServerTest.Modules.Backtest.Application
                 .ConfigureAwait(false);
 
             var provider = new BacktestMarketDataProvider(series);
-            var indicatorEngine = new IndicatorEngine(
-                provider,
-                _loggerFactory.CreateLogger<IndicatorEngine>(),
-                new OptionsWrapper<RuntimeQueueOptions>(_queueOptions));
-            var valueResolver = new IndicatorValueResolver(
-                provider,
-                indicatorEngine,
-                _loggerFactory.CreateLogger<IndicatorValueResolver>());
-            var conditionCache = new ConditionCacheService();
-            var conditionEvaluator = new ConditionEvaluator(conditionCache);
-
-            var actionExecutor = new BacktestActionExecutor(
-                symbolRuntimes.ToDictionary(k => k.Key, v => v.Value.State, StringComparer.OrdinalIgnoreCase));
-
-            var loopSw = System.Diagnostics.Stopwatch.StartNew();
-            var logicTiming = new LogicTiming();
-            var loopTotalTicks = 0L;
-            var resolveTicks = 0L;
-            var updateTicks = 0L;
-            var riskTicks = 0L;
-            var contextTicks = 0L;
-            var runtimeTicks = 0L;
-            var logicTicks = 0L;
-            var equityTicks = 0L;
-            var loopBars = 0L;
-            var loopSymbols = 0L;
-            var nextLoopProgressTick = System.Diagnostics.Stopwatch.GetTimestamp() + MainLoopProgressIntervalTicks;
+            var configuredExecutionMode = _configStore.GetString(
+                "Backtest:ExecutionModeDefault",
+                BacktestExecutionModes.BatchOpenClose);
+            var executionMode = ResolveExecutionMode(request.ExecutionMode, configuredExecutionMode);
+            LogSystemInfo(
+                "执行模式确定：请求模式={RequestMode} 默认模式={ConfiguredMode} 最终模式={ExecutionMode}",
+                string.IsNullOrWhiteSpace(request.ExecutionMode) ? "-" : request.ExecutionMode,
+                configuredExecutionMode,
+                executionMode);
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
-                    "main_loop",
-                    "执行主循环",
-                    "主循环开始",
-                    0,
-                    drivingTimestamps.Count,
-                    0,
-                    false,
-                    ct)
-                .ConfigureAwait(false);
-            foreach (var timestamp in drivingTimestamps)
-            {
-                var loopStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                if (!TryResolveBars(
-                        provider,
-                        exchange,
-                        timeframe,
-                        symbols,
-                        timestamp,
-                        out var mainBars,
-                        out var priceBars))
-                {
-                    continue;
-                }
-                resolveTicks += System.Diagnostics.Stopwatch.GetTimestamp() - loopStart;
-
-                foreach (var symbol in symbols)
-                {
-                    var symbolStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var runtime = symbolRuntimes[symbol];
-                    var bar = mainBars[symbol];
-                    var priceBar = priceBars[symbol];
-
-                    actionExecutor.UpdateCurrentBar(symbol, priceBar);
-                    updateTicks += System.Diagnostics.Stopwatch.GetTimestamp() - symbolStart;
-
-                    if (runtime.State.Position != null)
-                    {
-                        var riskStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        actionExecutor.TryProcessRisk(runtime.State, bar, timestamp);
-                        riskTicks += System.Diagnostics.Stopwatch.GetTimestamp() - riskStart;
-                    }
-
-                    if (runtime.IndicatorRequests.Count > 0)
-                    {
-                        var indicatorTask = new IndicatorTask(
-                            new MarketDataTask(exchange, symbol, timeframe, timestamp, true),
-                            runtime.IndicatorRequests);
-                        indicatorEngine.ProcessTaskNow(indicatorTask);
-                    }
-
-                    var contextStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var context = new StrategyExecutionContext(
-                        runtime.Strategy,
-                        new MarketDataTask(exchange, symbol, timeframe, timestamp, true),
-                        valueResolver,
-                        actionExecutor);
-                    contextTicks += System.Diagnostics.Stopwatch.GetTimestamp() - contextStart;
-
-                    var runtimeStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var runtimeGate = ResolveRuntimeGate(runtime, context.CurrentTime, output.IncludeEvents);
-                    runtimeTicks += System.Diagnostics.Stopwatch.GetTimestamp() - runtimeStart;
-                    var logicStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                    ExecuteLogic(context, runtimeGate, conditionEvaluator, logicTiming);
-                    logicTicks += System.Diagnostics.Stopwatch.GetTimestamp() - logicStart;
-
-                    if (output.IncludeEquityCurve)
-                    {
-                        var equityStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                        var equity = BuildEquityPoint(runtime, priceBar, request.InitialCapital, timestamp);
-                        equityCurveCollectors![runtime.Symbol].Add(equity);
-                        equityTicks += System.Diagnostics.Stopwatch.GetTimestamp() - equityStart;
-                    }
-
-                    loopSymbols++;
-                }
-
-                loopTotalTicks += System.Diagnostics.Stopwatch.GetTimestamp() - loopStart;
-                loopBars++;
-                if (ShouldPublishProgress(ref nextLoopProgressTick, MainLoopProgressIntervalTicks))
-                {
-                    await _progressPushService
-                        .PublishStageAsync(
-                            progressContext,
-                            "main_loop",
-                            "执行主循环",
-                            "主循环执行中",
-                            (int)loopBars,
-                            drivingTimestamps.Count,
-                            loopSw.ElapsedMilliseconds,
-                            false,
-                            ct)
-                        .ConfigureAwait(false);
-                }
-            }
-            loopSw.Stop();
-            LogSystemInfo(
-                "主循环拆分: bars={Bars} symbols={Symbols} totalMs={Total} resolveMs={Resolve} updateMs={Update} riskMs={Risk} contextMs={Context} runtimeMs={Runtime} logicMs={Logic} equityMs={Equity}",
-                loopBars,
-                loopSymbols,
-                ToMs(loopTotalTicks),
-                ToMs(resolveTicks),
-                ToMs(updateTicks),
-                ToMs(riskTicks),
-                ToMs(contextTicks),
-                ToMs(runtimeTicks),
-                ToMs(logicTicks),
-                ToMs(equityTicks));
-            LogSystemInfo(
-                "逻辑拆分: entryMs={Entry} exitMs={Exit} entryFilterMs={EntryFilter} entryCheckMs={EntryCheck} entryActionMs={EntryAction} exitCheckMs={ExitCheck} exitActionMs={ExitAction}",
-                ToMs(logicTiming.EntryTicks),
-                ToMs(logicTiming.ExitTicks),
-                ToMs(logicTiming.EntryFilterTicks),
-                ToMs(logicTiming.EntryCheckTicks),
-                ToMs(logicTiming.EntryActionTicks),
-                ToMs(logicTiming.ExitCheckTicks),
-                ToMs(logicTiming.ExitActionTicks));
-            LogSystemInfo(
-                "主循环完成: bars={Bars} symbols={Symbols} 耗时={Elapsed}ms",
-                drivingTimestamps.Count,
-                symbols.Count,
-                loopSw.ElapsedMilliseconds);
-            await _progressPushService
-                .PublishStageAsync(
-                    progressContext,
-                    "main_loop",
-                    "执行主循环",
-                    "主循环完成",
-                    drivingTimestamps.Count,
-                    drivingTimestamps.Count,
-                    loopSw.ElapsedMilliseconds,
+                    "execution_mode",
+                    "执行模式",
+                    $"当前执行模式：{executionMode}",
+                    null,
+                    null,
+                    stopwatch.ElapsedMilliseconds,
                     true,
                     ct)
                 .ConfigureAwait(false);
-            // 回测结束处理：按最后一根K线收盘价强制平仓
+
+            var mainLoopSw = System.Diagnostics.Stopwatch.StartNew();
+            var mainLoopResult = executionMode == BacktestExecutionModes.BatchOpenClose
+                ? await _mainLoop
+                    .ExecuteBatchOpenCloseAsync(
+                        exchange,
+                        timeframe,
+                        timeframeMs,
+                        symbols,
+                        drivingTimestamps,
+                        symbolRuntimes,
+                        provider,
+                        output,
+                        request.InitialCapital,
+                        equityCurveGranularityMs,
+                        progressContext,
+                        ct)
+                    .ConfigureAwait(false)
+                : await _mainLoop
+                    .ExecuteAsync(
+                        exchange,
+                        timeframe,
+                        timeframeMs,
+                        symbols,
+                        drivingTimestamps,
+                        symbolRuntimes,
+                        provider,
+                        output,
+                        request.InitialCapital,
+                        equityCurveGranularityMs,
+                        progressContext,
+                        ct)
+                    .ConfigureAwait(false);
+            mainLoopSw.Stop();
+            var equityCurvesBySymbol = mainLoopResult.EquityCurvesBySymbol;
+            var totalTradesAfterMainLoop = symbolRuntimes.Values.Sum(r => r.State.Trades.Count);
+            LogSystemInfo(
+                "核心执行阶段完成：执行模式={ExecutionMode} 交易笔数={Trades} 阶段耗时={Elapsed}ms 累计耗时={TotalElapsed}ms",
+                executionMode,
+                totalTradesAfterMainLoop,
+                mainLoopSw.ElapsedMilliseconds,
+                stopwatch.ElapsedMilliseconds);
+
             var finalizeSw = System.Diagnostics.Stopwatch.StartNew();
-            var lastTimestamp = drivingTimestamps[^1];
-            foreach (var runtime in symbolRuntimes.Values)
-            {
-                if (runtime.State.Position == null)
-                {
-                    continue;
-                }
-
-                if (!TryResolveBar(provider, exchange, "1m", runtime.Symbol, lastTimestamp, out var lastPriceBar) &&
-                    !TryResolveBar(provider, exchange, timeframe, runtime.Symbol, lastTimestamp, out lastPriceBar))
-                {
-                    continue;
-                }
-
-                var closePrice = Convert.ToDecimal(lastPriceBar.close ?? lastPriceBar.open ?? 0d);
-                if (closePrice <= 0)
-                {
-                    continue;
-                }
-
-                var orderSide = runtime.State.Position.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                    ? "sell"
-                    : "buy";
-                var execPrice = ApplySlippage(closePrice, orderSide, runtime.State.SlippageBps);
-                actionExecutor.ClosePosition(runtime.Symbol, execPrice, lastTimestamp, "End");
-
-                if (output.IncludeEquityCurve)
-                {
-                    var equity = BuildEquityPoint(runtime, lastPriceBar, request.InitialCapital, lastTimestamp);
-                    equityCurveCollectors![runtime.Symbol].Add(equity);
-                }
-            }
-
-            if (output.IncludeEquityCurve && equityCurveCollectors != null)
-            {
-                foreach (var runtime in symbolRuntimes.Values)
-                {
-                    runtime.Result.EquityCurve = equityCurveCollectors[runtime.Symbol].Build();
-                }
-            }
-
             var totalPositions = symbolRuntimes.Values.Sum(r => r.State.Trades.Count);
             var foundPositions = 0;
             var collectPositionsSw = System.Diagnostics.Stopwatch.StartNew();
-            var nextPositionProgressTick = System.Diagnostics.Stopwatch.GetTimestamp() + PositionProgressIntervalTicks;
+            var nextPositionProgressTick = System.Diagnostics.Stopwatch.GetTimestamp() + BacktestMainLoop.PositionProgressIntervalTicks;
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
@@ -813,9 +510,10 @@ namespace ServerTest.Modules.Backtest.Application
                 runtime.Result.InitialCapital = request.InitialCapital;
 
                 var symbolTrades = runtime.State.Trades;
+                runtime.Result.TradeSummary = BacktestStatisticsBuilder.BuildTradeSummary(symbolTrades);
                 if (output.IncludeTrades)
                 {
-                    runtime.Result.Trades = new List<BacktestTrade>(symbolTrades.Count);
+                    runtime.Result.TradesRaw = new List<string>(symbolTrades.Count);
                 }
 
                 var tradeChunk = new List<BacktestTrade>(128);
@@ -826,12 +524,12 @@ namespace ServerTest.Modules.Backtest.Application
 
                     if (output.IncludeTrades)
                     {
-                        runtime.Result.Trades.Add(closedTrade);
+                        runtime.Result.TradesRaw.Add(JsonConvert.SerializeObject(closedTrade));
                         tradeChunk.Add(closedTrade);
                     }
 
                     // 仓位汇总阶段按 0.1 秒推送进度，前端可先展示部分数据。
-                    if (ShouldPublishProgress(ref nextPositionProgressTick, PositionProgressIntervalTicks))
+                    if (ShouldPublishProgress(ref nextPositionProgressTick, BacktestMainLoop.PositionProgressIntervalTicks))
                     {
                         await _progressPushService
                             .PublishPositionsAsync(
@@ -869,12 +567,15 @@ namespace ServerTest.Modules.Backtest.Application
 
                 if (output.IncludeEvents)
                 {
-                    runtime.Result.Events = runtime.State.Events.ToList();
+                    runtime.Result.EventsRaw = BacktestStatisticsBuilder.SerializeToRawList(runtime.State.Events);
                 }
+                runtime.Result.EventSummary = BacktestStatisticsBuilder.BuildEventSummary(runtime.State.Events);
 
-                runtime.Result.Stats = BuildStats(
+                runtime.Result.Stats = BacktestStatisticsBuilder.BuildStats(
                     symbolTrades,
-                    output.IncludeEquityCurve ? runtime.Result.EquityCurve : null,
+                    output.IncludeEquityCurve && equityCurvesBySymbol != null && equityCurvesBySymbol.TryGetValue(runtime.Symbol, out var symbolCurve)
+                        ? symbolCurve
+                        : null,
                     request.InitialCapital);
             }
 
@@ -903,11 +604,12 @@ namespace ServerTest.Modules.Backtest.Application
                     true,
                     ct)
                 .ConfigureAwait(false);
+            collectPositionsSw.Stop();
 
             var totalInitial = request.InitialCapital * symbolRuntimes.Count;
             var allTrades = symbolRuntimes.Values.SelectMany(r => r.State.Trades).ToList();
-            var totalEquity = output.IncludeEquityCurve
-                ? BuildTotalEquityCurve(symbolRuntimes.Values.Select(r => r.Result.EquityCurve).ToList())
+            var totalEquity = output.IncludeEquityCurve && equityCurvesBySymbol != null
+                ? BacktestStatisticsBuilder.BuildTotalEquityCurve(equityCurvesBySymbol.Values.ToList())
                 : new List<BacktestEquityPoint>();
 
             stopwatch.Stop();
@@ -921,20 +623,30 @@ namespace ServerTest.Modules.Backtest.Application
                 EndTimestamp = drivingEnd,
                 TotalBars = drivingTimestamps.Count,
                 DurationMs = stopwatch.ElapsedMilliseconds,
-                TotalStats = BuildStats(allTrades, totalEquity, totalInitial),
+                TotalStats = BacktestStatisticsBuilder.BuildStats(allTrades, totalEquity, totalInitial),
                 Symbols = symbolRuntimes.Values.Select(r => r.Result).ToList()
             };
 
             LogSystemInfo(
-                "收尾统计完成: trades={Trades} 耗时={Elapsed}ms",
+                "收尾统计完成：交易笔数={Trades} 标的数={Symbols} 仓位汇总耗时={CollectElapsed}ms 收尾阶段耗时={Elapsed}ms",
                 allTrades.Count,
+                symbolRuntimes.Count,
+                collectPositionsSw.ElapsedMilliseconds,
                 finalizeSw.ElapsedMilliseconds);
             LogSystemInfo(
-                "回测完成: exchange={Exchange} timeframe={Timeframe} bars={Bars} trades={Trades}",
+                "回测完成：交易所={Exchange} 周期={Timeframe} 交集K线={Bars} 交易笔数={Trades} 总耗时={Elapsed}ms（参数解析={ParseElapsed}ms, 策略构建={BuildElapsed}ms, 主周期加载={LoadPrimaryElapsed}ms, 交集构建={IntersectionElapsed}ms, 补充周期={SupplementElapsed}ms, 核心执行={MainLoopElapsed}ms, 收尾阶段={FinalizeElapsed}ms）",
                 exchange,
                 timeframe,
                 result.TotalBars,
-                allTrades.Count);
+                allTrades.Count,
+                result.DurationMs,
+                parseSw.ElapsedMilliseconds,
+                buildRuntimeSw.ElapsedMilliseconds,
+                loadPrimaryStageSw.ElapsedMilliseconds,
+                intersectionSw.ElapsedMilliseconds,
+                supplementSw.ElapsedMilliseconds,
+                mainLoopSw.ElapsedMilliseconds,
+                finalizeSw.ElapsedMilliseconds);
             await _progressPushService
                 .PublishStageAsync(
                     progressContext,
@@ -950,36 +662,7 @@ namespace ServerTest.Modules.Backtest.Application
 
             return result;
         }
-        private sealed class SymbolRuntime
-        {
-            public SymbolRuntime(
-                string symbol,
-                StrategyModel strategy,
-                StrategyRuntimeSchedule runtimeSchedule,
-                BacktestActionExecutor.SymbolState state,
-                List<IndicatorRequest> indicatorRequests,
-                BacktestSymbolResult result,
-                bool useRuntimeGate)
-            {
-                Symbol = symbol;
-                Strategy = strategy;
-                RuntimeSchedule = runtimeSchedule;
-                State = state;
-                IndicatorRequests = indicatorRequests;
-                Result = result;
-                UseRuntimeGate = useRuntimeGate;
-            }
-
-            public string Symbol { get; }
-            public StrategyModel Strategy { get; }
-            public StrategyRuntimeSchedule RuntimeSchedule { get; }
-            public BacktestActionExecutor.SymbolState State { get; }
-            public List<IndicatorRequest> IndicatorRequests { get; }
-            public BacktestSymbolResult Result { get; }
-            public bool UseRuntimeGate { get; }
-        }
-
-        private Dictionary<string, SymbolRuntime> BuildSymbolRuntimes(
+        private Dictionary<string, BacktestSymbolRuntime> BuildSymbolRuntimes(
             BacktestRunRequest request,
             StrategyConfig templateConfig,
             string exchange,
@@ -988,7 +671,7 @@ namespace ServerTest.Modules.Backtest.Application
             StrategyRuntimeConfig? runtimeConfig,
             IReadOnlyList<string> symbols)
         {
-            var runtimes = new Dictionary<string, SymbolRuntime>(StringComparer.OrdinalIgnoreCase);
+            var runtimes = new Dictionary<string, BacktestSymbolRuntime>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var symbol in symbols)
             {
@@ -998,7 +681,7 @@ namespace ServerTest.Modules.Backtest.Application
                 if (!string.IsNullOrWhiteSpace(schedule.Error))
                 {
                     LogSystemWarning(
-                        "策略运行时间配置异常: symbol={Symbol} error={Error}",
+                        "策略运行时间配置异常：标的={Symbol} 错误={Error}",
                         symbol,
                         schedule.Error);
                 }
@@ -1018,6 +701,7 @@ namespace ServerTest.Modules.Backtest.Application
                     StopLossPct = stopLoss > 0 ? stopLoss : null,
                     TakeProfitPct = takeProfit > 0 ? takeProfit : null,
                     FeeRate = request.FeeRate,
+                    FundingRate = request.FundingRate,
                     SlippageBps = request.SlippageBps,
                     AutoReverse = request.AutoReverse,
                     ContractSize = contract?.ContractSize ?? 1m,
@@ -1029,7 +713,7 @@ namespace ServerTest.Modules.Backtest.Application
                     Symbol = symbol
                 };
 
-                runtimes[symbol] = new SymbolRuntime(
+                runtimes[symbol] = new BacktestSymbolRuntime(
                     symbol,
                     strategy,
                     schedule,
@@ -1148,1148 +832,51 @@ namespace ServerTest.Modules.Backtest.Application
             return false;
         }
 
-        private static List<string> NormalizeSymbols(IReadOnlyList<string>? symbols, string fallback)
+        private static string ResolveExecutionMode(string? requestMode, string? configuredMode)
         {
-            var list = new List<string>();
-            if (symbols != null && symbols.Count > 0)
+            var normalizedRequest = NormalizeExecutionMode(requestMode);
+            if (!string.IsNullOrWhiteSpace(normalizedRequest))
             {
-                list.AddRange(symbols);
-            }
-            else if (!string.IsNullOrWhiteSpace(fallback))
-            {
-                list.Add(fallback);
+                return normalizedRequest;
             }
 
-            return list
-                .Select(MarketDataKeyNormalizer.NormalizeSymbol)
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var normalizedConfigured = NormalizeExecutionMode(configuredMode);
+            if (!string.IsNullOrWhiteSpace(normalizedConfigured))
+            {
+                return normalizedConfigured;
+            }
+
+            return BacktestExecutionModes.BatchOpenClose;
         }
 
-        private static (DateTimeOffset? Start, DateTimeOffset? End) ParseRange(string? startRaw, string? endRaw)
+        private static string NormalizeExecutionMode(string? value)
         {
-            var start = ParseDateTime(startRaw, "开始时间");
-            var end = ParseDateTime(endRaw, "结束时间");
-
-            if (start.HasValue && end.HasValue && start.Value > end.Value)
+            if (string.IsNullOrWhiteSpace(value))
             {
-                throw new InvalidOperationException("开始时间不能晚于结束时间");
+                return string.Empty;
             }
 
-            return (start, end);
-        }
-
-        private static DateTimeOffset? ParseDateTime(string? raw, string fieldName)
-        {
-            if (string.IsNullOrWhiteSpace(raw))
+            var normalized = value.Trim().ToLowerInvariant();
+            return normalized switch
             {
-                return null;
-            }
-
-            if (!DateTime.TryParse(raw, out var parsed))
-            {
-                throw new InvalidOperationException($"{fieldName}格式错误，请使用 yyyy-MM-dd HH:mm:ss");
-            }
-
-            if (parsed.Kind == DateTimeKind.Unspecified)
-            {
-                parsed = DateTime.SpecifyKind(parsed, DateTimeKind.Local);
-            }
-
-            return new DateTimeOffset(parsed);
-        }
-
-        private int ResolveBarCount(bool useRange, int? barCount)
-        {
-            if (useRange)
-            {
-                return Math.Max(1, barCount ?? 0);
-            }
-
-            var max = _historyOptions.MaxQueryBars > 0 ? _historyOptions.MaxQueryBars : DefaultBarCount;
-            var fallback = Math.Min(DefaultBarCount, max);
-            var count = barCount.HasValue && barCount.Value > 0 ? barCount.Value : fallback;
-            return Math.Max(1, count);
-        }
-        private async Task<List<OHLCV>> LoadPrimaryBarsAsync(
-            string exchange,
-            string symbol,
-            string timeframe,
-            DateTimeOffset? startTime,
-            DateTimeOffset? endTime,
-            int barCount,
-            int warmupBars,
-            CancellationToken ct)
-        {
-            if (startTime.HasValue && endTime.HasValue)
-            {
-                var startMs = startTime.Value.ToUnixTimeMilliseconds();
-                var endMs = endTime.Value.ToUnixTimeMilliseconds();
-                var tfMs = MarketDataConfig.TimeframeToMs(timeframe);
-                var warmupStart = Math.Max(0, startMs - warmupBars * tfMs);
-                return await LoadBarsByRangeAsync(exchange, symbol, timeframe, warmupStart, endMs, ct);
-            }
-
-            var count = Math.Max(1, barCount + Math.Max(0, warmupBars));
-            return await LoadBarsByCountAsync(exchange, symbol, timeframe, null, count, ct);
-        }
-
-        private async Task LoadSupplementaryTimeframesAsync(
-            string exchange,
-            IReadOnlyCollection<string> timeframes,
-            IReadOnlyList<string> symbols,
-            long drivingStart,
-            long drivingEnd,
-            IReadOnlyDictionary<string, int> warmupByTimeframe,
-            Dictionary<string, List<OHLCV>> series,
-            CancellationToken ct)
-        {
-            foreach (var timeframe in timeframes)
-            {
-                foreach (var symbol in symbols)
-                {
-                    var key = BacktestMarketDataProvider.BuildKey(exchange, symbol, timeframe);
-                    if (series.ContainsKey(key))
-                    {
-                        continue;
-                    }
-
-                    var tfMs = MarketDataConfig.TimeframeToMs(timeframe);
-                    var warmupBars = warmupByTimeframe.TryGetValue(timeframe, out var warmup) ? warmup : 0;
-                    var startMs = Math.Max(0, drivingStart - warmupBars * tfMs);
-                    var endMs = drivingEnd;
-
-                    var bars = await LoadBarsByRangeAsync(exchange, symbol, timeframe, startMs, endMs, ct);
-                    series[key] = bars;
-                }
-            }
-        }
-
-        private async Task<List<OHLCV>> LoadBarsByRangeAsync(
-            string exchange,
-            string symbol,
-            string timeframe,
-            long startMs,
-            long endMs,
-            CancellationToken ct)
-        {
-            // 统一规范化 key，确保缓存键与表名一致。
-            var exchangeKey = MarketDataKeyNormalizer.NormalizeExchange(exchange);
-            var timeframeKey = MarketDataKeyNormalizer.NormalizeTimeframe(timeframe);
-            var symbolKey = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
-
-            if (_historicalCache.TryGetHistoryFromCache(
-                    exchangeKey,
-                    timeframeKey,
-                    symbolKey,
-                    startMs,
-                    endMs,
-                    null,
-                    out var cachedBars,
-                    out var cacheMissReason))
-            {
-                LogSystemInfo(
-                    "历史行情缓存命中(区间): exchange={Exchange} symbol={Symbol} timeframe={Timeframe} startMs={Start} endMs={End} bars={Bars}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    startMs,
-                    endMs,
-                    cachedBars.Count);
-                return cachedBars;
-            }
-
-            LogSystemInfo(
-                "历史行情缓存未命中(区间)，回退历史行情表: exchange={Exchange} symbol={Symbol} timeframe={Timeframe} startMs={Start} endMs={End} reason={Reason}",
-                exchangeKey,
-                symbolKey,
-                timeframeKey,
-                startMs,
-                endMs,
-                cacheMissReason);
-
-            var tableName = BuildTableName(exchangeKey, symbolKey, timeframeKey);
-            var pageSize = ResolvePageSize();
-            var result = new List<OHLCV>();
-            var cursor = startMs;
-            var pageCount = 0;
-            var rowCount = 0;
-            var loadSw = System.Diagnostics.Stopwatch.StartNew();
-
-            while (cursor <= endMs)
-            {
-                var rows = await _repository.QueryRangeAsync(tableName, cursor, endMs, pageSize, ct)
-                    .ConfigureAwait(false);
-                if (rows.Count == 0)
-                {
-                    break;
-                }
-
-                result.AddRange(rows.Select(ToOhlcv));
-                pageCount++;
-                rowCount += rows.Count;
-
-                var lastTs = rows[^1].OpenTime;
-                if (lastTs >= endMs || rows.Count < pageSize)
-                {
-                    break;
-                }
-
-                cursor = lastTs + 1;
-            }
-
-            loadSw.Stop();
-            LogSystemInfo(
-                "区间查询完成: table={Table} startMs={Start} endMs={End} rows={Rows} pages={Pages} 耗时={Elapsed}ms",
-                tableName,
-                startMs,
-                endMs,
-                rowCount,
-                pageCount,
-                loadSw.ElapsedMilliseconds);
-            return result;
-        }
-
-        private async Task<List<OHLCV>> LoadBarsByCountAsync(
-            string exchange,
-            string symbol,
-            string timeframe,
-            long? endMs,
-            int count,
-            CancellationToken ct)
-        {
-            // 统一规范化 key，避免大小写/格式差异
-            var exchangeKey = MarketDataKeyNormalizer.NormalizeExchange(exchange);
-            var timeframeKey = MarketDataKeyNormalizer.NormalizeTimeframe(timeframe);
-            var symbolKey = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
-            var safeCount = Math.Max(1, count);
-            var timeframeMs = MarketDataConfig.TimeframeToMs(timeframeKey);
-            var requestEndMs = endMs;
-            var requestStartMs = requestEndMs.HasValue
-                ? requestEndMs.Value - Math.Max(0L, (long)(safeCount - 1) * timeframeMs)
-                : (long?)null;
-
-            // 1. 优先从历史行情缓存中截取，命中后不读表。
-            if (_historicalCache.TryGetHistoryFromCache(
-                    exchangeKey,
-                    timeframeKey,
-                    symbolKey,
-                    null,
-                    endMs,
-                    safeCount,
-                    out var cachedBars,
-                    out var cacheMissReason))
-            {
-                if (cachedBars.Count >= safeCount)
-                {
-                    LogSystemInfo(
-                        "历史行情缓存命中(数量): exchange={Exchange} symbol={Symbol} timeframe={Timeframe} endMs={End} requested={Requested} actual={Actual}",
-                        exchangeKey,
-                        symbolKey,
-                        timeframeKey,
-                        endMs ?? 0,
-                        safeCount,
-                        cachedBars.Count);
-                    return cachedBars;
-                }
-
-                LogSystemInfo(
-                    "历史行情缓存数据不足(数量)，回退历史行情系统/历史行情表: exchange={Exchange} symbol={Symbol} timeframe={Timeframe} endMs={End} requested={Requested} actual={Actual}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    endMs ?? 0,
-                    safeCount,
-                    cachedBars.Count);
-            }
-            else
-            {
-                LogSystemInfo(
-                    "历史行情缓存未命中(数量): exchange={Exchange} symbol={Symbol} timeframe={Timeframe} endMs={End} requested={Requested} reason={Reason}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    endMs ?? 0,
-                    safeCount,
-                    cacheMissReason);
-            }
-
-            // 2. 历史行情缓存未命中时，尝试“历史行情系统”（IMarketDataProvider，例如 MarketDataEngine 缓存）
-            //    - 仅当返回数量满足请求时才视为命中，避免因为缓存长度不足导致回测截断。
-            List<OHLCV>? providerBars = null;
-            try
-            {
-                providerBars = _marketDataProvider.GetHistoryKlines(
-                    exchangeKey,
-                    timeframeKey,
-                    symbolKey,
-                    endMs,
-                    safeCount);
-            }
-            catch (Exception ex)
-            {
-                // 历史行情系统异常时，记录警告日志，继续回退到读表逻辑。
-                LogSystemWarning(
-                    "历史行情系统读取异常，回退到历史行情表: exchange={Exchange} symbol={Symbol} timeframe={Timeframe} error={Error}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    ex.Message);
-            }
-
-            if (providerBars != null && providerBars.Count >= safeCount)
-            {
-                LogSystemInfo(
-                    "历史行情系统命中: exchange={Exchange} symbol={Symbol} timeframe={Timeframe} bars={Bars} source={Source} range={Range}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    providerBars.Count,
-                    "MarketDataEngine",
-                    BuildRangeText(ResolveTimestampMs(providerBars[0]), ResolveTimestampMs(providerBars[^1])));
-                // IMarketDataProvider 约定按时间升序返回，无需反转。
-                return providerBars;
-            }
-
-            if (providerBars != null && providerBars.Count > 0 && providerBars.Count < safeCount)
-            {
-                // 有部分数据但不足以支撑回测完整区间，记录详细缺口后回退到历史行情表。
-                var providerStartMs = ResolveTimestampMs(providerBars[0]);
-                var providerEndMs = ResolveTimestampMs(providerBars[^1]);
-                var expectedEndMs = requestEndMs ?? providerEndMs;
-                var expectedStartMs = expectedEndMs - Math.Max(0L, (long)(safeCount - 1) * timeframeMs);
-                var missingCount = safeCount - providerBars.Count;
-
-                var leftGapBars = providerStartMs > expectedStartMs
-                    ? EstimateGapBars(providerStartMs - expectedStartMs, timeframeMs)
-                    : 0;
-                var rightGapBars = providerEndMs < expectedEndMs
-                    ? EstimateGapBars(expectedEndMs - providerEndMs, timeframeMs)
-                    : 0;
-                var internalGapBars = Math.Max(0, missingCount - leftGapBars - rightGapBars);
-
-                var missingParts = new List<string>(3);
-                if (leftGapBars > 0)
-                {
-                    missingParts.Add($"左侧缺失{leftGapBars}根");
-                }
-
-                if (rightGapBars > 0)
-                {
-                    missingParts.Add($"右侧缺失{rightGapBars}根");
-                }
-
-                if (internalGapBars > 0)
-                {
-                    missingParts.Add($"区间内部缺失{internalGapBars}根");
-                }
-
-                var missingDetail = missingParts.Count == 0
-                    ? "无法从首尾推断缺口位置"
-                    : string.Join("，", missingParts);
-                var reasonHint = BuildProviderInsufficientReason(leftGapBars, rightGapBars, internalGapBars, requestEndMs.HasValue);
-
-                LogSystemInfo(
-                    "历史行情系统数据不足，回退到历史行情表: exchange={Exchange} symbol={Symbol} timeframe={Timeframe} requested={Requested} actual={Actual} missing={Missing} missingDetail={MissingDetail} requestRange={RequestRange} providerRange={ProviderRange} reasonHint={ReasonHint}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    safeCount,
-                    providerBars.Count,
-                    missingCount,
-                    missingDetail,
-                    BuildRangeText(expectedStartMs, expectedEndMs),
-                    BuildRangeText(providerStartMs, providerEndMs),
-                    reasonHint);
-            }
-            else if (providerBars != null && providerBars.Count == 0)
-            {
-                LogSystemInfo(
-                    "历史行情系统返回空结果，回退到历史行情表: exchange={Exchange} symbol={Symbol} timeframe={Timeframe} requested={Requested} requestRange={RequestRange} reasonHint={ReasonHint}",
-                    exchangeKey,
-                    symbolKey,
-                    timeframeKey,
-                    safeCount,
-                    BuildRangeText(requestStartMs, requestEndMs),
-                    requestEndMs.HasValue
-                        ? "该时间窗在历史行情系统中不可用或尚未预热"
-                        : "按数量拉取末尾数据时历史行情系统无可用数据");
-            }
-
-            // 3. 历史行情系统没有命中或数据不足时，再从历史行情表读取。
-            var tableName = BuildTableName(exchangeKey, symbolKey, timeframeKey);
-            var loadSw = System.Diagnostics.Stopwatch.StartNew();
-            var rows = await _repository.QueryRangeAsync(tableName, null, endMs, count, ct)
-                .ConfigureAwait(false);
-            var list = rows.Select(ToOhlcv).ToList();
-            list.Reverse();
-            loadSw.Stop();
-            LogSystemInfo(
-                "数量查询完成: table={Table} endMs={End} rows={Rows} 耗时={Elapsed}ms",
-                tableName,
-                endMs ?? 0,
-                rows.Count,
-                loadSw.ElapsedMilliseconds);
-
-            if ((providerBars == null || providerBars.Count == 0) && list.Count == 0)
-            {
-                // 历史行情系统与历史行情表均无数据，按需求返回错误而非静默空结果。
-                throw new InvalidOperationException(
-                    $"历史行情不存在: exchange={exchangeKey} symbol={symbolKey} timeframe={timeframeKey}");
-            }
-
-            return list;
-        }
-
-        private int ResolvePageSize()
-        {
-            var max = _historyOptions.MaxQueryBars > 0 ? _historyOptions.MaxQueryBars : 2000;
-            return Math.Max(500, max);
-        }
-
-        private static long ResolveTimestampMs(OHLCV bar)
-        {
-            return (long)(bar.timestamp ?? 0);
-        }
-
-        private static int EstimateGapBars(long gapMs, long timeframeMs)
-        {
-            if (gapMs <= 0 || timeframeMs <= 0)
-            {
-                return 0;
-            }
-
-            return (int)((gapMs + timeframeMs - 1) / timeframeMs);
-        }
-
-        private static string BuildProviderInsufficientReason(
-            int leftGapBars,
-            int rightGapBars,
-            int internalGapBars,
-            bool hasExplicitEnd)
-        {
-            if (internalGapBars > 0)
-            {
-                return "时间窗内存在断档，历史行情系统返回序列不连续或被过滤";
-            }
-
-            if (leftGapBars > 0 && rightGapBars > 0)
-            {
-                return "首尾两侧均未覆盖，历史行情系统可用时间窗小于请求时间窗";
-            }
-
-            if (rightGapBars > 0)
-            {
-                return "右侧缺失，历史行情系统最新时间落后于请求结束时间";
-            }
-
-            if (leftGapBars > 0)
-            {
-                return hasExplicitEnd
-                    ? "左侧缺失，历史行情系统回溯深度不足"
-                    : "按数量拉取时历史行情系统历史窗口深度不足";
-            }
-
-            return "历史行情系统返回条数不足";
-        }
-
-        private static string BuildRangeText(long? startMs, long? endMs)
-        {
-            return $"{FormatUnixMs(startMs)}({startMs?.ToString() ?? "null"}) ~ {FormatUnixMs(endMs)}({endMs?.ToString() ?? "null"})";
-        }
-
-        private static string FormatUnixMs(long? value)
-        {
-            if (!value.HasValue || value.Value <= 0)
-            {
-                return "null";
-            }
-
-            try
-            {
-                return DateTimeOffset.FromUnixTimeMilliseconds(value.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-            }
-            catch
-            {
-                return value.Value.ToString();
-            }
-        }
-
-        private static List<OHLCV> SelectDrivingBars(
-            List<OHLCV> bars,
-            DateTimeOffset? startTime,
-            DateTimeOffset? endTime,
-            int barCount)
-        {
-            if (bars.Count == 0)
-            {
-                return new List<OHLCV>();
-            }
-
-            if (startTime.HasValue && endTime.HasValue)
-            {
-                var startMs = startTime.Value.ToUnixTimeMilliseconds();
-                var endMs = endTime.Value.ToUnixTimeMilliseconds();
-                return bars
-                    .Where(b => (b.timestamp ?? 0) >= startMs && (b.timestamp ?? 0) <= endMs)
-                    .ToList();
-            }
-
-            if (barCount <= 0 || bars.Count <= barCount)
-            {
-                return new List<OHLCV>(bars);
-            }
-
-            return bars.GetRange(bars.Count - barCount, barCount);
-        }
-
-        private static List<long> BuildIntersection(IEnumerable<List<long>> sources)
-        {
-            HashSet<long>? result = null;
-            foreach (var source in sources)
-            {
-                var set = new HashSet<long>(source.Where(ts => ts > 0));
-                if (result == null)
-                {
-                    result = set;
-                }
-                else
-                {
-                    result.IntersectWith(set);
-                }
-            }
-
-            if (result == null || result.Count == 0)
-            {
-                return new List<long>();
-            }
-
-            var list = result.ToList();
-            list.Sort();
-            return list;
-        }
-
-        private static bool TryResolveBars(
-            BacktestMarketDataProvider provider,
-            string exchange,
-            string timeframe,
-            IReadOnlyList<string> symbols,
-            long timestamp,
-            out Dictionary<string, OHLCV> mainBars,
-            out Dictionary<string, OHLCV> priceBars)
-        {
-            mainBars = new Dictionary<string, OHLCV>(StringComparer.OrdinalIgnoreCase);
-            priceBars = new Dictionary<string, OHLCV>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var symbol in symbols)
-            {
-                if (!provider.TryGetBar(exchange, timeframe, symbol, timestamp, out var bar))
-                {
-                    return false;
-                }
-
-                mainBars[symbol] = bar;
-
-                var priceBar = bar;
-                if (!string.Equals(timeframe, "1m", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!provider.TryGetBar(exchange, "1m", symbol, timestamp, out priceBar))
-                    {
-                        return false;
-                    }
-                }
-
-                priceBars[symbol] = priceBar;
-            }
-
-            return true;
-        }
-
-        private static bool TryResolveBar(
-            BacktestMarketDataProvider provider,
-            string exchange,
-            string timeframe,
-            string symbol,
-            long timestamp,
-            out OHLCV bar)
-        {
-            return provider.TryGetBar(exchange, timeframe, symbol, timestamp, out bar);
-        }
-        private static BacktestEquityPoint BuildEquityPoint(
-            SymbolRuntime runtime,
-            OHLCV priceBar,
-            decimal initialCapital,
-            long timestamp)
-        {
-            var realized = runtime.State.RealizedPnl;
-            var unrealized = 0m;
-
-            if (runtime.State.Position != null)
-            {
-                var close = Convert.ToDecimal(priceBar.close ?? priceBar.open ?? 0d);
-                if (close > 0)
-                {
-                    var position = runtime.State.Position;
-                    unrealized = position.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                        ? (close - position.EntryPrice) * position.Qty * position.ContractSize
-                        : (position.EntryPrice - close) * position.Qty * position.ContractSize;
-                }
-            }
-
-            return new BacktestEquityPoint
-            {
-                Timestamp = timestamp,
-                Equity = initialCapital + realized + unrealized,
-                RealizedPnl = realized,
-                UnrealizedPnl = unrealized
+                "batch_open_close" => BacktestExecutionModes.BatchOpenClose,
+                "batchopenclose" => BacktestExecutionModes.BatchOpenClose,
+                "batch" => BacktestExecutionModes.BatchOpenClose,
+                "fast" => BacktestExecutionModes.BatchOpenClose,
+                "timeline" => BacktestExecutionModes.Timeline,
+                "time_serial" => BacktestExecutionModes.Timeline,
+                "time-serial" => BacktestExecutionModes.Timeline,
+                _ => string.Empty
             };
         }
 
-        private static BacktestStats BuildStats(
-            IReadOnlyList<BacktestTrade> trades,
-            IReadOnlyList<BacktestEquityPoint>? equityCurve,
-            decimal initialCapital)
-        {
-            var totalProfit = trades.Sum(t => t.PnL);
-            var tradeCount = trades.Count;
-            var winTrades = trades.Where(t => t.PnL > 0).ToList();
-            var lossTrades = trades.Where(t => t.PnL < 0).ToList();
-            var winCount = winTrades.Count;
-            var lossCount = lossTrades.Count;
-            var winSum = winTrades.Sum(t => t.PnL);
-            var lossSum = lossTrades.Sum(t => t.PnL);
+        // ---- 参数解析 → BacktestParameterParser ----
+        // ---- 数据加载 → BacktestDataLoader ----
+        // ---- 主循环执行/强平收尾 → BacktestMainLoop ----
+        // ---- 统计/序列化 → BacktestStatisticsBuilder ----
+        // ---- 滑点计算 → BacktestSlippageHelper ----
 
-            var winRate = tradeCount > 0 ? winCount / (decimal)tradeCount : 0m;
-            var avgProfit = tradeCount > 0 ? totalProfit / tradeCount : 0m;
-            var avgWin = winCount > 0 ? winSum / winCount : 0m;
-            var avgLoss = lossCount > 0 ? lossSum / lossCount : 0m;
-            var profitFactor = lossSum < 0 ? winSum / Math.Abs(lossSum) : 0m;
-            var totalReturn = initialCapital > 0 ? totalProfit / initialCapital : 0m;
-            var maxDrawdown = equityCurve == null || equityCurve.Count == 0
-                ? 0m
-                : ComputeMaxDrawdown(equityCurve);
 
-            return new BacktestStats
-            {
-                TotalProfit = totalProfit,
-                TotalReturn = totalReturn,
-                MaxDrawdown = maxDrawdown,
-                WinRate = winRate,
-                TradeCount = tradeCount,
-                AvgProfit = avgProfit,
-                ProfitFactor = profitFactor,
-                AvgWin = avgWin,
-                AvgLoss = avgLoss
-            };
-        }
-
-        private static decimal ComputeMaxDrawdown(IReadOnlyList<BacktestEquityPoint> curve)
-        {
-            var peak = 0m;
-            var maxDrawdown = 0m;
-
-            foreach (var point in curve)
-            {
-                if (point.Equity > peak)
-                {
-                    peak = point.Equity;
-                }
-
-                if (peak <= 0)
-                {
-                    continue;
-                }
-
-                var drawdown = (peak - point.Equity) / peak;
-                if (drawdown > maxDrawdown)
-                {
-                    maxDrawdown = drawdown;
-                }
-            }
-
-            return maxDrawdown;
-        }
-
-        private static List<BacktestEquityPoint> BuildTotalEquityCurve(List<List<BacktestEquityPoint>> curves)
-        {
-            if (curves.Count == 0)
-            {
-                return new List<BacktestEquityPoint>();
-            }
-
-            var minCount = curves.Min(c => c.Count);
-            if (minCount <= 0)
-            {
-                return new List<BacktestEquityPoint>();
-            }
-
-            var result = new List<BacktestEquityPoint>(minCount);
-            for (var i = 0; i < minCount; i++)
-            {
-                var timestamp = curves[0][i].Timestamp;
-                var equity = 0m;
-                var realized = 0m;
-                var unrealized = 0m;
-                var periodRealized = 0m;
-                var periodUnrealized = 0m;
-
-                foreach (var curve in curves)
-                {
-                    equity += curve[i].Equity;
-                    realized += curve[i].RealizedPnl;
-                    unrealized += curve[i].UnrealizedPnl;
-                    periodRealized += curve[i].PeriodRealizedPnl;
-                    periodUnrealized += curve[i].PeriodUnrealizedPnl;
-                }
-
-                result.Add(new BacktestEquityPoint
-                {
-                    Timestamp = timestamp,
-                    Equity = equity,
-                    RealizedPnl = realized,
-                    UnrealizedPnl = unrealized,
-                    PeriodRealizedPnl = periodRealized,
-                    PeriodUnrealizedPnl = periodUnrealized
-                });
-            }
-
-            return result;
-        }
-
-        private static long AlignBucketStart(long timestamp, long intervalMs)
-        {
-            if (intervalMs <= 0)
-            {
-                return timestamp;
-            }
-
-            var mod = timestamp % intervalMs;
-            if (mod < 0)
-            {
-                return timestamp - mod - intervalMs;
-            }
-
-            return timestamp - mod;
-        }
-
-        private static (string Granularity, long IntervalMs) ResolveEquityCurveGranularity(string? rawGranularity)
-        {
-            var normalized = string.IsNullOrWhiteSpace(rawGranularity)
-                ? "1m"
-                : rawGranularity.Trim().ToLowerInvariant();
-
-            if (EquityGranularityToMs.TryGetValue(normalized, out var intervalMs))
-            {
-                return (normalized, intervalMs);
-            }
-
-            throw new InvalidOperationException(
-                $"资金曲线颗粒度不支持: {rawGranularity}，仅支持 {string.Join("/", SupportedEquityGranularities)}");
-        }
-
-        private StrategyRuntimeGate ResolveRuntimeGate(SymbolRuntime runtime, DateTimeOffset currentTime, bool recordEvent)
-        {
-            if (!runtime.UseRuntimeGate)
-            {
-                return StrategyRuntimeGate.AllowAll;
-            }
-
-            var evaluation = runtime.RuntimeSchedule.Evaluate(currentTime);
-            if (evaluation.Changed && recordEvent)
-            {
-                runtime.State.Events.Add(new BacktestEvent
-                {
-                    Timestamp = currentTime.ToUnixTimeMilliseconds(),
-                    Type = "RuntimeGate",
-                    Message = $"运行时间切换: 允许={evaluation.Allowed} 模式={runtime.RuntimeSchedule.Summary}"
-                });
-            }
-
-            if (evaluation.Allowed)
-            {
-                return StrategyRuntimeGate.AllowAll;
-            }
-
-            return runtime.RuntimeSchedule.Policy == StrategyRuntimeOutOfSessionPolicy.BlockAll
-                ? StrategyRuntimeGate.BlockAll
-                : StrategyRuntimeGate.BlockEntryAllowExit;
-        }
-        private void ExecuteLogic(
-            StrategyExecutionContext context,
-            StrategyRuntimeGate runtimeGate,
-            ConditionEvaluator evaluator,
-            LogicTiming? timing)
-        {
-            var logic = context.StrategyConfig.Logic;
-            if (logic == null)
-            {
-                return;
-            }
-
-            if (runtimeGate.AllowExit)
-            {
-                var exitStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                ExecuteBranch(context, logic.Exit.Long, "Exit.Long", evaluator, LogicBranchKind.Exit, timing);
-                timing?.AddBranch(LogicBranchKind.Exit, System.Diagnostics.Stopwatch.GetTimestamp() - exitStart);
-            }
-
-            if (context.Strategy.State == StrategyState.PausedOpenPosition)
-            {
-                return;
-            }
-
-            if (!runtimeGate.AllowEntry)
-            {
-                return;
-            }
-
-            var filterStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            if (!EvaluateEntryFilters(context, logic.Entry.Long, "Entry.Long", evaluator))
-            {
-                if (timing != null)
-                {
-                    timing.EntryFilterTicks += System.Diagnostics.Stopwatch.GetTimestamp() - filterStart;
-                }
-                return;
-            }
-            if (timing != null)
-            {
-                timing.EntryFilterTicks += System.Diagnostics.Stopwatch.GetTimestamp() - filterStart;
-            }
-
-            var entryStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            ExecuteBranch(context, logic.Entry.Long, "Entry.Long", evaluator, LogicBranchKind.Entry, timing);
-            timing?.AddBranch(LogicBranchKind.Entry, System.Diagnostics.Stopwatch.GetTimestamp() - entryStart);
-        }
-
-        private bool EvaluateEntryFilters(
-            StrategyExecutionContext context,
-            StrategyLogicBranch branch,
-            string stage,
-            ConditionEvaluator evaluator)
-        {
-            if (branch == null || !branch.Enabled)
-            {
-                return true;
-            }
-
-            var filters = branch.Filters;
-            if (filters == null || !filters.Enabled)
-            {
-                return true;
-            }
-
-            if (filters.Groups == null || filters.Groups.Count == 0)
-            {
-                return true;
-            }
-
-            PrecomputeRequiredConditions(context, filters, evaluator);
-            var results = new List<ConditionEvaluationResult>();
-            var stageLabel = $"{stage}.Filter";
-            var pass = EvaluateChecks(context, filters, results, stageLabel, evaluator);
-            // 性能优先：回测高频链路关闭逐K线调试日志
-
-            return pass;
-        }
-
-        private void ExecuteBranch(
-            StrategyExecutionContext context,
-            StrategyLogicBranch branch,
-            string stage,
-            ConditionEvaluator evaluator,
-            LogicBranchKind branchKind,
-            LogicTiming? timing)
-        {
-            if (branch == null || !branch.Enabled)
-            {
-                return;
-            }
-
-            var containers = branch.Containers ?? new List<ConditionContainer>();
-            var passCount = 0;
-            var aggregatedResults = new List<ConditionEvaluationResult>();
-
-            PrecomputeRequiredConditions(context, containers, evaluator);
-
-            for (var i = 0; i < containers.Count; i++)
-            {
-                var container = containers[i];
-                if (container == null)
-                {
-                    continue;
-                }
-
-                var checkResults = new List<ConditionEvaluationResult>();
-                var stageLabel = $"{stage}[{i}]";
-
-                var checkStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                var checkPass = EvaluateChecks(context, container.Checks, checkResults, stageLabel, evaluator);
-                timing?.AddCheck(branchKind, System.Diagnostics.Stopwatch.GetTimestamp() - checkStart);
-                if (!checkPass)
-                {
-                    continue;
-                }
-
-                passCount++;
-                aggregatedResults.AddRange(checkResults);
-            }
-
-            if (passCount < branch.MinPassConditionContainer)
-            {
-                return;
-            }
-
-            var actionStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            ExecuteActions(context, branch.OnPass, aggregatedResults, stage);
-            timing?.AddAction(branchKind, System.Diagnostics.Stopwatch.GetTimestamp() - actionStart);
-        }
-
-        private static void PrecomputeRequiredConditions(
-            StrategyExecutionContext context,
-            IReadOnlyList<ConditionContainer> containers,
-            ConditionEvaluator evaluator)
-        {
-            if (containers == null || containers.Count == 0)
-            {
-                return;
-            }
-
-            foreach (var container in containers)
-            {
-                if (container?.Checks == null)
-                {
-                    continue;
-                }
-
-                if (container.Checks.Groups == null)
-                {
-                    continue;
-                }
-
-                foreach (var group in container.Checks.Groups)
-                {
-                    if (group?.Conditions == null || !group.Enabled)
-                    {
-                        continue;
-                    }
-
-                    foreach (var condition in group.Conditions)
-                    {
-                        if (condition == null || !condition.Enabled || !condition.Required)
-                        {
-                            continue;
-                        }
-
-                        evaluator.Evaluate(context, condition);
-                    }
-                }
-            }
-        }
-
-        private static void PrecomputeRequiredConditions(
-            StrategyExecutionContext context,
-            ConditionGroupSet? checks,
-            ConditionEvaluator evaluator)
-        {
-            if (checks == null || !checks.Enabled || checks.Groups == null || checks.Groups.Count == 0)
-            {
-                return;
-            }
-
-            foreach (var group in checks.Groups)
-            {
-                if (group?.Conditions == null || !group.Enabled)
-                {
-                    continue;
-                }
-
-                foreach (var condition in group.Conditions)
-                {
-                    if (condition == null || !condition.Enabled || !condition.Required)
-                    {
-                        continue;
-                    }
-
-                    evaluator.Evaluate(context, condition);
-                }
-            }
-        }
-
-        private bool EvaluateChecks(
-            StrategyExecutionContext context,
-            ConditionGroupSet checks,
-            List<ConditionEvaluationResult> results,
-            string stage,
-            ConditionEvaluator evaluator)
-        {
-            if (checks == null || !checks.Enabled)
-            {
-                return false;
-            }
-
-            var groups = checks.Groups ?? new List<ConditionGroup>();
-            var passGroups = 0;
-
-            for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
-            {
-                var group = groups[groupIndex];
-                if (group == null || !group.Enabled)
-                {
-                    continue;
-                }
-
-                var crossRequired = new List<StrategyMethod>();
-                var crossOptional = new List<StrategyMethod>();
-                var required = new List<StrategyMethod>();
-                var optional = new List<StrategyMethod>();
-
-                // 重要：优先级拆分只调整评估顺序，不改变 Required/Optional 语义。
-                ConditionPriorityHelper.SplitByPriority(
-                    group.Conditions ?? new List<StrategyMethod>(),
-                    crossRequired,
-                    crossOptional,
-                    required,
-                    optional);
-
-                var hasEnabled = crossRequired.Count + crossOptional.Count + required.Count + optional.Count > 0;
-                if (!hasEnabled)
-                {
-                    if (group.MinPassConditions <= 0)
-                    {
-                        passGroups++;
-                    }
-                    continue;
-                }
-
-                var requiredFailed = false;
-                var optionalPassCount = 0;
-
-                bool EvaluateCondition(StrategyMethod condition, bool isRequired)
-                {
-                    var result = evaluator.Evaluate(context, condition);
-                    results.Add(result);
-
-                    if (isRequired && !result.Success)
-                    {
-                        requiredFailed = true;
-                        return false;
-                    }
-
-                    if (!isRequired && result.Success)
-                    {
-                        optionalPassCount++;
-                    }
-
-                    return result.Success;
-                }
-
-                foreach (var condition in crossRequired)
-                {
-                    EvaluateCondition(condition, true);
-                    if (requiredFailed)
-                    {
-                        break;
-                    }
-                }
-
-                if (requiredFailed)
-                {
-                    continue;
-                }
-
-                foreach (var condition in crossOptional)
-                {
-                    EvaluateCondition(condition, false);
-                }
-
-                foreach (var condition in required)
-                {
-                    EvaluateCondition(condition, true);
-                    if (requiredFailed)
-                    {
-                        break;
-                    }
-                }
-
-                if (requiredFailed)
-                {
-                    continue;
-                }
-
-                if (optionalPassCount < group.MinPassConditions)
-                {
-                    foreach (var condition in optional)
-                    {
-                        EvaluateCondition(condition, false);
-                        if (optionalPassCount >= group.MinPassConditions)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                var pass = optionalPassCount >= group.MinPassConditions;
-                if (!pass)
-                {
-                    // 性能优先：回测高频链路关闭逐条件调试日志
-                }
-                else
-                {
-                    passGroups++;
-                }
-            }
-
-            return passGroups >= checks.MinPassGroups;
-        }
-
-        private void ExecuteActions(
-            StrategyExecutionContext context,
-            ActionSet actions,
-            IReadOnlyList<ConditionEvaluationResult> triggerResults,
-            string stage)
-        {
-            if (actions == null || !actions.Enabled)
-            {
-                return;
-            }
-
-            var optionalSuccessCount = 0;
-            var hasEnabled = false;
-
-            foreach (var action in actions.Conditions ?? new List<StrategyMethod>())
-            {
-                if (action == null || !action.Enabled)
-                {
-                    continue;
-                }
-
-                hasEnabled = true;
-                var result = ActionMethodRegistry.Run(context, action, triggerResults);
-
-                if (action.Required && !result.Success)
-                {
-                    return;
-                }
-
-                if (!action.Required && result.Success)
-                {
-                    optionalSuccessCount++;
-                }
-            }
-
-            if (!hasEnabled)
-            {
-                return;
-            }
-
-            if (optionalSuccessCount < actions.MinPassConditions)
-            {
-                // 性能优先：回测高频链路关闭逐动作调试日志
-            }
-        }
         private static List<IndicatorRequest> BuildIndicatorRequests(StrategyModel strategy)
         {
             var trade = strategy.StrategyConfig?.Trade;
@@ -2480,61 +1067,5 @@ namespace ServerTest.Modules.Backtest.Application
             return set;
         }
 
-        private static OHLCV ToOhlcv(HistoricalMarketDataKlineRow row)
-        {
-            return new OHLCV
-            {
-                timestamp = row.OpenTime,
-                open = row.Open.HasValue ? (double)row.Open.Value : null,
-                high = row.High.HasValue ? (double)row.High.Value : null,
-                low = row.Low.HasValue ? (double)row.Low.Value : null,
-                close = row.Close.HasValue ? (double)row.Close.Value : null,
-                volume = row.Volume.HasValue ? (double)row.Volume.Value : null
-            };
-        }
-
-        private static string BuildTableName(string exchangeId, string symbol, string timeframe)
-        {
-            var exchangeKey = MarketDataKeyNormalizer.NormalizeExchange(exchangeId);
-            var symbolKey = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
-            var timeframeKey = MarketDataKeyNormalizer.NormalizeTimeframe(timeframe);
-
-            var symbolPart = symbolKey.Replace("/", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
-            if (!SafeIdentifier.IsMatch(exchangeKey) || !SafeIdentifier.IsMatch(symbolPart) || !SafeIdentifier.IsMatch(timeframeKey))
-            {
-                throw new InvalidOperationException("历史行情表名不合法");
-            }
-
-            return $"{exchangeKey}_futures_{symbolPart}_{timeframeKey}";
-        }
-
-        private static decimal ApplySlippage(decimal price, string orderSide, int slippageBps)
-        {
-            if (slippageBps == 0)
-            {
-                return price;
-            }
-
-            var ratio = slippageBps / 10000m;
-            return orderSide.Equals("buy", StringComparison.OrdinalIgnoreCase)
-                ? price * (1 + ratio)
-                : price * (1 - ratio);
-        }
-
-        private readonly struct StrategyRuntimeGate
-        {
-            private StrategyRuntimeGate(bool allowEntry, bool allowExit)
-            {
-                AllowEntry = allowEntry;
-                AllowExit = allowExit;
-            }
-
-            public bool AllowEntry { get; }
-            public bool AllowExit { get; }
-
-            public static StrategyRuntimeGate AllowAll => new(true, true);
-            public static StrategyRuntimeGate BlockEntryAllowExit => new(false, true);
-            public static StrategyRuntimeGate BlockAll => new(false, false);
-        }
     }
 }

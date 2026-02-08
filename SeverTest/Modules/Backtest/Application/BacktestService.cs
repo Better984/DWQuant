@@ -35,6 +35,7 @@ namespace ServerTest.Modules.Backtest.Application
             BacktestRunRequest request,
             string? reqId,
             long? userId,
+            long? taskId,
             CancellationToken ct)
         {
             if (request == null)
@@ -69,7 +70,8 @@ namespace ServerTest.Modules.Backtest.Application
             var progressContext = new BacktestProgressContext
             {
                 ReqId = reqId,
-                UserId = userId
+                UserId = userId,
+                TaskId = taskId
             };
 
             try

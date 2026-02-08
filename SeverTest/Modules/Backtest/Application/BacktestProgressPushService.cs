@@ -1,7 +1,10 @@
+using System;
 using System.Net.WebSockets;
 using System.Text;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ServerTest.Modules.Backtest.Domain;
+using ServerTest.Modules.Backtest.Infrastructure;
 using ServerTest.Protocol;
 using ServerTest.WebSockets;
 
@@ -17,13 +20,16 @@ namespace ServerTest.Modules.Backtest.Application
         private const string ProgressType = "backtest.progress";
 
         private readonly IConnectionManager _connectionManager;
+        private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<BacktestProgressPushService> _logger;
 
         public BacktestProgressPushService(
             IConnectionManager connectionManager,
+            IServiceProvider serviceProvider,
             ILogger<BacktestProgressPushService> logger)
         {
             _connectionManager = connectionManager ?? throw new ArgumentNullException(nameof(connectionManager));
+            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -51,6 +57,24 @@ namespace ServerTest.Modules.Backtest.Application
                 Completed = completed
             };
 
+            return PublishAsync(context, payload, ct);
+        }
+
+        /// <summary>
+        /// 直接按自定义内容推送回测进度消息。
+        /// </summary>
+        public Task PublishMessageAsync(
+            BacktestProgressContext? context,
+            BacktestProgressMessage payload,
+            CancellationToken ct = default)
+        {
+            if (payload == null)
+            {
+                throw new ArgumentNullException(nameof(payload));
+            }
+
+            payload.Stage ??= string.Empty;
+            payload.StageName ??= string.Empty;
             return PublishAsync(context, payload, ct);
         }
 
@@ -87,6 +111,8 @@ namespace ServerTest.Modules.Backtest.Application
 
         private async Task PublishAsync(BacktestProgressContext? context, BacktestProgressMessage payload, CancellationToken ct)
         {
+            await PersistTaskProgressAsync(context, payload, ct).ConfigureAwait(false);
+
             if (context?.UserId == null || context.UserId.Value <= 0)
             {
                 return;
@@ -129,6 +155,64 @@ namespace ServerTest.Modules.Backtest.Application
                         payload.EventKind);
                 }
             }
+        }
+
+        private async Task PersistTaskProgressAsync(BacktestProgressContext? context, BacktestProgressMessage payload, CancellationToken ct)
+        {
+            if (context?.TaskId == null)
+            {
+                return;
+            }
+
+            var taskId = context.TaskId.Value;
+            if (taskId <= 0)
+            {
+                return;
+            }
+
+            var progress = ResolveProgress(payload);
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var repository = scope.ServiceProvider.GetRequiredService<BacktestTaskRepository>();
+                await repository.UpdateProgressAsync(
+                    taskId,
+                    progress,
+                    payload.Stage,
+                    payload.StageName,
+                    payload.Message,
+                    ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "回测进度落库失败: taskId={TaskId} stage={Stage}", taskId, payload.Stage);
+            }
+        }
+
+        private static decimal ResolveProgress(BacktestProgressMessage payload)
+        {
+            if (payload.Completed == true && payload.Stage.Equals("completed", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1m;
+            }
+
+            var progress = payload.Progress ?? 0m;
+            if (progress < 0m)
+            {
+                return 0m;
+            }
+
+            if (progress > 1m)
+            {
+                return 1m;
+            }
+
+            return progress;
         }
 
         private static decimal? BuildProgress(int? processed, int? total)

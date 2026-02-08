@@ -127,12 +127,12 @@ namespace ServerTest.Models.Strategy
         /// </summary>
         public string OutOfSessionPolicy { get; set; } = "BlockEntryAllowExit";
         /// <summary>
-        /// ?? ID ??????????
+        /// 模板ID列表（当ScheduleType为Template时使用）
         /// </summary>
         public List<string> TemplateIds { get; set; } = new();
 
         /// <summary>
-        /// ????????????????????
+        /// 模板配置列表（当ScheduleType为Template时使用）
         /// </summary>
         public List<StrategyRuntimeTemplateConfig> Templates { get; set; } = new();
 

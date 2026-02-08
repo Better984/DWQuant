@@ -24,6 +24,7 @@ import IndicatorModule from './IndicatorModule';
 import DiscoverModule from './DiscoverModule';
 import ChatModule from './ChatModule';
 import IndicatorGeneratorSelector from './IndicatorGeneratorSelector';
+import HistoricalDataCacheDialog from './HistoricalDataCacheDialog';
 import './Dashboard.css';
 import { getAuthProfile } from '../auth/profileStore';
 import { ensureWsConnected, getWsStatus, onWsStatusChange } from '../network';
@@ -64,6 +65,7 @@ const Dashboard: React.FC = () => {
   const { success } = useNotification();
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
   const [showIndicatorGenerator, setShowIndicatorGenerator] = useState(false);
+  const [showHistoricalCacheDialog, setShowHistoricalCacheDialog] = useState(false);
   
   // 菜单项对应的面包屑文本映射
   const menuBreadcrumbMap: { [key: number]: { first: string; second: string } } = {
@@ -373,6 +375,13 @@ const Dashboard: React.FC = () => {
               >
                 指标创建器
               </button>
+              <button
+                type="button"
+                className="sidebar-test-button"
+                onClick={() => setShowHistoricalCacheDialog(true)}
+              >
+                回测区间
+              </button>
             </div>
           </div>
         </div>
@@ -487,6 +496,11 @@ const Dashboard: React.FC = () => {
       <IndicatorGeneratorSelector
         open={showIndicatorGenerator}
         onClose={() => setShowIndicatorGenerator(false)}
+      />
+
+      <HistoricalDataCacheDialog
+        open={showHistoricalCacheDialog}
+        onClose={() => setShowHistoricalCacheDialog(false)}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-﻿using ccxt;
+using ccxt;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -176,6 +176,35 @@ namespace ServerTest.Controllers
             {
                 Logger.LogError(ex, "获取历史K线失败");
                 return BadRequest(ApiResponse<object>.Error($"获取历史K线失败: {ex.Message}"));
+            }
+        }
+
+        /// <summary>
+        /// 获取历史行情缓存快照：返回所有缓存的数据信息汇总
+        /// </summary>
+        [ProtocolType("marketdata.cache.snapshots")]
+        [HttpPost("cache-snapshots")]
+        public IActionResult GetCacheSnapshots([FromBody] ProtocolRequest<object> request)
+        {
+            try
+            {
+                var snapshots = _historicalCache.GetCacheSnapshots();
+                var result = snapshots.Select(s => new
+                {
+                    exchange = s.Exchange,
+                    symbol = s.Symbol,
+                    timeframe = s.Timeframe,
+                    startTime = s.StartTime.ToString("O"),
+                    endTime = s.EndTime.ToString("O"),
+                    count = s.Count,
+                }).ToList();
+
+                return Ok(ApiResponse<object>.Ok(new { snapshots = result }, "查询成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取缓存快照失败");
+                return StatusCode(500, ApiResponse<object>.Error($"查询失败: {ex.Message}"));
             }
         }
 

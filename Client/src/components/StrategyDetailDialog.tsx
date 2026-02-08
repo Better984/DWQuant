@@ -1,11 +1,12 @@
-﻿import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNotification } from './ui';
 import StrategyShareDialog, { type SharePolicyPayload } from './StrategyShareDialog';
 import StrategyHistoryDialog, { type StrategyHistoryVersion } from './StrategyHistoryDialog';
 import AlertDialog from './AlertDialog';
 import { getAuthProfile } from '../auth/profileStore';
-import { getWsClient } from '../network';
+import { getWsClient, getToken } from '../network';
 import { generateReqId } from '../network/requestId';
+import { HttpClient } from '../network/httpClient';
 import type { StrategyConfig, StrategyRuntimeConfig } from './StrategyModule.types';
 import './StrategyDetailDialog.css';
 
@@ -58,6 +59,7 @@ export type BacktestOutputOptions = {
 export type BacktestRunPayload = {
   usId?: number;
   configJson?: string;
+  executionMode?: string;
   exchange?: string;
   symbols?: string[];
   timeframe?: string;
@@ -88,6 +90,52 @@ export type BacktestStats = {
   profitFactor: number;
   avgWin: number;
   avgLoss: number;
+  /** 夏普比率（年化，无风险利率=0） */
+  sharpeRatio?: number;
+  /** Sortino 比率（年化，仅下行波动率） */
+  sortinoRatio?: number;
+  /** 年化收益率 */
+  annualizedReturn?: number;
+  /** 最大连续亏损次数 */
+  maxConsecutiveLosses?: number;
+  /** 最大连续盈利次数 */
+  maxConsecutiveWins?: number;
+  /** 平均持仓时间（毫秒） */
+  avgHoldingMs?: number;
+  /** 最大回撤持续时间（毫秒） */
+  maxDrawdownDurationMs?: number;
+  /** Calmar 比率（年化收益率/最大回撤） */
+  calmarRatio?: number;
+};
+
+export type BacktestTradeSummary = {
+  totalCount: number;
+  winCount: number;
+  lossCount: number;
+  maxProfit: number;
+  maxLoss: number;
+  totalFee: number;
+  firstEntryTime: number;
+  lastExitTime: number;
+};
+
+export type BacktestEquitySummary = {
+  pointCount: number;
+  maxEquity: number;
+  maxEquityAt: number;
+  minEquity: number;
+  minEquityAt: number;
+  maxPeriodProfit: number;
+  maxPeriodProfitAt: number;
+  maxPeriodLoss: number;
+  maxPeriodLossAt: number;
+};
+
+export type BacktestEventSummary = {
+  totalCount: number;
+  firstTimestamp: number;
+  lastTimestamp: number;
+  typeCounts: Record<string, number>;
 };
 
 export type BacktestTrade = {
@@ -125,9 +173,12 @@ export type BacktestSymbolResult = {
   bars: number;
   initialCapital: number;
   stats: BacktestStats;
-  trades: BacktestTrade[];
-  equityCurve: BacktestEquityPoint[];
-  events: BacktestEvent[];
+  tradeSummary?: BacktestTradeSummary;
+  equitySummary?: BacktestEquitySummary;
+  eventSummary?: BacktestEventSummary;
+  tradesRaw?: string[];
+  equityCurveRaw?: string[];
+  eventsRaw?: string[];
 };
 
 export type BacktestRunResult = {
@@ -154,9 +205,13 @@ type BacktestProgressPayload = {
   foundPositions?: number;
   totalPositions?: number;
   chunkCount?: number;
+  winCount?: number;
+  lossCount?: number;
+  winRate?: number;
   completed?: boolean;
   symbol?: string;
   positions?: BacktestTrade[];
+  replacePositions?: boolean;
 };
 
 type StrategyDetailDialogProps = {
@@ -218,6 +273,139 @@ const equityGranularityOptions = [
   { value: '3d', label: '3天' },
   { value: '7d', label: '7天' },
 ];
+
+type LazyTableProps<T> = {
+  rawItems?: string[];
+  parseItem: (raw: string) => T | null;
+  renderRow: (item: T, index: number) => React.ReactNode;
+  columns: React.ReactNode;
+  colSpan: number;
+  emptyText: string;
+  rowHeight?: number;
+  overscan?: number;
+};
+
+const parseJsonSafe = <T,>(raw: string): T | null => {
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.warn('回测数据解析失败', err);
+    return null;
+  }
+};
+
+const LazyTable = <T,>({
+  rawItems,
+  parseItem,
+  renderRow,
+  columns,
+  colSpan,
+  emptyText,
+  rowHeight = 28,
+  overscan = 20,
+}: LazyTableProps<T>) => {
+  const items = rawItems ?? [];
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const cacheRef = React.useRef<Map<number, T>>(new Map());
+  const [range, setRange] = useState(() => ({
+    start: 0,
+    end: Math.min(items.length, overscan * 2),
+  }));
+
+  const updateRange = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    const scrollTop = container.scrollTop;
+    const viewportHeight = container.clientHeight;
+    const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+    const end = Math.min(items.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+    setRange((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+  }, [items.length, overscan, rowHeight]);
+
+  useEffect(() => {
+    cacheRef.current.clear();
+    setRange({ start: 0, end: Math.min(items.length, overscan * 2) });
+  }, [items.length, overscan]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    updateRange();
+    const onScroll = () => updateRange();
+    container.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', updateRange);
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', updateRange);
+    };
+  }, [updateRange]);
+
+  const visibleItems = useMemo(() => {
+    if (items.length === 0) {
+      return [];
+    }
+    const parsed: Array<{ index: number; item: T }> = [];
+    for (let i = range.start; i < range.end && i < items.length; i += 1) {
+      const cached = cacheRef.current.get(i);
+      if (cached) {
+        parsed.push({ index: i, item: cached });
+        continue;
+      }
+      const raw = items[i];
+      const value = raw ? parseItem(raw) : null;
+      if (value) {
+        cacheRef.current.set(i, value);
+        parsed.push({ index: i, item: value });
+      }
+    }
+    return parsed;
+  }, [items, parseItem, range.end, range.start]);
+
+  if (items.length === 0) {
+    return <div className="backtest-empty">{emptyText}</div>;
+  }
+
+  const topPad = range.start * rowHeight;
+  const bottomPad = Math.max(0, items.length - range.end) * rowHeight;
+  const startIndex = range.start + 1;
+  const endIndex = Math.min(range.end, items.length);
+
+  return (
+    <>
+      <div className="backtest-table-meta">
+        <span>数据量：{items.length}</span>
+        <span>
+          解析范围：{startIndex}-{endIndex}
+        </span>
+      </div>
+      <div className="backtest-table-wrapper" ref={containerRef}>
+        <table className="backtest-table">
+          <thead>{columns}</thead>
+          <tbody>
+            {topPad > 0 && (
+              <tr className="backtest-table-spacer">
+                <td colSpan={colSpan} style={{ height: topPad }} />
+              </tr>
+            )}
+            {visibleItems.map(({ item, index }) => renderRow(item, index))}
+            {bottomPad > 0 && (
+              <tr className="backtest-table-spacer">
+                <td colSpan={colSpan} style={{ height: bottomPad }} />
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+};
 
 const formatTimeframeFromSeconds = (value?: number) => {
   if (!value || value <= 0) {
@@ -316,12 +504,26 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   const [backtestResult, setBacktestResult] = useState<BacktestRunResult | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [isBacktestRunning, setIsBacktestRunning] = useState(false);
+  const [backtestProgressStageCode, setBacktestProgressStageCode] = useState<string>('');
   const [backtestProgressStage, setBacktestProgressStage] = useState<string>('');
   const [backtestProgressMessage, setBacktestProgressMessage] = useState<string>('');
   const [backtestProgressPercent, setBacktestProgressPercent] = useState<number | null>(null);
   const [backtestFoundPositions, setBacktestFoundPositions] = useState(0);
   const [backtestTotalPositions, setBacktestTotalPositions] = useState(0);
+  const [backtestWinCount, setBacktestWinCount] = useState(0);
+  const [backtestLossCount, setBacktestLossCount] = useState(0);
+  const [backtestWinRate, setBacktestWinRate] = useState<number | null>(null);
   const [backtestStreamingTrades, setBacktestStreamingTrades] = useState<BacktestTrade[]>([]);
+  const [cacheSnapshots, setCacheSnapshots] = useState<Array<{
+    exchange: string;
+    symbol: string;
+    timeframe: string;
+    startTime: string;
+    endTime: string;
+    count: number;
+  }>>([]);
+  const [isLoadingCache, setIsLoadingCache] = useState(false);
+  const httpClient = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
 
   const profile = useMemo(() => getAuthProfile(), []);
   const canPublish = profile?.role === 255;
@@ -355,6 +557,144 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     }
   }, [strategy]);
 
+  // 加载历史行情缓存数据
+  useEffect(() => {
+    if (activeTab !== 'backtest') {
+      return;
+    }
+    loadCacheSnapshots();
+  }, [activeTab]);
+
+  const loadCacheSnapshots = async () => {
+    setIsLoadingCache(true);
+    try {
+      const response = await httpClient.postProtocol<{ snapshots: Array<{
+        exchange: string;
+        symbol: string;
+        timeframe: string;
+        startTime: string;
+        endTime: string;
+        count: number;
+      }> }>(
+        '/api/MarketData/cache-snapshots',
+        'marketdata.cache.snapshots',
+        {}
+      );
+      setCacheSnapshots(response.snapshots || []);
+    } catch (err) {
+      console.error('加载缓存数据失败', err);
+    } finally {
+      setIsLoadingCache(false);
+    }
+  };
+
+  // 获取可用的交易所列表
+  const availableExchanges = useMemo(() => {
+    const exchanges = new Set<string>();
+    cacheSnapshots.forEach((snapshot) => {
+      exchanges.add(snapshot.exchange);
+    });
+    return Array.from(exchanges).sort();
+  }, [cacheSnapshots]);
+
+  // 根据选择的交易所获取可用的币种
+  const availableSymbols = useMemo(() => {
+    if (!backtestForm.exchange) {
+      return [];
+    }
+    const symbols = new Set<string>();
+    cacheSnapshots.forEach((snapshot) => {
+      if (snapshot.exchange === backtestForm.exchange) {
+        symbols.add(snapshot.symbol);
+      }
+    });
+    return Array.from(symbols).sort();
+  }, [cacheSnapshots, backtestForm.exchange]);
+
+  // 根据选择的交易所和币种获取可用的周期
+  const availableTimeframes = useMemo(() => {
+    if (!backtestForm.exchange || !backtestForm.symbols) {
+      return [];
+    }
+    const symbols = backtestForm.symbols.split(/[,\s]+/).filter(Boolean);
+    if (symbols.length === 0) {
+      return [];
+    }
+    const timeframes = new Set<string>();
+    cacheSnapshots.forEach((snapshot) => {
+      if (snapshot.exchange === backtestForm.exchange && symbols.includes(snapshot.symbol)) {
+        timeframes.add(snapshot.timeframe);
+      }
+    });
+    return Array.from(timeframes).sort();
+  }, [cacheSnapshots, backtestForm.exchange, backtestForm.symbols]);
+
+  // 获取支持的时间范围（取交集）
+  const supportedTimeRange = useMemo(() => {
+    if (!backtestForm.exchange || !backtestForm.symbols || !backtestForm.timeframe) {
+      return null;
+    }
+    const symbols = backtestForm.symbols.split(/[,\s]+/).filter(Boolean);
+    if (symbols.length === 0) {
+      return null;
+    }
+    let earliestStart: Date | null = null;
+    let latestEnd: Date | null = null;
+    let foundAny = false;
+
+    cacheSnapshots.forEach((snapshot) => {
+      if (
+        snapshot.exchange === backtestForm.exchange &&
+        symbols.includes(snapshot.symbol) &&
+        snapshot.timeframe === backtestForm.timeframe
+      ) {
+        foundAny = true;
+        const start = new Date(snapshot.startTime);
+        const end = new Date(snapshot.endTime);
+        if (!earliestStart || start > earliestStart) {
+          earliestStart = start;
+        }
+        if (!latestEnd || end < latestEnd) {
+          latestEnd = end;
+        }
+      }
+    });
+
+    if (!foundAny || !earliestStart || !latestEnd) {
+      return null;
+    }
+
+    return {
+      start: earliestStart,
+      end: latestEnd,
+    };
+  }, [cacheSnapshots, backtestForm.exchange, backtestForm.symbols, backtestForm.timeframe]);
+
+  // 全量回测功能
+  const handleFullRangeBacktest = () => {
+    if (!supportedTimeRange) {
+      error('请先选择交易所、币种和周期');
+      return;
+    }
+    // 切换到时间范围模式
+    updateBacktestField('rangeMode', 'time');
+    // 设置时间范围
+    const startDate = new Date(supportedTimeRange.start);
+    const endDate = new Date(supportedTimeRange.end);
+    // 转换为本地时间格式 (YYYY-MM-DDTHH:mm)
+    const formatLocalDateTime = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    };
+    updateBacktestField('startTime', formatLocalDateTime(startDate));
+    updateBacktestField('endTime', formatLocalDateTime(endDate));
+    success('已设置为全量回测时间范围');
+  };
+
   useEffect(() => {
     if (!strategy) {
       return;
@@ -362,11 +702,15 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     setBacktestForm(defaultBacktestForm);
     setBacktestResult(null);
     setBacktestError(null);
+    setBacktestProgressStageCode('');
     setBacktestProgressStage('');
     setBacktestProgressMessage('');
     setBacktestProgressPercent(null);
     setBacktestFoundPositions(0);
     setBacktestTotalPositions(0);
+    setBacktestWinCount(0);
+    setBacktestLossCount(0);
+    setBacktestWinRate(null);
     setBacktestStreamingTrades([]);
   }, [defaultBacktestForm, strategy?.usId]);
 
@@ -804,11 +1148,15 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     setBacktestForm(defaultBacktestForm);
     setBacktestResult(null);
     setBacktestError(null);
+    setBacktestProgressStageCode('');
     setBacktestProgressStage('');
     setBacktestProgressMessage('');
     setBacktestProgressPercent(null);
     setBacktestFoundPositions(0);
     setBacktestTotalPositions(0);
+    setBacktestWinCount(0);
+    setBacktestLossCount(0);
+    setBacktestWinRate(null);
     setBacktestStreamingTrades([]);
   };
 
@@ -908,6 +1256,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 
     const payload: BacktestRunPayload = {
       usId: strategy.usId,
+      executionMode: 'batch_open_close',
       initialCapital: initialCapitalResult.value ?? 0,
       feeRate: feeRateResult.value ?? 0,
       fundingRate: fundingRateResult.value ?? 0,
@@ -962,6 +1311,9 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         return;
       }
 
+      if (payload.stage) {
+        setBacktestProgressStageCode(payload.stage);
+      }
       if (payload.stageName) {
         setBacktestProgressStage(payload.stageName);
       }
@@ -977,11 +1329,23 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
       if (typeof payload.totalPositions === 'number') {
         setBacktestTotalPositions(payload.totalPositions);
       }
+      if (typeof payload.winCount === 'number') {
+        setBacktestWinCount(payload.winCount);
+      }
+      if (typeof payload.lossCount === 'number') {
+        setBacktestLossCount(payload.lossCount);
+      }
+      if (typeof payload.winRate === 'number') {
+        setBacktestWinRate(payload.winRate);
+      }
 
       if (Array.isArray(payload.positions) && payload.positions.length > 0) {
         setBacktestStreamingTrades((prev) => {
+          const previewLimit = 100;
+          if (payload.replacePositions) {
+            return (payload.positions ?? []).slice(0, previewLimit);
+          }
           const merged = prev.concat(payload.positions ?? []);
-          const previewLimit = 500;
           if (merged.length <= previewLimit) {
             return merged;
           }
@@ -992,11 +1356,15 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 
     setIsBacktestRunning(true);
     setBacktestError(null);
+    setBacktestProgressStageCode('');
     setBacktestProgressStage('准备中');
     setBacktestProgressMessage('等待回测任务启动');
     setBacktestProgressPercent(0);
     setBacktestFoundPositions(0);
     setBacktestTotalPositions(0);
+    setBacktestWinCount(0);
+    setBacktestLossCount(0);
+    setBacktestWinRate(null);
     setBacktestStreamingTrades([]);
     try {
       const result = await onRunBacktest(payload, reqId);
@@ -1012,44 +1380,167 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     }
   };
 
+  const formatDurationMs = (ms?: number) => {
+    if (ms === null || ms === undefined || Number.isNaN(ms)) {
+      return '-';
+    }
+    return formatDuration(ms);
+  };
+
+  const backtestProgressCountLabel = useMemo(() => {
+    if (backtestProgressStageCode === 'batch_open_phase') {
+      return '已检测开仓';
+    }
+    if (backtestProgressStageCode === 'batch_close_phase') {
+      return '已检测平仓';
+    }
+    if (backtestProgressStageCode === 'collect_positions') {
+      return '已汇总仓位';
+    }
+    return '已处理数量';
+  }, [backtestProgressStageCode]);
+
+  const backtestProgressCountValue = backtestTotalPositions > 0
+    ? `${backtestFoundPositions} / ${backtestTotalPositions}`
+    : `${backtestFoundPositions}`;
+
   const renderStats = (stats: BacktestStats) => (
-    <div className="backtest-stats-grid">
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">总收益</span>
-        <span className="backtest-stat-value">{formatNumber(stats.totalProfit)}</span>
+    <>
+      <div className="backtest-stats-grid">
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">总收益</span>
+          <span className="backtest-stat-value">{formatNumber(stats.totalProfit)}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">总收益率</span>
+          <span className="backtest-stat-value">{formatPercent(stats.totalReturn)}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">最大回撤</span>
+          <span className="backtest-stat-value">{formatPercent(stats.maxDrawdown)}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">胜率</span>
+          <span className="backtest-stat-value">{formatPercent(stats.winRate)}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">交易次数</span>
+          <span className="backtest-stat-value">{stats.tradeCount}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">平均收益</span>
+          <span className="backtest-stat-value">{formatNumber(stats.avgProfit)}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">盈亏比</span>
+          <span className="backtest-stat-value">{formatNumber(stats.profitFactor)}</span>
+        </div>
+        <div className="backtest-stat">
+          <span className="backtest-stat-label">平均盈利/亏损</span>
+          <span className="backtest-stat-value">
+            {formatNumber(stats.avgWin)} / {formatNumber(stats.avgLoss)}
+          </span>
+        </div>
       </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">总收益率</span>
-        <span className="backtest-stat-value">{formatPercent(stats.totalReturn)}</span>
+      <div className="backtest-section backtest-section--advanced">
+        <div className="backtest-section-title">高级指标</div>
+        <div className="backtest-stats-grid">
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">夏普比率</span>
+            <span className="backtest-stat-value">{formatNumber(stats.sharpeRatio)}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">Sortino 比率</span>
+            <span className="backtest-stat-value">{formatNumber(stats.sortinoRatio)}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">年化收益率</span>
+            <span className="backtest-stat-value">{formatPercent(stats.annualizedReturn)}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">Calmar 比率</span>
+            <span className="backtest-stat-value">{formatNumber(stats.calmarRatio)}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">最大连续亏损次数</span>
+            <span className="backtest-stat-value">{stats.maxConsecutiveLosses ?? '-'}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">最大连续盈利次数</span>
+            <span className="backtest-stat-value">{stats.maxConsecutiveWins ?? '-'}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">平均持仓时间</span>
+            <span className="backtest-stat-value">{formatDurationMs(stats.avgHoldingMs)}</span>
+          </div>
+          <div className="backtest-stat">
+            <span className="backtest-stat-label">最大回撤持续时间</span>
+            <span className="backtest-stat-value">{formatDurationMs(stats.maxDrawdownDurationMs)}</span>
+          </div>
+        </div>
       </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">最大回撤</span>
-        <span className="backtest-stat-value">{formatPercent(stats.maxDrawdown)}</span>
+    </>
+  );
+
+  const renderTradeSummary = (summary?: BacktestTradeSummary) => {
+    if (!summary) {
+      return null;
+    }
+    return (
+      <div className="backtest-summary-row">
+        <span>总数：{summary.totalCount}</span>
+        <span>
+          胜/负：{summary.winCount}/{summary.lossCount}
+        </span>
+        <span>最大盈利：{formatNumber(summary.maxProfit)}</span>
+        <span>最大亏损：{formatNumber(summary.maxLoss)}</span>
+        <span>手续费：{formatNumber(summary.totalFee)}</span>
       </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">胜率</span>
-        <span className="backtest-stat-value">{formatPercent(stats.winRate)}</span>
-      </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">交易次数</span>
-        <span className="backtest-stat-value">{stats.tradeCount}</span>
-      </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">平均收益</span>
-        <span className="backtest-stat-value">{formatNumber(stats.avgProfit)}</span>
-      </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">盈亏比</span>
-        <span className="backtest-stat-value">{formatNumber(stats.profitFactor)}</span>
-      </div>
-      <div className="backtest-stat">
-        <span className="backtest-stat-label">平均盈利/亏损</span>
-        <span className="backtest-stat-value">
-          {formatNumber(stats.avgWin)} / {formatNumber(stats.avgLoss)}
+    );
+  };
+
+  const renderEquitySummary = (summary?: BacktestEquitySummary) => {
+    if (!summary) {
+      return null;
+    }
+    return (
+      <div className="backtest-summary-row">
+        <span>点数：{summary.pointCount}</span>
+        <span>
+          最大盈利：{formatNumber(summary.maxPeriodProfit)} @ {formatTimestamp(summary.maxPeriodProfitAt)}
+        </span>
+        <span>
+          最大亏损：{formatNumber(summary.maxPeriodLoss)} @ {formatTimestamp(summary.maxPeriodLossAt)}
+        </span>
+        <span>
+          最高权益：{formatNumber(summary.maxEquity)} @ {formatTimestamp(summary.maxEquityAt)}
+        </span>
+        <span>
+          最低权益：{formatNumber(summary.minEquity)} @ {formatTimestamp(summary.minEquityAt)}
         </span>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const renderEventSummary = (summary?: BacktestEventSummary) => {
+    if (!summary) {
+      return null;
+    }
+    const topTypes = Object.entries(summary.typeCounts ?? {})
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+    return (
+      <div className="backtest-summary-row">
+        <span>总数：{summary.totalCount}</span>
+        <span>
+          时间范围：{formatTimestamp(summary.firstTimestamp)} ~ {formatTimestamp(summary.lastTimestamp)}
+        </span>
+        <span>
+          类型分布：{topTypes.length === 0 ? '-' : topTypes.map(([key, value]) => `${key}:${value}`).join(' / ')}
+        </span>
+      </div>
+    );
+  };
 
   if (!strategy) {
     return null;
@@ -1432,38 +1923,110 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                     <div className="backtest-section-title">鍩虹淇℃伅</div>
                     <div className="backtest-form-grid">
                       <label className="backtest-field">
-                        <span className="backtest-label">浜ゆ槗鎵€</span>
-                        <input
-                          className="backtest-input"
-                          placeholder="渚嬪 binance"
+                        <span className="backtest-label">交易所</span>
+                        <select
+                          className="backtest-select"
                           value={backtestForm.exchange}
                           onChange={(event) => updateBacktestField('exchange', event.target.value)}
-                        />
+                        >
+                          <option value="">请选择</option>
+                          {availableExchanges.map((exchange) => (
+                            <option key={exchange} value={exchange}>
+                              {exchange}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="backtest-field">
-                        <span className="backtest-label">鍛ㄦ湡</span>
-                        <input
-                          className="backtest-input"
-                          placeholder="1m/5m/1h"
+                        <span className="backtest-label">周期</span>
+                        <select
+                          className="backtest-select"
                           value={backtestForm.timeframe}
                           onChange={(event) => updateBacktestField('timeframe', event.target.value)}
-                        />
+                          disabled={!backtestForm.exchange || availableTimeframes.length === 0}
+                        >
+                          <option value="">请选择</option>
+                          {availableTimeframes.map((timeframe) => (
+                            <option key={timeframe} value={timeframe}>
+                              {timeframe}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="backtest-field backtest-field--full">
                         <span className="backtest-label">标的列表</span>
-                        <input
-                          className="backtest-input"
-                          placeholder="BTC/USDT, ETH/USDT"
-                          value={backtestForm.symbols}
-                          onChange={(event) => updateBacktestField('symbols', event.target.value)}
-                        />
-                        <span className="backtest-hint">多个标的用逗号或空格分隔</span>
+                        <div className="backtest-symbols-input-wrapper">
+                          <input
+                            className="backtest-input"
+                            placeholder="BTC/USDT, ETH/USDT"
+                            value={backtestForm.symbols}
+                            onChange={(event) => updateBacktestField('symbols', event.target.value)}
+                            disabled={!backtestForm.exchange}
+                          />
+                          {backtestForm.exchange && availableSymbols.length > 0 && (
+                            <div className="backtest-symbols-suggestions">
+                              {availableSymbols.map((symbol) => {
+                                const symbols = backtestForm.symbols.split(/[,\s]+/).filter(Boolean);
+                                const isSelected = symbols.includes(symbol);
+                                return (
+                                  <button
+                                    key={symbol}
+                                    type="button"
+                                    className={`backtest-symbol-tag ${isSelected ? 'selected' : ''}`}
+                                    onClick={() => {
+                                      const symbols = backtestForm.symbols.split(/[,\s]+/).filter(Boolean);
+                                      if (isSelected) {
+                                        const newSymbols = symbols.filter((s) => s !== symbol);
+                                        updateBacktestField('symbols', newSymbols.join(', '));
+                                      } else {
+                                        symbols.push(symbol);
+                                        updateBacktestField('symbols', symbols.join(', '));
+                                      }
+                                    }}
+                                  >
+                                    {symbol}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                        <span className="backtest-hint">多个标的用逗号或空格分隔，或点击下方标签选择</span>
                       </label>
                     </div>
                   </div>
 
                   <div className="backtest-section">
                     <div className="backtest-section-title">时间范围</div>
+                    {supportedTimeRange && (
+                      <div className="backtest-time-range-info">
+                        <span className="backtest-time-range-label">支持的回测时间范围：</span>
+                        <span className="backtest-time-range-value">
+                          {supportedTimeRange.start.toLocaleString('zh-CN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}{' '}
+                          ~{' '}
+                          {supportedTimeRange.end.toLocaleString('zh-CN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                        <button
+                          type="button"
+                          className="backtest-full-range-btn"
+                          onClick={handleFullRangeBacktest}
+                        >
+                          全量回测
+                        </button>
+                      </div>
+                    )}
                     <div className="backtest-form-grid">
                       <label className="backtest-field">
                         <span className="backtest-label">回测方式</span>
@@ -1719,16 +2282,17 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                       <span>当前阶段：{backtestProgressStage || '-'}</span>
                       <span>阶段说明：{backtestProgressMessage || '-'}</span>
                       <span>阶段进度：{backtestProgressPercent === null ? '-' : formatPercent(backtestProgressPercent)}</span>
-                      <span>
-                        已汇总仓位：
-                        {backtestTotalPositions > 0
-                          ? `${backtestFoundPositions} / ${backtestTotalPositions}`
-                          : `${backtestFoundPositions}`}
-                      </span>
+                      <span>{backtestProgressCountLabel}：{backtestProgressCountValue}</span>
+                      {backtestProgressStageCode === 'batch_close_phase' && (
+                        <span>当前胜率：{backtestWinRate === null ? '-' : formatPercent(backtestWinRate)}</span>
+                      )}
+                      {backtestProgressStageCode === 'batch_close_phase' && (
+                        <span>胜/负：{backtestWinCount}/{backtestLossCount}</span>
+                      )}
                     </div>
                     {backtestStreamingTrades.length > 0 && (
                       <details className="backtest-details" open>
-                        <summary>仓位增量预览（{backtestStreamingTrades.length}）</summary>
+                        <summary>最近仓位预览（{backtestStreamingTrades.length}）</summary>
                         <div className="backtest-table-wrapper">
                           <table className="backtest-table">
                             <thead>
@@ -1759,7 +2323,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                             </tbody>
                           </table>
                         </div>
-                        <div className="backtest-hint">仅展示最近 500 条增量仓位预览，完整结果将在回测结束后返回。</div>
+                        <div className="backtest-hint">仅展示最近 100 条仓位预览，完整结果将在回测结束后返回。</div>
                       </details>
                     )}
                   </div>
@@ -1787,121 +2351,119 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                         {backtestResult.symbols.length === 0 ? (
                           <div className="backtest-empty">暂无标的结果</div>
                         ) : (
-                          backtestResult.symbols.map((symbolResult) => (
-                            <div className="backtest-symbol-card" key={symbolResult.symbol}>
-                              <div className="backtest-symbol-header">
-                                <div className="backtest-symbol-title">{symbolResult.symbol}</div>
-                                <div className="backtest-symbol-meta">
-                                  Bars: {symbolResult.bars} | 初始资金: {formatNumber(symbolResult.initialCapital)}
+                          backtestResult.symbols.map((symbolResult) => {
+                            const tradeCount = symbolResult.tradeSummary?.totalCount ?? symbolResult.tradesRaw?.length ?? 0;
+                            const equityCount =
+                              symbolResult.equitySummary?.pointCount ?? symbolResult.equityCurveRaw?.length ?? 0;
+                            const eventCount = symbolResult.eventSummary?.totalCount ?? symbolResult.eventsRaw?.length ?? 0;
+
+                            return (
+                              <div className="backtest-symbol-card" key={symbolResult.symbol}>
+                                <div className="backtest-symbol-header">
+                                  <div className="backtest-symbol-title">{symbolResult.symbol}</div>
+                                  <div className="backtest-symbol-meta">
+                                    Bars: {symbolResult.bars} | 初始资金: {formatNumber(symbolResult.initialCapital)}
+                                  </div>
                                 </div>
+                                {renderStats(symbolResult.stats)}
+
+                                <details className="backtest-details">
+                                  <summary>交易明细（{tradeCount}）</summary>
+                                  {renderTradeSummary(symbolResult.tradeSummary)}
+                                  <LazyTable<BacktestTrade>
+                                    rawItems={symbolResult.tradesRaw}
+                                    parseItem={(raw) => parseJsonSafe<BacktestTrade>(raw)}
+                                    colSpan={10}
+                                    emptyText="暂无交易"
+                                    columns={
+                                      <tr>
+                                        <th>方向</th>
+                                        <th>开仓时间</th>
+                                        <th>平仓时间</th>
+                                        <th>开仓价</th>
+                                        <th>平仓价</th>
+                                        <th>数量</th>
+                                        <th>手续费</th>
+                                        <th>盈亏</th>
+                                        <th>原因</th>
+                                        <th>滑点Bps</th>
+                                      </tr>
+                                    }
+                                    renderRow={(trade, tradeIndex) => (
+                                      <tr key={`${trade.entryTime}-${tradeIndex}`}>
+                                        <td>{trade.side}</td>
+                                        <td>{formatTimestamp(trade.entryTime)}</td>
+                                        <td>{formatTimestamp(trade.exitTime)}</td>
+                                        <td>{formatNumber(trade.entryPrice)}</td>
+                                        <td>{formatNumber(trade.exitPrice)}</td>
+                                        <td>{formatNumber(trade.qty)}</td>
+                                        <td>{formatNumber(trade.fee)}</td>
+                                        <td>{formatNumber(trade.pnL)}</td>
+                                        <td>{trade.exitReason || '-'}</td>
+                                        <td>{trade.slippageBps}</td>
+                                      </tr>
+                                    )}
+                                  />
+                                </details>
+
+                                <details className="backtest-details">
+                                  <summary>资金曲线（{equityCount}）</summary>
+                                  {renderEquitySummary(symbolResult.equitySummary)}
+                                  <LazyTable<BacktestEquityPoint>
+                                    rawItems={symbolResult.equityCurveRaw}
+                                    parseItem={(raw) => parseJsonSafe<BacktestEquityPoint>(raw)}
+                                    colSpan={6}
+                                    emptyText="暂无资金曲线"
+                                    columns={
+                                      <tr>
+                                        <th>时间</th>
+                                        <th>权益</th>
+                                        <th>已实现</th>
+                                        <th>未实现</th>
+                                        <th>区间已实现</th>
+                                        <th>区间未实现</th>
+                                      </tr>
+                                    }
+                                    renderRow={(point, pointIndex) => (
+                                      <tr key={`${point.timestamp}-${pointIndex}`}>
+                                        <td>{formatTimestamp(point.timestamp)}</td>
+                                        <td>{formatNumber(point.equity)}</td>
+                                        <td>{formatNumber(point.realizedPnl)}</td>
+                                        <td>{formatNumber(point.unrealizedPnl)}</td>
+                                        <td>{formatNumber(point.periodRealizedPnl)}</td>
+                                        <td>{formatNumber(point.periodUnrealizedPnl)}</td>
+                                      </tr>
+                                    )}
+                                  />
+                                </details>
+
+                                <details className="backtest-details">
+                                  <summary>事件日志（{eventCount}）</summary>
+                                  {renderEventSummary(symbolResult.eventSummary)}
+                                  <LazyTable<BacktestEvent>
+                                    rawItems={symbolResult.eventsRaw}
+                                    parseItem={(raw) => parseJsonSafe<BacktestEvent>(raw)}
+                                    colSpan={3}
+                                    emptyText="暂无事件"
+                                    columns={
+                                      <tr>
+                                        <th>时间</th>
+                                        <th>类型</th>
+                                        <th>内容</th>
+                                      </tr>
+                                    }
+                                    renderRow={(evt, evtIndex) => (
+                                      <tr key={`${evt.timestamp}-${evtIndex}`}>
+                                        <td>{formatTimestamp(evt.timestamp)}</td>
+                                        <td>{evt.type}</td>
+                                        <td>{evt.message}</td>
+                                      </tr>
+                                    )}
+                                  />
+                                </details>
                               </div>
-                              {renderStats(symbolResult.stats)}
-
-                              <details className="backtest-details">
-                                <summary>交易明细（{symbolResult.trades.length}）</summary>
-                                {symbolResult.trades.length === 0 ? (
-                                  <div className="backtest-empty">暂无交易</div>
-                                ) : (
-                                  <div className="backtest-table-wrapper">
-                                    <table className="backtest-table">
-                                      <thead>
-                                        <tr>
-                                          <th>方向</th>
-                                          <th>开仓时间</th>
-                                          <th>平仓时间</th>
-                                          <th>开仓价</th>
-                                          <th>平仓价</th>
-                                          <th>数量</th>
-                                          <th>手续费</th>
-                                          <th>盈亏</th>
-                                          <th>原因</th>
-                                          <th>滑点Bps</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {symbolResult.trades.map((trade, tradeIndex) => (
-                                          <tr key={`${trade.entryTime}-${tradeIndex}`}>
-                                            <td>{trade.side}</td>
-                                            <td>{formatTimestamp(trade.entryTime)}</td>
-                                            <td>{formatTimestamp(trade.exitTime)}</td>
-                                            <td>{formatNumber(trade.entryPrice)}</td>
-                                            <td>{formatNumber(trade.exitPrice)}</td>
-                                            <td>{formatNumber(trade.qty)}</td>
-                                            <td>{formatNumber(trade.fee)}</td>
-                                            <td>{formatNumber(trade.pnL)}</td>
-                                            <td>{trade.exitReason || '-'}</td>
-                                            <td>{trade.slippageBps}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </details>
-
-                              <details className="backtest-details">
-                                <summary>资金曲线（{symbolResult.equityCurve.length}）</summary>
-                                {symbolResult.equityCurve.length === 0 ? (
-                                  <div className="backtest-empty">暂无资金曲线</div>
-                                ) : (
-                                  <div className="backtest-table-wrapper">
-                                    <table className="backtest-table">
-                                      <thead>
-                                        <tr>
-                                          <th>时间</th>
-                                          <th>权益</th>
-                                          <th>已实现</th>
-                                          <th>未实现</th>
-                                          <th>区间已实现</th>
-                                          <th>区间未实现</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {symbolResult.equityCurve.map((point, pointIndex) => (
-                                          <tr key={`${point.timestamp}-${pointIndex}`}>
-                                            <td>{formatTimestamp(point.timestamp)}</td>
-                                            <td>{formatNumber(point.equity)}</td>
-                                            <td>{formatNumber(point.realizedPnl)}</td>
-                                            <td>{formatNumber(point.unrealizedPnl)}</td>
-                                            <td>{formatNumber(point.periodRealizedPnl)}</td>
-                                            <td>{formatNumber(point.periodUnrealizedPnl)}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </details>
-
-                              <details className="backtest-details">
-                                <summary>事件日志（{symbolResult.events.length}）</summary>
-                                {symbolResult.events.length === 0 ? (
-                                  <div className="backtest-empty">暂无事件</div>
-                                ) : (
-                                  <div className="backtest-table-wrapper">
-                                    <table className="backtest-table">
-                                      <thead>
-                                        <tr>
-                                          <th>时间</th>
-                                          <th>类型</th>
-                                          <th>内容</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {symbolResult.events.map((evt, evtIndex) => (
-                                          <tr key={`${evt.timestamp}-${evtIndex}`}>
-                                            <td>{formatTimestamp(evt.timestamp)}</td>
-                                            <td>{evt.type}</td>
-                                            <td>{evt.message}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </details>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     </div>

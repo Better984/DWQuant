@@ -10,23 +10,29 @@ namespace ServerTest.Modules.Backtest.Application
     /// </summary>
     internal sealed class BacktestMarketDataProvider : IMarketDataProvider
     {
+        private static readonly IReadOnlyDictionary<long, int> EmptyTimestampIndex = new Dictionary<long, int>();
+
         private sealed class BacktestSeries
         {
             public BacktestSeries(List<OHLCV> bars)
             {
                 Bars = bars;
+                Timestamps = new long[bars.Count];
                 TimestampIndex = new Dictionary<long, int>(bars.Count);
                 for (var i = 0; i < bars.Count; i++)
                 {
                     var ts = (long)(bars[i].timestamp ?? 0);
-                    if (ts > 0 && !TimestampIndex.ContainsKey(ts))
+                    Timestamps[i] = ts;
+                    if (ts > 0)
                     {
-                        TimestampIndex[ts] = i;
+                        // 仅记录首次出现的时间戳索引，避免 ContainsKey + 写入的双重查找。
+                        TimestampIndex.TryAdd(ts, i);
                     }
                 }
             }
 
             public List<OHLCV> Bars { get; }
+            public long[] Timestamps { get; }
             public Dictionary<long, int> TimestampIndex { get; }
         }
 
@@ -80,8 +86,16 @@ namespace ServerTest.Modules.Backtest.Application
 
         public bool TryGetBar(string exchangeId, string timeframe, string symbol, long timestamp, out OHLCV bar)
         {
+            return TryGetBarBySeriesKey(BuildKey(exchangeId, symbol, timeframe), timestamp, out bar);
+        }
+
+        /// <summary>
+        /// 按已构建的序列 key 直接读取 K 线（用于主循环热路径，避免重复归一化和拼 key）。
+        /// </summary>
+        public bool TryGetBarBySeriesKey(string seriesKey, long timestamp, out OHLCV bar)
+        {
             bar = default;
-            if (!_series.TryGetValue(BuildKey(exchangeId, symbol, timeframe), out var series))
+            if (!_series.TryGetValue(seriesKey, out var series))
             {
                 return false;
             }
@@ -100,6 +114,29 @@ namespace ServerTest.Modules.Backtest.Application
             return true;
         }
 
+        /// <summary>
+        /// 读取指定序列的底层缓存引用（仅用于回测高速只读场景）。
+        /// </summary>
+        public bool TryGetSeries(
+            string exchangeId,
+            string timeframe,
+            string symbol,
+            out IReadOnlyList<OHLCV> bars,
+            out IReadOnlyDictionary<long, int> timestampIndex)
+        {
+            bars = Array.Empty<OHLCV>();
+            timestampIndex = EmptyTimestampIndex;
+
+            if (!_series.TryGetValue(BuildKey(exchangeId, symbol, timeframe), out var series))
+            {
+                return false;
+            }
+
+            bars = series.Bars;
+            timestampIndex = series.TimestampIndex;
+            return true;
+        }
+
         public IReadOnlyList<long> GetTimestamps(string exchangeId, string timeframe, string symbol)
         {
             if (!_series.TryGetValue(BuildKey(exchangeId, symbol, timeframe), out var series))
@@ -107,13 +144,7 @@ namespace ServerTest.Modules.Backtest.Application
                 return Array.Empty<long>();
             }
 
-            var result = new long[series.Bars.Count];
-            for (var i = 0; i < series.Bars.Count; i++)
-            {
-                result[i] = (long)(series.Bars[i].timestamp ?? 0);
-            }
-
-            return result;
+            return series.Timestamps;
         }
 
         private static int FindLastIndex(List<OHLCV> items, long target)
@@ -145,7 +176,12 @@ namespace ServerTest.Modules.Backtest.Application
             var exchangeKey = MarketDataKeyNormalizer.NormalizeExchange(exchangeId);
             var symbolKey = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
             var timeframeKey = MarketDataKeyNormalizer.NormalizeTimeframe(timeframe);
-            return $"{exchangeKey}|{symbolKey}|{timeframeKey}";
+            return BuildKeyFromNormalized(exchangeKey, symbolKey, timeframeKey);
+        }
+
+        public static string BuildKeyFromNormalized(string exchangeKey, string symbolKey, string timeframeKey)
+        {
+            return string.Concat(exchangeKey, "|", symbolKey, "|", timeframeKey);
         }
     }
 }

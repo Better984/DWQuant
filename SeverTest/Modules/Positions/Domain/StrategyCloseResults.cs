@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-// ??????
+// 策略平仓结果相关模型
 namespace ServerTest.Modules.Positions.Domain
 {
     public sealed class StrategyClosePositionsResult

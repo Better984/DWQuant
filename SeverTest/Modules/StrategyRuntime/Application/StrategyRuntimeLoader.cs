@@ -10,7 +10,7 @@ using ServerTest.Modules.StrategyRuntime.Infrastructure;
 namespace ServerTest.Modules.StrategyRuntime.Application
 {
     /// <summary>
-    /// 绛栫暐杩愯鏃跺姞杞藉櫒锛岀粺涓€绛栫暐閰嶇疆瑙ｆ瀽涓?API Key 鏍￠獙閫昏緫
+    /// 策略运行时加载器，统一策略配置解析与 API Key 校验逻辑
     /// </summary>
     public sealed class StrategyRuntimeLoader
     {

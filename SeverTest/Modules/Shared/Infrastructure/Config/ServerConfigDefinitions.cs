@@ -50,6 +50,25 @@ namespace ServerTest.Infrastructure.Config
             new ServerConfigDefinition("WebSocket:ConnectionKeyRefreshSeconds", "WebSocket", "int", "连接键刷新间隔（秒，需重启）", false),
 
             new ServerConfigDefinition("Trading:EnableSandboxMode", "交易", "bool", "是否启用沙盒模式（需重启）", false),
+
+            new ServerConfigDefinition("Backtest:MaxConcurrentTasks", "回测", "int", "全局最大并发回测任务数（实时生效）", true),
+            new ServerConfigDefinition("Backtest:InnerParallelism", "回测", "int", "单任务主循环每个时间点的 symbol 并行度（<=0 表示按 CPU 核心数，实时生效）", true),
+            new ServerConfigDefinition("Backtest:MaxTasksPerUser", "回测", "int", "单用户最大并发回测任务数（实时生效）", true),
+            new ServerConfigDefinition("Backtest:MaxQueueSize", "回测", "int", "回测队列最大排队数量（实时生效）", true),
+            new ServerConfigDefinition("Backtest:MaxBarCount", "回测", "int", "单次回测最大 K 线数量（实时生效）", true),
+            new ServerConfigDefinition("Backtest:TaskTimeoutMinutes", "回测", "int", "单次回测最大执行时间（分钟，实时生效）", true),
+            new ServerConfigDefinition("Backtest:ResultRetentionDays", "回测", "int", "回测结果保留天数（实时生效）", true),
+            new ServerConfigDefinition("Backtest:ExecutionModeDefault", "回测", "string", "默认执行模式（batch_open_close/timeline，实时生效）", true),
+            new ServerConfigDefinition("Backtest:BatchCloseParallelism", "回测", "int", "批量模式统一平仓并行度（<=0 按 CPU 核心数，实时生效）", true),
+            new ServerConfigDefinition("Backtest:BatchCloseCandidateSliceSize", "回测", "int", "批量模式单个并行任务处理的平仓候选数量（实时生效）", true),
+            new ServerConfigDefinition("Backtest:BatchAllowOverlappingPositions", "回测", "bool", "批量模式是否允许重叠仓位（实时生效）", true),
+            new ServerConfigDefinition("Backtest:ObjectPool:BarDictionaryPrewarm", "回测", "int", "回测对象池：K线字典预热数量（需重启）", false),
+            new ServerConfigDefinition("Backtest:ObjectPool:ConditionResultListPrewarm", "回测", "int", "回测对象池：条件结果列表预热数量（需重启）", false),
+            new ServerConfigDefinition("Backtest:ObjectPool:StrategyMethodListPrewarm", "回测", "int", "回测对象池：条件方法列表预热数量（需重启）", false),
+            new ServerConfigDefinition("Backtest:ObjectPool:TimestampSetPrewarm", "回测", "int", "回测对象池：时间戳集合预热数量（需重启）", false),
+            new ServerConfigDefinition("Backtest:ObjectPool:IndicatorTaskPrewarm", "回测", "int", "回测对象池：指标任务预热数量（需重启）", false),
+            new ServerConfigDefinition("Backtest:ObjectPool:StrategyContextPrewarm", "回测", "int", "回测对象池：策略上下文预热数量（需重启）", false),
+            new ServerConfigDefinition("Backtest:WorkerPollingIntervalMs", "回测", "int", "任务轮询间隔（毫秒，需重启）", false),
         };
     }
 

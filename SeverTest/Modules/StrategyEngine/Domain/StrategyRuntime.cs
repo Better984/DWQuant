@@ -90,7 +90,37 @@ namespace ServerTest.Modules.StrategyEngine.Domain
 
     public sealed class StrategyExecutionContext
     {
+        private static readonly StrategyModel EmptyStrategy = new();
+
+        internal StrategyExecutionContext()
+        {
+            Strategy = EmptyStrategy;
+            Task = default;
+            ValueResolver = NoopStrategyValueResolver.Instance;
+            CurrentTime = DateTimeOffset.UnixEpoch;
+        }
+
         public StrategyExecutionContext(
+            StrategyModel strategy,
+            MarketDataTask task,
+            IStrategyValueResolver? valueResolver = null,
+            IStrategyActionExecutor? actionExecutor = null,
+            DateTimeOffset? currentTime = null)
+        {
+            Reset(strategy, task, valueResolver, actionExecutor, currentTime);
+        }
+
+        public StrategyModel Strategy { get; private set; } = EmptyStrategy;
+        public StrategyConfig StrategyConfig => Strategy.StrategyConfig;
+        public MarketDataTask Task { get; private set; } = default;
+        public IStrategyValueResolver ValueResolver { get; private set; } = NoopStrategyValueResolver.Instance;
+        public IStrategyActionExecutor? ActionExecutor { get; private set; }
+        public DateTimeOffset CurrentTime { get; private set; } = DateTimeOffset.UnixEpoch;
+
+        /// <summary>
+        /// 重置执行上下文，供回测对象池复用。
+        /// </summary>
+        internal void Reset(
             StrategyModel strategy,
             MarketDataTask task,
             IStrategyValueResolver? valueResolver = null,
@@ -104,11 +134,16 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             CurrentTime = currentTime ?? DateTimeOffset.FromUnixTimeMilliseconds(task.CandleTimestamp);
         }
 
-        public StrategyModel Strategy { get; }
-        public StrategyConfig StrategyConfig => Strategy.StrategyConfig;
-        public MarketDataTask Task { get; }
-        public IStrategyValueResolver ValueResolver { get; }
-        public IStrategyActionExecutor? ActionExecutor { get; }
-        public DateTimeOffset CurrentTime { get; }
+        /// <summary>
+        /// 清理上下文引用，避免对象池中残留大对象。
+        /// </summary>
+        internal void Clear()
+        {
+            Strategy = EmptyStrategy;
+            Task = default;
+            ValueResolver = NoopStrategyValueResolver.Instance;
+            ActionExecutor = null;
+            CurrentTime = DateTimeOffset.UnixEpoch;
+        }
     }
 }

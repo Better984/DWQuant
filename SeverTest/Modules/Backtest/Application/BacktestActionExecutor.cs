@@ -22,10 +22,13 @@ namespace ServerTest.Modules.Backtest.Application
             public decimal? StopLossPct { get; set; }
             public decimal? TakeProfitPct { get; set; }
             public decimal FeeRate { get; set; }
+            public decimal FundingRate { get; set; }
             public int SlippageBps { get; set; }
             public bool AutoReverse { get; set; }
             public decimal ContractSize { get; set; } = 1m;
             public ContractDetails? Contract { get; set; }
+            /// <summary>累计资金费用</summary>
+            public decimal AccumulatedFunding { get; set; }
 
             public BacktestPosition? Position { get; set; }
             public decimal RealizedPnl { get; set; }
@@ -46,21 +49,38 @@ namespace ServerTest.Modules.Backtest.Application
         }
 
         private readonly Dictionary<string, SymbolState> _states;
-        private readonly Dictionary<string, OHLCV> _currentBars = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, OHLCV> _currentBars;
 
         public BacktestActionExecutor(Dictionary<string, SymbolState> states)
         {
             _states = states ?? throw new ArgumentNullException(nameof(states));
+            _currentBars = new Dictionary<string, OHLCV>(Math.Max(4, _states.Count), StringComparer.OrdinalIgnoreCase);
         }
 
-        public void UpdateCurrentBar(string symbol, OHLCV bar)
+        /// <summary>
+        /// 按时间点批量刷新当前价格快照。
+        /// 注意：该方法由主循环在进入并行 Symbol 处理前串行调用，
+        /// 并行阶段仅执行只读访问，避免字典并发写导致的线程安全问题。
+        /// </summary>
+        public void UpdateCurrentBars(IReadOnlyDictionary<string, OHLCV> bars)
         {
-            if (string.IsNullOrWhiteSpace(symbol))
+            if (bars == null || bars.Count == 0)
             {
+                _currentBars.Clear();
                 return;
             }
 
-            _currentBars[symbol] = bar;
+            _currentBars.Clear();
+            _currentBars.EnsureCapacity(bars.Count);
+            foreach (var item in bars)
+            {
+                if (string.IsNullOrWhiteSpace(item.Key))
+                {
+                    continue;
+                }
+
+                _currentBars[item.Key] = item.Value;
+            }
         }
 
         public SymbolState? GetState(string symbol)
@@ -124,7 +144,7 @@ namespace ServerTest.Modules.Backtest.Application
                 return BuildResult(method.Method ?? "Unknown", false, "K线收盘价无效");
             }
 
-            var execPrice = ApplySlippage(Convert.ToDecimal(closePrice), orderSide, state.SlippageBps);
+            var execPrice = BacktestSlippageHelper.ApplySlippage(Convert.ToDecimal(closePrice), orderSide, state.SlippageBps);
 
             if (isClose)
             {
@@ -181,6 +201,38 @@ namespace ServerTest.Modules.Backtest.Application
             return BuildResult(method.Method ?? "Unknown", true, "已开仓");
         }
 
+        /// <summary>
+        /// 结算资金费率（每根 K 线调用一次，模拟 8h 结算周期）
+        /// </summary>
+        public void ApplyFundingRate(SymbolState state, OHLCV bar, long timestamp, long timeframeMs)
+        {
+            if (state.Position == null || state.FundingRate == 0m)
+                return;
+
+            // 简化模型：按比例将资金费率分摊到每根 K 线
+            // 实际交易所每 8 小时结算一次，这里按时间比例分摊
+            const long FundingIntervalMs = 8 * 60 * 60 * 1000L; // 8小时
+            var ratio = (decimal)timeframeMs / FundingIntervalMs;
+            var close = Convert.ToDecimal(bar.close ?? bar.open ?? 0d);
+            if (close <= 0)
+                return;
+
+            var notional = close * state.Position.Qty * state.Position.ContractSize;
+            var funding = notional * state.FundingRate * ratio;
+
+            // 多头支付正资金费率，空头收取正资金费率
+            if (state.Position.Side.Equals("Long", StringComparison.OrdinalIgnoreCase))
+            {
+                state.AccumulatedFunding += funding;
+                state.RealizedPnl -= funding;
+            }
+            else
+            {
+                state.AccumulatedFunding -= funding;
+                state.RealizedPnl += funding;
+            }
+        }
+
         public bool TryProcessRisk(SymbolState state, OHLCV bar, long timestamp)
         {
             if (state.Position == null)
@@ -207,7 +259,7 @@ namespace ServerTest.Modules.Backtest.Application
 
             var reason = takeProfitHit ? "TakeProfit" : "StopLoss";
             var orderSide = position.Side.Equals("Long", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy";
-            var execPrice = ApplySlippage(Convert.ToDecimal(close), orderSide, state.SlippageBps);
+            var execPrice = BacktestSlippageHelper.ApplySlippage(Convert.ToDecimal(close), orderSide, state.SlippageBps);
             return TryClosePosition(state, execPrice, timestamp, reason);
         }
 
@@ -296,19 +348,6 @@ namespace ServerTest.Modules.Backtest.Application
             }
 
             return qty;
-        }
-
-        private static decimal ApplySlippage(decimal price, string orderSide, int slippageBps)
-        {
-            if (slippageBps == 0)
-            {
-                return price;
-            }
-
-            var ratio = slippageBps / 10000m;
-            return orderSide.Equals("buy", StringComparison.OrdinalIgnoreCase)
-                ? price * (1 + ratio)
-                : price * (1 - ratio);
         }
 
         private static decimal? BuildStopLossPrice(decimal entryPrice, decimal? stopLossPct, int leverage, string side)
