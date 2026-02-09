@@ -12,7 +12,7 @@
 - HomeModule.tsx: 首页模块入口容器。
 - IndicatorGeneratorSelector.tsx: 指标生成/选择弹窗，输出指标配置。
 - IndicatorModule.tsx: 指标模块入口页容器。
-- MarketChart.tsx: 行情图表视图封装。
+- MarketChart.tsx: 行情图表视图封装，绘图工具栏线段类、通道类与形状类图标使用 `assets/KLineCharts` 本地 SVG。
 - MarketModule.tsx: 行情模块入口容器。
 - SignIn4.tsx: 登录表单页面。
 - SnowUITest.tsx: UI 组件展示/调试页面。

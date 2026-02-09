@@ -1,9 +1,50 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import HorizontalLineIcon from "../assets/KLineCharts/01_horizontal_line.svg?react";
+import HorizontalRayIcon from "../assets/KLineCharts/02_horizontal_ray.svg?react";
+import TrendLineIcon from "../assets/KLineCharts/03_trend_line.svg?react";
+import VerticalLineIcon from "../assets/KLineCharts/04_vertical_line.svg?react";
+import VerticalRayIcon from "../assets/KLineCharts/05_vertical_ray.svg?react";
+import VerticalSegmentIcon from "../assets/KLineCharts/06_vertical_segment.svg?react";
+import ExtendedLineIcon from "../assets/KLineCharts/07_extended_line.svg?react";
+import RayIcon from "../assets/KLineCharts/08_ray.svg?react";
+import SegmentIcon from "../assets/KLineCharts/09_segment.svg?react";
+import PriceLineIcon from "../assets/KLineCharts/10_price_line.svg?react";
+import RectangleIcon from "../assets/KLineCharts/01_rectangle.svg?react";
+import CircleCenterRightIcon from "../assets/KLineCharts/02_circle_center_right.svg?react";
+import TriangleIcon from "../assets/KLineCharts/03_triangle.svg?react";
+import ParallelogramIcon from "../assets/KLineCharts/04_parallelogram.svg?react";
+import ParallelLinesIcon from "../assets/KLineCharts/05_parallel_lines.svg?react";
+import PriceChannelIcon from "../assets/KLineCharts/06_price_channel.svg?react";
+// 斐波那契工具与江恩箱图标（11~17）
+import FibonacciLineIcon from "../assets/KLineCharts/11_fibonacci_retracement_line.svg?react";
+import FibonacciSegmentIcon from "../assets/KLineCharts/12_fibonacci_retracement_segment.svg?react";
+import FibonacciCircleIcon from "../assets/KLineCharts/13_fibonacci_circle.svg?react";
+import FibonacciSpiralIcon from "../assets/KLineCharts/14_fibonacci_spiral.svg?react";
+import FibonacciSpeedFanIcon from "../assets/KLineCharts/15_fibonacci_speed_resistance_fan.svg?react";
+import FibonacciExtensionIcon from "../assets/KLineCharts/16_fibonacci_extension.svg?react";
+import GannBoxIcon from "../assets/KLineCharts/17_gann_box.svg?react";
+// 波浪形态工具图标（18~23）
+import WaveXabcdIcon from "../assets/KLineCharts/18_wave_xabcd.svg?react";
+import WaveAbcdIcon from "../assets/KLineCharts/19_wave_abcd.svg?react";
+import WaveThreeIcon from "../assets/KLineCharts/20_wave_three.svg?react";
+import WaveFiveIcon from "../assets/KLineCharts/21_wave_five.svg?react";
+import WaveEightIcon from "../assets/KLineCharts/22_wave_eight.svg?react";
+import WaveAnyIcon from "../assets/KLineCharts/23_wave_any.svg?react";
+import MagnetWeakOnIcon from "../assets/KLineCharts/magnet-weak-on.svg?react";
+import MagnetWeakOffIcon from "../assets/KLineCharts/magnet-weak-off.svg?react";
+import MagnetStrongOnIcon from "../assets/KLineCharts/magnet-strong-on.svg?react";
+import MagnetStrongOffIcon from "../assets/KLineCharts/magnet-strong-off.svg?react";
+import DrawingLockOffIcon from "../assets/KLineCharts/drawing-lock-off.svg?react";
+import DrawingLockOnIcon from "../assets/KLineCharts/drawing-lock-on.svg?react";
+import DrawingShowAllIcon from "../assets/KLineCharts/drawing-show-all.svg?react";
+import DrawingHideAllIcon from "../assets/KLineCharts/drawing-hide-all.svg?react";
+import DrawingClearAllIcon from "../assets/KLineCharts/drawing-clear-all.svg?react";
 import {
   dispose,
   getSupportedIndicators,
   init,
   LoadDataType,
+  registerYAxis,
   type Chart,
   type KLineData,
 } from "klinecharts";
@@ -23,9 +64,14 @@ type MarketChartProps = {
 
 type IndicatorOption = {
   label: string;
+  /** klinecharts 内部指标名称 */
   value: string;
+  /** 是否叠加在同一 pane 上 */
   stack: boolean;
+  /** 使用的 pane 类型，用于区分主图 / 副图 */
   pane?: "main" | "sub";
+  /** 指标中文描述，用于弹窗展示 */
+  description?: string;
 };
 
 const DEFAULT_SYMBOL = "Binance:BTC/USDT";
@@ -48,13 +94,40 @@ const PERIOD_TABS = [
 ];
 
 const INDICATOR_OPTIONS: IndicatorOption[] = [
-  { label: "MA", value: "MA", stack: true, pane: "main" },
-  { label: "EMA", value: "EMA", stack: true, pane: "main" },
-  { label: "BOLL", value: "BOLL", stack: true, pane: "main" },
-  { label: "VOL", value: "VOL", stack: false },
-  { label: "MACD", value: "MACD", stack: false },
-  { label: "RSI", value: "RSI", stack: false },
-  { label: "KDJ", value: "KDJ", stack: false },
+  // 主图指标
+  { label: "MA", value: "MA", stack: true, pane: "main", description: "移动平均线" },
+  { label: "EMA", value: "EMA", stack: true, pane: "main", description: "指数平滑移动平均线" },
+  { label: "SMA", value: "SMA", stack: true, pane: "main", description: "平滑移动平均线" },
+  { label: "BOLL", value: "BOLL", stack: true, pane: "main", description: "布林线" },
+  { label: "SAR", value: "SAR", stack: true, pane: "main", description: "停损点指向指标" },
+  { label: "BBI", value: "BBI", stack: true, pane: "main", description: "多空指数" },
+  // 副图指标
+  { label: "MA", value: "MA", stack: false, pane: "sub", description: "移动平均线" },
+  { label: "EMA", value: "EMA", stack: false, pane: "sub", description: "指数平滑移动平均线" },
+  { label: "VOL", value: "VOL", stack: false, pane: "sub", description: "成交量" },
+  { label: "MACD", value: "MACD", stack: false, pane: "sub", description: "指数平滑异同平均线" },
+  { label: "BOLL", value: "BOLL", stack: false, pane: "sub", description: "布林线" },
+  { label: "KDJ", value: "KDJ", stack: false, pane: "sub", description: "随机指标" },
+  { label: "RSI", value: "RSI", stack: false, pane: "sub", description: "相对强弱指标" },
+  { label: "BIAS", value: "BIAS", stack: false, pane: "sub", description: "乖离率" },
+  { label: "BRAR", value: "BRAR", stack: false, pane: "sub", description: "情绪指标" },
+  { label: "CCI", value: "CCI", stack: false, pane: "sub", description: "顺势指标" },
+  { label: "DMI", value: "DMI", stack: false, pane: "sub", description: "动向指标" },
+  { label: "CR", value: "CR", stack: false, pane: "sub", description: "能量指标" },
+  { label: "PSY", value: "PSY", stack: false, pane: "sub", description: "心理线" },
+  { label: "DMA", value: "DMA", stack: false, pane: "sub", description: "平行线差指标" },
+  { label: "TRIX", value: "TRIX", stack: false, pane: "sub", description: "三重指数平滑平均线" },
+  { label: "OBV", value: "OBV", stack: false, pane: "sub", description: "能量潮指标" },
+  { label: "VR", value: "VR", stack: false, pane: "sub", description: "成交量变异率" },
+  { label: "WR", value: "WR", stack: false, pane: "sub", description: "威廉指标" },
+  { label: "MTM", value: "MTM", stack: false, pane: "sub", description: "动量指标" },
+  { label: "EMV", value: "EMV", stack: false, pane: "sub", description: "简易波动指标" },
+  { label: "SAR", value: "SAR", stack: false, pane: "sub", description: "停损点指向指标" },
+  { label: "SMA", value: "SMA", stack: false, pane: "sub", description: "平滑移动平均线" },
+  { label: "ROC", value: "ROC", stack: false, pane: "sub", description: "变动率指标" },
+  { label: "PVT", value: "PVT", stack: false, pane: "sub", description: "价量趋势指标" },
+  { label: "BBI", value: "BBI", stack: false, pane: "sub", description: "多空指数" },
+  { label: "AO", value: "AO", stack: false, pane: "sub", description: "动量震荡指标" },
 ];
 
 // 工具栏分组配置 - 完全匹配 KlineCharts Pro
@@ -131,9 +204,25 @@ const DRAWING_TOOL_GROUPS = [
 ];
 
 const TIMEZONE_OPTIONS = [
-  { label: "本地", value: "local" },
-  { label: "UTC", value: "UTC" },
-  { label: "Asia/Shanghai", value: "Asia/Shanghai" },
+  { label: "本地（自动）", value: "local" },
+  { label: "世界统一时间", value: "UTC" },
+  { label: "(UTC-10) 檀香山", value: "Pacific/Honolulu" },
+  { label: "(UTC-8) 朱诺", value: "America/Juneau" },
+  { label: "(UTC-7) 洛杉矶", value: "America/Los_Angeles" },
+  { label: "(UTC-5) 芝加哥", value: "America/Chicago" },
+  { label: "(UTC-4) 多伦多", value: "America/Toronto" },
+  { label: "(UTC-3) 圣保罗", value: "America/Sao_Paulo" },
+  { label: "(UTC+1) 伦敦", value: "Europe/London" },
+  { label: "(UTC+2) 柏林", value: "Europe/Berlin" },
+  { label: "(UTC+3) 巴林", value: "Asia/Bahrain" },
+  { label: "(UTC+4) 迪拜", value: "Asia/Dubai" },
+  { label: "(UTC+5) 阿什哈巴德", value: "Asia/Ashgabat" },
+  { label: "(UTC+6) 阿拉木图", value: "Asia/Almaty" },
+  { label: "(UTC+7) 曼谷", value: "Asia/Bangkok" },
+  { label: "(UTC+8) 上海", value: "Asia/Shanghai" },
+  { label: "(UTC+9) 东京", value: "Asia/Tokyo" },
+  { label: "(UTC+10) 悉尼", value: "Australia/Sydney" },
+  { label: "(UTC+12) 诺福克岛", value: "Pacific/Norfolk" },
 ];
 
 const SYMBOL_OPTIONS = [
@@ -171,6 +260,57 @@ const RESOLUTION_TO_MS: Record<string, number> = {
   "1D": 86_400_000,
   "W": 604_800_000,
   "1W": 604_800_000,
+};
+
+// 注册一个倒置坐标轴，后续通过 setPaneOptions 切换
+registerYAxis({
+  name: "reversed",
+  reverse: true,
+});
+
+// 线段类工具图标统一使用本地 KLineCharts SVG 资源
+const LINE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  horizontalStraightLine: HorizontalLineIcon,
+  horizontalRayLine: HorizontalRayIcon,
+  horizontalSegment: TrendLineIcon,
+  verticalStraightLine: VerticalLineIcon,
+  verticalRayLine: VerticalRayIcon,
+  verticalSegment: VerticalSegmentIcon,
+  straightLine: ExtendedLineIcon,
+  rayLine: RayIcon,
+  segment: SegmentIcon,
+  priceLine: PriceLineIcon,
+};
+
+// 通道与形状工具图标统一使用本地 KLineCharts SVG 资源
+const CHANNEL_AND_SHAPE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  priceChannelLine: PriceChannelIcon,
+  parallelStraightLine: ParallelLinesIcon,
+  circle: CircleCenterRightIcon,
+  rect: RectangleIcon,
+  parallelogram: ParallelogramIcon,
+  triangle: TriangleIcon,
+};
+
+// 斐波那契与江恩箱工具图标映射
+const FIB_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  fibonacciLine: FibonacciLineIcon,
+  fibonacciSegment: FibonacciSegmentIcon,
+  fibonacciCircle: FibonacciCircleIcon,
+  fibonacciSpiral: FibonacciSpiralIcon,
+  fibonacciSpeedResistanceFan: FibonacciSpeedFanIcon,
+  fibonacciExtension: FibonacciExtensionIcon,
+  gannBox: GannBoxIcon,
+};
+
+// 波浪形态工具图标映射
+const WAVE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  xabcd: WaveXabcdIcon,
+  abcd: WaveAbcdIcon,
+  threeWaves: WaveThreeIcon,
+  fiveWaves: WaveFiveIcon,
+  eightWaves: WaveEightIcon,
+  anyWaves: WaveAnyIcon,
 };
 
 const logKline = (...args: unknown[]) => {
@@ -232,6 +372,19 @@ const MarketChart: React.FC<MarketChartProps> = ({
   const expandedListRef = useRef<HTMLUListElement>(null);
   const [isDrawingLocked, setIsDrawingLocked] = useState(false);
   const [isDrawingVisible, setIsDrawingVisible] = useState(true);
+  const [magnetMode, setMagnetMode] = useState<"weak_magnet" | "strong_magnet">("weak_magnet");
+  const [isMagnetEnabled, setIsMagnetEnabled] = useState(false);
+  // 图表显示设置
+  const [showLatestPrice, setShowLatestPrice] = useState(true);
+  const [showHighPrice, setShowHighPrice] = useState(true);
+  const [showLowPrice, setShowLowPrice] = useState(true);
+  const [showIndicatorLastValue, setShowIndicatorLastValue] = useState(false);
+  const [invertYAxis, setInvertYAxis] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [candleType, setCandleType] = useState<
+    "candle_solid" | "candle_stroke" | "candle_up_stroke" | "candle_down_stroke" | "ohlc" | "area"
+  >("candle_solid");
+  const [priceAxisType, setPriceAxisType] = useState<"linear" | "percentage" | "log">("linear");
 
   useEffect(() => {
     setActiveSymbol(symbol ?? DEFAULT_SYMBOL);
@@ -381,6 +534,51 @@ const MarketChart: React.FC<MarketChartProps> = ({
       : activeTimezone;
     chart.setTimezone(timezone);
   }, [activeTimezone]);
+
+  // 根据设置面板状态同步样式（最新价、高低价、指标最新值、网格、蜡烛图类型）
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    chart.setStyles({
+      grid: {
+        show: showGrid,
+      },
+      candle: {
+        type: candleType,
+        priceMark: {
+          high: { show: showHighPrice },
+          low: { show: showLowPrice },
+          last: { show: showLatestPrice },
+        },
+      },
+      indicator: {
+        lastValueMark: {
+          show: showIndicatorLastValue,
+          text: { show: showIndicatorLastValue },
+        },
+      },
+    });
+  }, [showGrid, candleType, showHighPrice, showLowPrice, showLatestPrice, showIndicatorLastValue]);
+
+  // 坐标倒置与价格轴类型（目前仅倒置生效，轴类型预留）
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    const paneIds = new Set<string>();
+    paneIds.add(CANDLE_PANE_ID);
+    indicatorPaneRef.current.forEach((paneId) => {
+      paneIds.add(paneId);
+    });
+    const axisName = invertYAxis ? "reversed" : "default";
+    paneIds.forEach((id) => {
+      const opts = { id, axisOptions: { name: axisName } } as Parameters<Chart["setPaneOptions"]>[0];
+      chart.setPaneOptions(opts);
+    });
+  }, [invertYAxis, priceAxisType]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -556,11 +754,13 @@ const MarketChart: React.FC<MarketChartProps> = ({
     if (!chart) {
       return;
     }
+    const mode = isMagnetEnabled ? magnetMode : "normal";
     // klinecharts 9.x 需要传入对象格式
     const created = chart.createOverlay({
       name: overlay,
       lock: isDrawingLocked,
       visible: isDrawingVisible,
+      mode,
     });
     if (created) {
       overlayIdsRef.current = [...overlayIdsRef.current, created as string];
@@ -577,6 +777,21 @@ const MarketChart: React.FC<MarketChartProps> = ({
     }
     overlayIdsRef.current = [];
     setActiveDrawing("cursor");
+  };
+
+  const handleToggleDrawingsVisible = () => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    const nextVisible = !isDrawingVisible;
+    const anyChart = chart as unknown as { overrideOverlay?: (options: { id: string; visible: boolean }) => void };
+    if (anyChart.overrideOverlay) {
+      for (const id of overlayIdsRef.current) {
+        anyChart.overrideOverlay({ id, visible: nextVisible });
+      }
+    }
+    setIsDrawingVisible(nextVisible);
   };
 
   const handleScreenshot = () => {
@@ -700,22 +915,63 @@ const MarketChart: React.FC<MarketChartProps> = ({
               <span className="market-chart-action-icon">指标</span>
             </button>
             {showIndicators && (
-              <div ref={indicatorPanelRef} className="market-chart-popover">
-                <div className="market-chart-popover-title">指标</div>
-                <div className="market-chart-popover-grid">
-                  {indicatorOptions.map((option) => {
-                    const isActive = activeIndicators.includes(option.value);
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`market-chart-popover-item ${isActive ? "is-active" : ""}`}
-                        onClick={() => handleToggleIndicator(option)}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
+              <div className="klinecharts-pro-modal">
+                <div ref={indicatorPanelRef} className="klinecharts-pro-modal-inner">
+                  <div className="klinecharts-pro-modal-title">指标</div>
+                  <div className="klinecharts-pro-modal-content">
+                    <div className="klinecharts-pro-modal-section">
+                      <div className="klinecharts-pro-modal-section-title">主图指标</div>
+                      <div className="klinecharts-pro-modal-list">
+                        {indicatorOptions
+                          .filter((option) => option.pane === "main")
+                          .map((option) => {
+                            const isActive = activeIndicators.includes(option.value);
+                            return (
+                              <button
+                                key={`main-${option.value}`}
+                                type="button"
+                                className={`klinecharts-pro-modal-item ${isActive ? "is-active" : ""}`}
+                                onClick={() => handleToggleIndicator(option)}
+                              >
+                                <div className="klinecharts-pro-modal-item-text">
+                                  <span className="name">{option.label}</span>
+                                  {option.description && <span className="desc">{option.description}</span>}
+                                </div>
+                                <span className={`switch ${isActive ? "on" : "off"}`}>
+                                  <span className="handle" />
+                                </span>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                    <div className="klinecharts-pro-modal-section">
+                      <div className="klinecharts-pro-modal-section-title">副图指标</div>
+                      <div className="klinecharts-pro-modal-list">
+                        {indicatorOptions
+                          .filter((option) => option.pane !== "main")
+                          .map((option) => {
+                            const isActive = activeIndicators.includes(option.value);
+                            return (
+                              <button
+                                key={`sub-${option.value}`}
+                                type="button"
+                                className={`klinecharts-pro-modal-item ${isActive ? "is-active" : ""}`}
+                                onClick={() => handleToggleIndicator(option)}
+                              >
+                                <div className="klinecharts-pro-modal-item-text">
+                                  <span className="name">{option.label}</span>
+                                  {option.description && <span className="desc">{option.description}</span>}
+                                </div>
+                                <span className={`switch ${isActive ? "on" : "off"}`}>
+                                  <span className="handle" />
+                                </span>
+                              </button>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -765,19 +1021,172 @@ const MarketChart: React.FC<MarketChartProps> = ({
               <span className="market-chart-action-icon">设置</span>
             </button>
             {showSettings && (
-              <div ref={settingsPanelRef} className="market-chart-popover">
+              <div ref={settingsPanelRef} className="market-chart-popover market-chart-settings-popover">
                 <div className="market-chart-popover-title">设置</div>
-                <div className="market-chart-popover-list">
-                  <button type="button" className="market-chart-popover-item" onClick={handleClearDrawings}>
-                    清除绘图
-                  </button>
-                  <button
-                    type="button"
-                    className="market-chart-popover-item"
-                    onClick={() => setReloadKey((prev) => prev + 1)}
-                  >
-                    重载数据
-                  </button>
+                <div className="market-chart-settings-groups">
+                  <div className="market-chart-settings-group">
+                    <div className="market-chart-settings-title">显示</div>
+                    <button
+                      type="button"
+                      className={`market-chart-settings-item ${showLatestPrice ? "is-active" : ""}`}
+                      onClick={() => setShowLatestPrice((prev) => !prev)}
+                    >
+                      <span className="label">最新价显示</span>
+                      <span className={`toggle ${showLatestPrice ? "on" : "off"}`}>
+                        <span className="handle" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`market-chart-settings-item ${showHighPrice ? "is-active" : ""}`}
+                      onClick={() => setShowHighPrice((prev) => !prev)}
+                    >
+                      <span className="label">最高价显示</span>
+                      <span className={`toggle ${showHighPrice ? "on" : "off"}`}>
+                        <span className="handle" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`market-chart-settings-item ${showLowPrice ? "is-active" : ""}`}
+                      onClick={() => setShowLowPrice((prev) => !prev)}
+                    >
+                      <span className="label">最低价显示</span>
+                      <span className={`toggle ${showLowPrice ? "on" : "off"}`}>
+                        <span className="handle" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`market-chart-settings-item ${showIndicatorLastValue ? "is-active" : ""}`}
+                      onClick={() => setShowIndicatorLastValue((prev) => !prev)}
+                    >
+                      <span className="label">指标最新值显示</span>
+                      <span className={`toggle ${showIndicatorLastValue ? "on" : "off"}`}>
+                        <span className="handle" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`market-chart-settings-item ${invertYAxis ? "is-active" : ""}`}
+                      onClick={() => setInvertYAxis((prev) => !prev)}
+                    >
+                      <span className="label">倒置坐标</span>
+                      <span className={`toggle ${invertYAxis ? "on" : "off"}`}>
+                        <span className="handle" />
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`market-chart-settings-item ${showGrid ? "is-active" : ""}`}
+                      onClick={() => setShowGrid((prev) => !prev)}
+                    >
+                      <span className="label">网格线显示</span>
+                      <span className={`toggle ${showGrid ? "on" : "off"}`}>
+                        <span className="handle" />
+                      </span>
+                    </button>
+                  </div>
+                  <div className="market-chart-settings-group">
+                    <div className="market-chart-settings-title">蜡烛图类型</div>
+                    <div className="market-chart-settings-radio-group">
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${candleType === "candle_solid" ? "is-active" : ""}`}
+                        onClick={() => setCandleType("candle_solid")}
+                      >
+                        全实心
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${candleType === "candle_stroke" ? "is-active" : ""}`}
+                        onClick={() => setCandleType("candle_stroke")}
+                      >
+                        全空心
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${
+                          candleType === "candle_up_stroke" ? "is-active" : ""
+                        }`}
+                        onClick={() => setCandleType("candle_up_stroke")}
+                      >
+                        涨空心
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${
+                          candleType === "candle_down_stroke" ? "is-active" : ""
+                        }`}
+                        onClick={() => setCandleType("candle_down_stroke")}
+                      >
+                        跌空心
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${candleType === "ohlc" ? "is-active" : ""}`}
+                        onClick={() => setCandleType("ohlc")}
+                      >
+                        OHLC
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${candleType === "area" ? "is-active" : ""}`}
+                        onClick={() => setCandleType("area")}
+                      >
+                        面积图
+                      </button>
+                    </div>
+                  </div>
+                  <div className="market-chart-settings-group">
+                    <div className="market-chart-settings-title">价格轴类型</div>
+                    <div className="market-chart-settings-radio-group">
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio ${priceAxisType === "linear" ? "is-active" : ""}`}
+                        onClick={() => setPriceAxisType("linear")}
+                      >
+                        线性轴
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio market-chart-settings-radio--disabled ${
+                          priceAxisType === "percentage" ? "is-active" : ""
+                        }`}
+                        disabled
+                      >
+                        百分比轴（暂未实现）
+                      </button>
+                      <button
+                        type="button"
+                        className={`market-chart-settings-radio market-chart-settings-radio--disabled ${
+                          priceAxisType === "log" ? "is-active" : ""
+                        }`}
+                        disabled
+                      >
+                        对数轴（暂未实现）
+                      </button>
+                    </div>
+                  </div>
+                  <div className="market-chart-settings-group">
+                    <div className="market-chart-settings-title">其它</div>
+                    <div className="market-chart-settings-radio-group">
+                      <button
+                        type="button"
+                        className="market-chart-settings-radio"
+                        onClick={handleClearDrawings}
+                      >
+                        清除绘图
+                      </button>
+                      <button
+                        type="button"
+                        className="market-chart-settings-radio"
+                        onClick={() => setReloadKey((prev) => prev + 1)}
+                      >
+                        重载数据
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -800,12 +1209,11 @@ const MarketChart: React.FC<MarketChartProps> = ({
             const selectedToolId = selectedToolPerGroup[group.id] || group.defaultIcon || group.tools[0]?.id;
             const selectedTool = group.tools.find((t) => t.id === selectedToolId) || group.tools[0];
             const isExpanded = expandedToolGroup === group.id;
-            const isGroupActive = group.tools.some((t) => t.id === activeDrawing);
 
             return (
               <div key={group.id} className="item" tabIndex={0}>
                 <span
-                  className={`icon-overlay ${isGroupActive ? "selected" : ""}`}
+                  className="icon-overlay"
                   onClick={() => {
                     if (selectedTool) {
                       handleStartDrawing(selectedTool.overlay, selectedTool.id);
@@ -864,6 +1272,68 @@ const MarketChart: React.FC<MarketChartProps> = ({
           <span className="split-line" />
           <div className="item" tabIndex={0}>
             <span
+              className={`icon-overlay ${isMagnetEnabled ? "selected" : ""}`}
+              onClick={() => setIsMagnetEnabled((prev) => !prev)}
+              title={isMagnetEnabled ? "磁吸关闭" : "磁吸开启"}
+            >
+              {magnetMode === "weak_magnet"
+                ? isMagnetEnabled
+                  ? <MagnetWeakOnIcon aria-hidden="true" />
+                  : <MagnetWeakOffIcon aria-hidden="true" />
+                : isMagnetEnabled
+                  ? <MagnetStrongOnIcon aria-hidden="true" />
+                  : <MagnetStrongOffIcon aria-hidden="true" />}
+            </span>
+            <div
+              className="icon-arrow"
+              onClick={() => {
+                if (expandedToolGroup === "magnet") {
+                  setExpandedToolGroup(null);
+                  return;
+                }
+                setToolListDirection("down");
+                setExpandedToolGroup("magnet");
+              }}
+            >
+              <svg viewBox="0 0 4 6" className={expandedToolGroup === "magnet" ? "rotate" : ""}>
+                <path
+                  d="M1.07298,0.159458C0.827521,-0.0531526,0.429553,-0.0531526,0.184094,0.159458C-0.0613648,0.372068,-0.0613648,0.716778,0.184094,0.929388L2.61275,3.03303L0.260362,5.07061C0.0149035,5.28322,0.0149035,5.62793,0.260362,5.84054C0.505822,6.05315,0.903789,6.05315,1.14925,5.84054L3.81591,3.53075C4.01812,3.3556,4.05374,3.0908,3.92279,2.88406C3.93219,2.73496,3.87113,2.58315,3.73964,2.46925L1.07298,0.159458Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </div>
+            {expandedToolGroup === "magnet" && (
+              <ul
+                ref={expandedListRef}
+                className={`list ${toolListDirection === "up" ? "is-up" : ""}`}
+              >
+                <li
+                  onClick={() => {
+                    setMagnetMode("weak_magnet");
+                    setExpandedToolGroup(null);
+                  }}
+                >
+                  <span className="icon-overlay">
+                    <MagnetWeakOffIcon aria-hidden="true" />
+                  </span>
+                  <span style={{ paddingLeft: 8 }}>弱磁模式</span>
+                </li>
+                <li
+                  onClick={() => {
+                    setMagnetMode("strong_magnet");
+                    setExpandedToolGroup(null);
+                  }}
+                >
+                  <span className="icon-overlay">
+                    <MagnetStrongOffIcon aria-hidden="true" />
+                  </span>
+                  <span style={{ paddingLeft: 8 }}>强磁模式</span>
+                </li>
+              </ul>
+            )}
+          </div>
+          <div className="item" tabIndex={0}>
+            <span
               className={`icon-overlay ${isDrawingLocked ? "selected" : ""}`}
               onClick={() => setIsDrawingLocked((prev) => !prev)}
               title={isDrawingLocked ? "解锁" : "锁定"}
@@ -874,19 +1344,23 @@ const MarketChart: React.FC<MarketChartProps> = ({
           <div className="item" tabIndex={0}>
             <span
               className={`icon-overlay ${!isDrawingVisible ? "selected" : ""}`}
-              onClick={() => setIsDrawingVisible((prev) => !prev)}
-              title={isDrawingVisible ? "隐藏" : "显示"}
+              onClick={handleToggleDrawingsVisible}
+              title={isDrawingVisible ? "隐藏所有画图" : "显示所有画图"}
             >
-              <ToolIcon id={isDrawingVisible ? "visible" : "invisible"} />
+              {isDrawingVisible ? (
+                <DrawingHideAllIcon aria-hidden="true" />
+              ) : (
+                <DrawingShowAllIcon aria-hidden="true" />
+              )}
             </span>
           </div>
           <div className="item" tabIndex={0}>
             <span
               className="icon-overlay"
               onClick={handleClearDrawings}
-              title="清除全部"
+              title="删除所有绘图"
             >
-              <ToolIcon id="trash" />
+              <DrawingClearAllIcon aria-hidden="true" />
             </span>
           </div>
         </div>
@@ -1060,240 +1534,35 @@ function formatNumber(value: number): string {
 }
 
 function ToolIcon({ id }: { id: string }) {
+  const LineIconComponent = LINE_TOOL_ICON_MAP[id];
+  if (LineIconComponent) {
+    return <LineIconComponent aria-hidden="true" />;
+  }
+
+  const ChannelAndShapeIconComponent = CHANNEL_AND_SHAPE_TOOL_ICON_MAP[id];
+  if (ChannelAndShapeIconComponent) {
+    return <ChannelAndShapeIconComponent aria-hidden="true" />;
+  }
+
+  const FibIconComponent = FIB_TOOL_ICON_MAP[id];
+  if (FibIconComponent) {
+    return <FibIconComponent aria-hidden="true" />;
+  }
+
+  const WaveIconComponent = WAVE_TOOL_ICON_MAP[id];
+  if (WaveIconComponent) {
+    return <WaveIconComponent aria-hidden="true" />;
+  }
+
   switch (id) {
-    // 水平线工具
-    case "horizontalStraightLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2" />
-        </svg>
-      );
-    case "horizontalRayLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="6" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="2" />
-          <circle cx="6" cy="12" r="2" fill="currentColor" />
-        </svg>
-      );
-    case "horizontalSegment":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" strokeWidth="2" />
-          <circle cx="5" cy="12" r="2" fill="currentColor" />
-          <circle cx="19" cy="12" r="2" fill="currentColor" />
-        </svg>
-      );
-    // 垂直线工具
-    case "verticalStraightLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" strokeWidth="2" />
-        </svg>
-      );
-    case "verticalRayLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="12" y1="6" x2="12" y2="21" stroke="currentColor" strokeWidth="2" />
-          <circle cx="12" cy="6" r="2" fill="currentColor" />
-        </svg>
-      );
-    case "verticalSegment":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" strokeWidth="2" />
-          <circle cx="12" cy="5" r="2" fill="currentColor" />
-          <circle cx="12" cy="19" r="2" fill="currentColor" />
-        </svg>
-      );
-    // 斜线工具
-    case "straightLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="2" />
-        </svg>
-      );
-    case "rayLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="6" y1="18" x2="20" y2="4" stroke="currentColor" strokeWidth="2" />
-          <circle cx="6" cy="18" r="2" fill="currentColor" />
-        </svg>
-      );
-    case "segment":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="5" y1="19" x2="19" y2="5" stroke="currentColor" strokeWidth="2" />
-          <circle cx="5" cy="19" r="2" fill="currentColor" />
-          <circle cx="19" cy="5" r="2" fill="currentColor" />
-        </svg>
-      );
-    case "priceLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="3" y1="12" x2="17" y2="12" stroke="currentColor" strokeWidth="2" />
-          <rect x="17" y="9" width="4" height="6" rx="1" fill="currentColor" />
-        </svg>
-      );
-    // 平行线工具
-    case "priceChannelLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="8" x2="20" y2="5" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="4" y1="16" x2="20" y2="13" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="4" y1="19" x2="20" y2="16" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      );
-    case "parallelStraightLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" strokeWidth="2" />
-          <line x1="4" y1="16" x2="20" y2="16" stroke="currentColor" strokeWidth="2" />
-        </svg>
-      );
-    // 形状工具
-    case "circle":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
-      );
-    case "rect":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="4" y="6" width="16" height="12" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
-      );
-    case "parallelogram":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polygon points="6,18 10,6 18,6 14,18" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
-      );
-    case "triangle":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polygon points="12,5 4,19 20,19" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
-      );
-    // 斐波那契工具
-    case "fibonacciLine":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="5" x2="20" y2="5" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="4" y1="9" x2="20" y2="9" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-          <line x1="4" y1="13" x2="20" y2="13" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-          <line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-          <line x1="4" y1="19" x2="20" y2="19" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      );
-    case "fibonacciSegment":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="18" x2="20" y2="6" stroke="currentColor" strokeWidth="2" />
-          <line x1="4" y1="14" x2="16" y2="6" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-          <line x1="4" y1="10" x2="12" y2="6" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-        </svg>
-      );
-    case "fibonacciCircle":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" fill="none" />
-          <circle cx="12" cy="12" r="6" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" fill="none" />
-          <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" fill="none" />
-        </svg>
-      );
-    case "fibonacciSpiral":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 12 Q16 12 16 8 Q16 4 12 4 Q6 4 6 10 Q6 18 14 18 Q20 18 20 12" stroke="currentColor" strokeWidth="1.5" fill="none" />
-        </svg>
-      );
-    case "fibonacciSpeedResistanceFan":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="4" y1="20" x2="20" y2="10" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-          <line x1="4" y1="20" x2="20" y2="16" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-          <circle cx="4" cy="20" r="1.5" fill="currentColor" />
-        </svg>
-      );
-    case "fibonacciExtension":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="18" x2="12" y2="6" stroke="currentColor" strokeWidth="2" />
-          <line x1="12" y1="6" x2="20" y2="14" stroke="currentColor" strokeWidth="2" />
-          <line x1="4" y1="4" x2="20" y2="4" stroke="currentColor" strokeWidth="1" strokeDasharray="2,2" />
-        </svg>
-      );
-    case "gannBox":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="4" y="4" width="16" height="16" stroke="currentColor" strokeWidth="1.5" fill="none" />
-          <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" strokeWidth="1" />
-          <line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" strokeWidth="1" />
-          <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" strokeWidth="1" />
-        </svg>
-      );
-    // 波浪工具
-    case "xabcd":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="3,16 7,8 11,14 15,6 21,12" stroke="currentColor" strokeWidth="1.5" fill="none" />
-          <circle cx="3" cy="16" r="1.5" fill="currentColor" />
-          <circle cx="7" cy="8" r="1.5" fill="currentColor" />
-          <circle cx="11" cy="14" r="1.5" fill="currentColor" />
-          <circle cx="15" cy="6" r="1.5" fill="currentColor" />
-          <circle cx="21" cy="12" r="1.5" fill="currentColor" />
-        </svg>
-      );
-    case "abcd":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="4,16 8,6 16,14 20,4" stroke="currentColor" strokeWidth="1.5" fill="none" />
-          <circle cx="4" cy="16" r="1.5" fill="currentColor" />
-          <circle cx="8" cy="6" r="1.5" fill="currentColor" />
-          <circle cx="16" cy="14" r="1.5" fill="currentColor" />
-          <circle cx="20" cy="4" r="1.5" fill="currentColor" />
-        </svg>
-      );
-    case "threeWaves":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="4,18 10,6 14,14 20,4" stroke="currentColor" strokeWidth="1.5" fill="none" />
-        </svg>
-      );
-    case "fiveWaves":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="2,16 5,8 8,12 12,4 16,10 20,6" stroke="currentColor" strokeWidth="1.5" fill="none" />
-        </svg>
-      );
-    case "eightWaves":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="2,14 4,10 6,12 8,6 10,10 13,4 16,8 19,6 22,10" stroke="currentColor" strokeWidth="1.5" fill="none" />
-        </svg>
-      );
-    case "anyWaves":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <polyline points="3,15 7,8 11,13 15,6 19,11 22,8" stroke="currentColor" strokeWidth="1.5" fill="none" strokeDasharray="3,2" />
-        </svg>
-      );
     // 功能图标
     case "lock":
       return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="6" y="11" width="12" height="9" rx="1" stroke="currentColor" strokeWidth="2" fill="none" />
-          <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
+        <DrawingLockOnIcon aria-hidden="true" />
       );
     case "unlock":
       return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="6" y="11" width="12" height="9" rx="1" stroke="currentColor" strokeWidth="2" fill="none" />
-          <path d="M8 11V7a4 4 0 0 1 8 0" stroke="currentColor" strokeWidth="2" fill="none" />
-        </svg>
+        <DrawingLockOffIcon aria-hidden="true" />
       );
     case "visible":
       return (

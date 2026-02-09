@@ -378,7 +378,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             //    low,
             //    close,
             //    value,
-            //    offset);
+            //    offset)
         }
 
         private void LogResolvedIndicator(
