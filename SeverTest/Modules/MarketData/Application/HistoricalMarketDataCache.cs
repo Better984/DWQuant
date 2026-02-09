@@ -104,11 +104,9 @@ namespace ServerTest.Modules.MarketData.Application
 
         public async Task WarmUpCacheAsync(DateTime startDate, CancellationToken ct = default)
         {
-            // 只预热币安
-            List<MarketDataConfig.ExchangeEnum> exchangesToPreload = new()
-            {
-                MarketDataConfig.ExchangeEnum.Binance
-            };
+            // 只预热币安BTC的数据
+            var exchangeEnum = MarketDataConfig.ExchangeEnum.Binance;
+            var symbolEnum = MarketDataConfig.SymbolEnum.BTC_USDT;
 
             var preloadLimit = ResolvePreloadLimit();
             var startMs = new DateTimeOffset(startDate).ToUnixTimeMilliseconds();
@@ -125,50 +123,43 @@ namespace ServerTest.Modules.MarketData.Application
             const int maxFailDetails = 10;
             var failDetails = new List<string>(maxFailDetails);
 
-            foreach (var exchangeEnum in exchangesToPreload)
+            var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
+            var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
+
+            foreach (var timeframeEnum in Enum.GetValues<MarketDataConfig.TimeframeEnum>())
             {
-                var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
+                var timeframeStr = MarketDataConfig.TimeframeToString(timeframeEnum);
+                var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
+                var cacheKey = BuildCacheKey(exchangeId, symbolStr, timeframeStr);
 
-                foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
+                combosTotal++;
+
+                try
                 {
-                    var symbolStr = MarketDataConfig.SymbolToString(symbolEnum);
+                    var rows = await QueryRangeAsync(tableName, startMs, null, preloadLimit, ct);
+                    UpdateCache(cacheKey, rows);
 
-                    foreach (var timeframeEnum in Enum.GetValues<MarketDataConfig.TimeframeEnum>())
+                    if (rows.Count == 0)
                     {
-                        var timeframeStr = MarketDataConfig.TimeframeToString(timeframeEnum);
-                        var tableName = BuildTableName(exchangeId, symbolStr, timeframeStr);
-                        var cacheKey = BuildCacheKey(exchangeId, symbolStr, timeframeStr);
-
-                        combosTotal++;
-
-                        try
-                        {
-                            var rows = await QueryRangeAsync(tableName, startMs, null, preloadLimit, ct);
-                            UpdateCache(cacheKey, rows);
-
-                            if (rows.Count == 0)
-                            {
-                                combosNoData++;
-                                continue;
-                            }
-
-                            combosOk++;
-                            totalRows += rows.Count;
-
-                            var firstTs = (long)(rows[0].timestamp ?? 0);
-                            var lastTs = (long)(rows[^1].timestamp ?? 0);
-
-                            globalMinTs = globalMinTs is null ? firstTs : Math.Min(globalMinTs.Value, firstTs);
-                            globalMaxTs = globalMaxTs is null ? lastTs : Math.Max(globalMaxTs.Value, lastTs);
-                        }
-                        catch (Exception ex)
-                        {
-                            combosFail++;
-                            if (failDetails.Count < maxFailDetails)
-                                failDetails.Add($"{exchangeId}/{symbolStr}/{timeframeStr}({tableName}): {ex.GetType().Name} {ex.Message}");
-                            // 不在循环内打 log
-                        }
+                        combosNoData++;
+                        continue;
                     }
+
+                    combosOk++;
+                    totalRows += rows.Count;
+
+                    var firstTs = (long)(rows[0].timestamp ?? 0);
+                    var lastTs = (long)(rows[^1].timestamp ?? 0);
+
+                    globalMinTs = globalMinTs is null ? firstTs : Math.Min(globalMinTs.Value, firstTs);
+                    globalMaxTs = globalMaxTs is null ? lastTs : Math.Max(globalMaxTs.Value, lastTs);
+                }
+                catch (Exception ex)
+                {
+                    combosFail++;
+                    if (failDetails.Count < maxFailDetails)
+                        failDetails.Add($"{exchangeId}/{symbolStr}/{timeframeStr}({tableName}): {ex.GetType().Name} {ex.Message}");
+                    // 不在循环内打 log
                 }
             }
 

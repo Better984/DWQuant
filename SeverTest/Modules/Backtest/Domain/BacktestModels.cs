@@ -201,6 +201,8 @@ namespace ServerTest.Modules.Backtest.Domain
         public long ExitTime { get; set; }
         public decimal EntryPrice { get; set; }
         public decimal ExitPrice { get; set; }
+        public decimal? StopLossPrice { get; set; }
+        public decimal? TakeProfitPrice { get; set; }
         public decimal Qty { get; set; }
         public decimal ContractSize { get; set; }
         public decimal Fee { get; set; }

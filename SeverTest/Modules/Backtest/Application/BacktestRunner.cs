@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using ccxt;
@@ -15,6 +15,7 @@ using ServerTest.Modules.MarketData.Domain;
 using ServerTest.Modules.MarketData.Infrastructure;
 using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.StrategyEngine.Domain;
+using ServerTest.Protocol;
 using ServerTest.Options;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 
@@ -524,7 +525,7 @@ namespace ServerTest.Modules.Backtest.Application
 
                     if (output.IncludeTrades)
                     {
-                        runtime.Result.TradesRaw.Add(JsonConvert.SerializeObject(closedTrade));
+                        runtime.Result.TradesRaw.Add(ProtocolJson.Serialize(closedTrade));
                         tradeChunk.Add(closedTrade);
                     }
 

@@ -43,24 +43,19 @@ namespace ServerTest.Modules.MarketData.Application
                 var throttler = new SemaphoreSlim(_options.SyncMaxParallel, _options.SyncMaxParallel);
                 var tasks = new List<Task<SyncResult>>();
 
-                foreach (var exchangeEnum in Enum.GetValues<MarketDataConfig.ExchangeEnum>())
+                // 只处理币安BTC的数据
+                var exchangeEnum = MarketDataConfig.ExchangeEnum.Binance;
+                var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
+                if (exchanges.TryGetValue(exchangeId, out var exchange))
                 {
-                    var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
-                    if (!exchanges.TryGetValue(exchangeId, out var exchange))
+                    var symbolEnum = MarketDataConfig.SymbolEnum.BTC_USDT;
+                    var symbol = MarketDataConfig.SymbolToString(symbolEnum);
+                    foreach (var timeframeEnum in Enum.GetValues<MarketDataConfig.TimeframeEnum>())
                     {
-                        continue;
-                    }
-
-                    foreach (var symbolEnum in Enum.GetValues<MarketDataConfig.SymbolEnum>())
-                    {
-                        var symbol = MarketDataConfig.SymbolToString(symbolEnum);
-                        foreach (var timeframeEnum in Enum.GetValues<MarketDataConfig.TimeframeEnum>())
-                        {
-                            var timeframe = MarketDataConfig.TimeframeToString(timeframeEnum);
-                            var localExchange = exchange;
-                            // 每个交易所/币对/周期独立任务，后台并发执行
-                            tasks.Add(SyncSingleAsync(localExchange, exchangeEnum, symbolEnum, timeframeEnum, symbol, timeframe, throttler, ct));
-                        }
+                        var timeframe = MarketDataConfig.TimeframeToString(timeframeEnum);
+                        var localExchange = exchange;
+                        // 每个周期独立任务，后台并发执行
+                        tasks.Add(SyncSingleAsync(localExchange, exchangeEnum, symbolEnum, timeframeEnum, symbol, timeframe, throttler, ct));
                     }
                 }
 
@@ -311,24 +306,17 @@ namespace ServerTest.Modules.MarketData.Application
         private async Task<Dictionary<string, Exchange>> CreateExchangesAsync(CancellationToken ct)
         {
             var map = new Dictionary<string, Exchange>();
-            foreach (var exchangeEnum in Enum.GetValues<MarketDataConfig.ExchangeEnum>())
-            {
-                var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
-                var options = MarketDataConfig.GetExchangeOptions(exchangeEnum);
+            // 只创建币安交易所连接
+            var exchangeEnum = MarketDataConfig.ExchangeEnum.Binance;
+            var exchangeId = MarketDataConfig.ExchangeToString(exchangeEnum);
+            var options = MarketDataConfig.GetExchangeOptions(exchangeEnum);
 
-                Exchange exchange = exchangeEnum switch
-                {
-                    MarketDataConfig.ExchangeEnum.Binance => new ccxt.binanceusdm(options),
-                    MarketDataConfig.ExchangeEnum.OKX => new ccxt.okx(options),
-                    MarketDataConfig.ExchangeEnum.Bitget => new ccxt.bitget(options),
-                    _ => throw new NotSupportedException($"Unsupported exchange: {exchangeEnum}")
-                };
+            Exchange exchange = new ccxt.binanceusdm(options);
 
-                // 预加载交易所市场信息，保证后续查询可用
-                await exchange.LoadMarkets();
-                map[exchangeId] = exchange;
-                ct.ThrowIfCancellationRequested();
-            }
+            // 预加载交易所市场信息，保证后续查询可用
+            await exchange.LoadMarkets();
+            map[exchangeId] = exchange;
+            ct.ThrowIfCancellationRequested();
 
             return map;
         }

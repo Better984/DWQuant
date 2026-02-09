@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 using ServerTest.Modules.Backtest.Domain;
+using ServerTest.Protocol;
 
 namespace ServerTest.Modules.Backtest.Application
 {
@@ -607,7 +608,7 @@ namespace ServerTest.Modules.Backtest.Application
             var result = new List<string>(items.Count);
             foreach (var item in items)
             {
-                result.Add(JsonConvert.SerializeObject(item));
+                result.Add(ProtocolJson.Serialize(item));
             }
 
             return result;

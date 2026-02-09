@@ -283,6 +283,8 @@ namespace ServerTest.Modules.Backtest.Application
                 ExitTime = timestamp,
                 EntryPrice = position.EntryPrice,
                 ExitPrice = price,
+                StopLossPrice = position.StopLossPrice,
+                TakeProfitPrice = position.TakeProfitPrice,
                 Qty = position.Qty,
                 ContractSize = position.ContractSize,
                 Fee = position.EntryFee + exitFee,

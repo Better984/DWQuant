@@ -40,12 +40,14 @@ import DrawingShowAllIcon from "../assets/KLineCharts/drawing-show-all.svg?react
 import DrawingHideAllIcon from "../assets/KLineCharts/drawing-hide-all.svg?react";
 import DrawingClearAllIcon from "../assets/KLineCharts/drawing-clear-all.svg?react";
 import {
+  DomPosition,
   dispose,
   getSupportedIndicators,
   init,
   LoadDataType,
   registerYAxis,
   type Chart,
+  type Coordinate,
   type KLineData,
 } from "klinecharts";
 import { HttpClient, subscribeMarket } from "../network";
@@ -60,6 +62,21 @@ type MarketChartProps = {
   interval?: string;
   height?: string | number;
   theme?: "light" | "dark";
+  focusRange?: MarketChartFocusRange | null;
+};
+
+export type MarketChartFocusRange = {
+  id: string;
+  chartSymbol?: string;
+  chartInterval?: string;
+  startTime: number;
+  endTime: number;
+  side?: string;
+  exitReason?: string;
+  entryPrice?: number;
+  exitPrice?: number;
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
 };
 
 type IndicatorOption = {
@@ -73,6 +90,8 @@ type IndicatorOption = {
   /** 指标中文描述，用于弹窗展示 */
   description?: string;
 };
+
+type IconAsset = React.ComponentType<React.SVGProps<SVGSVGElement>> | string;
 
 const DEFAULT_SYMBOL = "Binance:BTC/USDT";
 const DEFAULT_INTERVAL = "1";
@@ -262,6 +281,8 @@ const RESOLUTION_TO_MS: Record<string, number> = {
   "1W": 604_800_000,
 };
 
+const FOCUS_AUTO_INTERVAL_ORDER = ["1", "3", "5", "15", "30", "60", "240", "D", "W"] as const;
+
 // 注册一个倒置坐标轴，后续通过 setPaneOptions 切换
 registerYAxis({
   name: "reversed",
@@ -269,7 +290,7 @@ registerYAxis({
 });
 
 // 线段类工具图标统一使用本地 KLineCharts SVG 资源
-const LINE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+const LINE_TOOL_ICON_MAP: Record<string, IconAsset> = {
   horizontalStraightLine: HorizontalLineIcon,
   horizontalRayLine: HorizontalRayIcon,
   horizontalSegment: TrendLineIcon,
@@ -283,7 +304,7 @@ const LINE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGS
 };
 
 // 通道与形状工具图标统一使用本地 KLineCharts SVG 资源
-const CHANNEL_AND_SHAPE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+const CHANNEL_AND_SHAPE_TOOL_ICON_MAP: Record<string, IconAsset> = {
   priceChannelLine: PriceChannelIcon,
   parallelStraightLine: ParallelLinesIcon,
   circle: CircleCenterRightIcon,
@@ -293,7 +314,7 @@ const CHANNEL_AND_SHAPE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.
 };
 
 // 斐波那契与江恩箱工具图标映射
-const FIB_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+const FIB_TOOL_ICON_MAP: Record<string, IconAsset> = {
   fibonacciLine: FibonacciLineIcon,
   fibonacciSegment: FibonacciSegmentIcon,
   fibonacciCircle: FibonacciCircleIcon,
@@ -304,7 +325,7 @@ const FIB_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSV
 };
 
 // 波浪形态工具图标映射
-const WAVE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+const WAVE_TOOL_ICON_MAP: Record<string, IconAsset> = {
   xabcd: WaveXabcdIcon,
   abcd: WaveAbcdIcon,
   threeWaves: WaveThreeIcon,
@@ -312,11 +333,176 @@ const WAVE_TOOL_ICON_MAP: Record<string, React.ComponentType<React.SVGProps<SVGS
   eightWaves: WaveEightIcon,
   anyWaves: WaveAnyIcon,
 };
+const TIMEFRAME_TO_RESOLUTION: Record<string, string> = {
+  m1: "1",
+  m3: "3",
+  m5: "5",
+  m15: "15",
+  m30: "30",
+  h1: "60",
+  h4: "240",
+  d: "D",
+  d1: "D",
+  w: "W",
+  w1: "W",
+  "1m": "1",
+  "3m": "3",
+  "5m": "5",
+  "15m": "15",
+  "30m": "30",
+  "1h": "60",
+  "4h": "240",
+  "1d": "D",
+  "1w": "W",
+};
+
+const toResolution = (timeframe?: string) => {
+  if (!timeframe) {
+    return undefined;
+  }
+  const normalized = timeframe.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (TIMEFRAME_TO_RESOLUTION[normalized]) {
+    return TIMEFRAME_TO_RESOLUTION[normalized];
+  }
+  if (/^\d+$/.test(normalized)) {
+    return normalized;
+  }
+  return undefined;
+};
 
 const logKline = (...args: unknown[]) => {
   if (DEBUG_KLINE) {
     console.debug("[Klinecharts]", ...args);
   }
+};
+
+const logKlineTrace = (stage: string, payload?: unknown) => {
+  if (DEBUG_KLINE) {
+    console.info("[KlinechartsTrace]", stage, payload ?? {});
+  }
+};
+
+const buildTraceId = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+
+type FocusZoneKind = "takeProfitPlan" | "stopLossPlan" | "executedProfit" | "executedLoss";
+
+type FocusZone = {
+  kind: FocusZoneKind;
+  upper: number;
+  lower: number;
+  color: string;
+};
+
+const FOCUS_ZONE_COLORS: Record<FocusZoneKind, string> = {
+  takeProfitPlan: "rgba(34, 197, 94, 0.16)",
+  stopLossPlan: "rgba(239, 68, 68, 0.20)",
+  executedProfit: "rgba(21, 128, 61, 0.32)",
+  executedLoss: "rgba(220, 38, 38, 0.32)",
+};
+
+const toFinitePrice = (value: number | undefined) => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return value;
+};
+
+const clamp = (value: number, min: number, max: number) => {
+  return Math.max(min, Math.min(max, value));
+};
+
+const normalizeFocusResolution = (value?: string) => {
+  if (!value) {
+    return undefined;
+  }
+  if (value === "1D") {
+    return "D";
+  }
+  if (value === "1W") {
+    return "W";
+  }
+  return value;
+};
+
+const estimateFocusMaxVisibleBars = (chart: Chart) => {
+  const paneSize =
+    chart.getSize(CANDLE_PANE_ID, DomPosition.Main) ??
+    chart.getSize(undefined, DomPosition.Main) ??
+    chart.getSize();
+  const paneWidth = paneSize?.width ?? 0;
+  const barSpace = chart.getBarSpace();
+  const safeBarSpace = Number.isFinite(barSpace) && barSpace > 0 ? barSpace : 6;
+  const estimatedBySpace = paneWidth > 0 ? Math.floor(paneWidth / safeBarSpace) : 0;
+  const visibleRange = chart.getVisibleRange();
+  const estimatedByRange =
+    Number.isFinite(visibleRange.realFrom) && Number.isFinite(visibleRange.realTo)
+      ? Math.floor(Math.abs(visibleRange.realTo - visibleRange.realFrom)) + 1
+      : 0;
+  return Math.max(60, Math.max(estimatedBySpace, estimatedByRange));
+};
+
+const pickFocusAutoInterval = (
+  rawStart: number,
+  rawEnd: number,
+  baseInterval: string,
+  maxVisibleBars: number
+) => {
+  const normalizedBase = normalizeFocusResolution(baseInterval) ?? DEFAULT_INTERVAL;
+  const baseMs = RESOLUTION_TO_MS[normalizedBase] ?? RESOLUTION_TO_MS[DEFAULT_INTERVAL];
+  const candidateIntervals = FOCUS_AUTO_INTERVAL_ORDER.filter((interval) => {
+    const ms = RESOLUTION_TO_MS[interval];
+    return Number.isFinite(ms) && ms >= baseMs;
+  });
+  const candidates = candidateIntervals.length > 0
+    ? candidateIntervals
+    : [FOCUS_AUTO_INTERVAL_ORDER[FOCUS_AUTO_INTERVAL_ORDER.length - 1]];
+  const safeMaxVisibleBars = Math.max(30, Math.floor(maxVisibleBars));
+  const rangeMs = Math.max(0, rawEnd - rawStart);
+  for (const interval of candidates) {
+    const intervalMs = RESOLUTION_TO_MS[interval];
+    const bars = Math.max(1, Math.ceil(rangeMs / intervalMs) + 1);
+    if (bars <= safeMaxVisibleBars) {
+      return interval;
+    }
+  }
+  return candidates[candidates.length - 1];
+};
+
+const resolveFocusDirection = (
+  side: string | undefined,
+  entryPrice: number,
+  exitPrice: number | null,
+  stopLossPrice: number | null,
+  takeProfitPrice: number | null
+) => {
+  const normalized = side?.trim().toLowerCase();
+  if (normalized === "long") {
+    return true;
+  }
+  if (normalized === "short") {
+    return false;
+  }
+  if (takeProfitPrice !== null && stopLossPrice !== null) {
+    if (takeProfitPrice > entryPrice && stopLossPrice < entryPrice) {
+      return true;
+    }
+    if (takeProfitPrice < entryPrice && stopLossPrice > entryPrice) {
+      return false;
+    }
+  }
+  if (takeProfitPrice !== null && takeProfitPrice !== entryPrice) {
+    return takeProfitPrice > entryPrice;
+  }
+  if (stopLossPrice !== null && stopLossPrice !== entryPrice) {
+    return stopLossPrice < entryPrice;
+  }
+  if (exitPrice !== null && exitPrice !== entryPrice) {
+    return exitPrice >= entryPrice;
+  }
+  return true;
 };
 
 const getIndicatorPaneOptions = (option?: IndicatorOption) => {
@@ -331,6 +517,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
   interval = DEFAULT_INTERVAL,
   height = 420,
   theme = "light",
+  focusRange = null,
 }) => {
   const shellRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -338,6 +525,9 @@ const MarketChart: React.FC<MarketChartProps> = ({
   const lastBarRef = useRef<KLineData | null>(null);
   const indicatorPaneRef = useRef(new Map<string, string>());
   const overlayIdsRef = useRef<string[]>([]);
+  const focusOverlayIdsRef = useRef<string[]>([]);
+  const focusModeRef = useRef(false);
+  const dataVersionRef = useRef(0);
   const httpRef = useRef(new HttpClient());
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const indicatorPanelRef = useRef<HTMLDivElement>(null);
@@ -408,6 +598,43 @@ const MarketChart: React.FC<MarketChartProps> = ({
     const parts = activeSymbol.split(":");
     return parts.length > 1 ? parts[1] : parts[0];
   }, [activeSymbol]);
+
+  const clearFocusOverlays = () => {
+    const chart = chartRef.current;
+    if (!chart) {
+      focusOverlayIdsRef.current = [];
+      return;
+    }
+    if (focusOverlayIdsRef.current.length > 0) {
+      logKlineTrace("focus:overlay:clear", {
+        count: focusOverlayIdsRef.current.length,
+      });
+    }
+    for (const id of focusOverlayIdsRef.current) {
+      chart.removeOverlay(id);
+    }
+    focusOverlayIdsRef.current = [];
+  };
+
+  const bumpDataVersion = (reason: string) => {
+    dataVersionRef.current += 1;
+    const version = dataVersionRef.current;
+    logKlineTrace("data:version:bump", { reason, version });
+    return version;
+  };
+
+  const isDataVersionCurrent = (version: number) => dataVersionRef.current === version;
+
+  const exitFocusMode = (reason: string, reloadHistory = false) => {
+    const wasFocused = focusModeRef.current;
+    focusModeRef.current = false;
+    clearFocusOverlays();
+    if (reloadHistory && wasFocused) {
+      bumpDataVersion(`focus-exit:${reason}`);
+      logKlineTrace("focus:restore-history", { reason });
+      setReloadKey((prev) => prev + 1);
+    }
+  };
 
   useEffect(() => {
     if (!showIndicators && !showTimezone && !showSettings && !showSymbolSelector && !expandedToolGroup) {
@@ -593,8 +820,12 @@ const MarketChart: React.FC<MarketChartProps> = ({
       return;
     }
 
+    exitFocusMode("history-load:start");
+
     const timeframe = RESOLUTION_TO_TIMEFRAME[activeInterval] ?? "m1";
     const intervalMs = RESOLUTION_TO_MS[activeInterval] ?? 60_000;
+    const baseTraceId = buildTraceId(`symbol-${parsed.symbol}-interval-${activeInterval}`);
+    const historyDataVersion = bumpDataVersion(`history:${parsed.symbol}:${activeInterval}:${reloadKey}`);
 
     chart.clearData();
     lastBarRef.current = null;
@@ -605,7 +836,15 @@ const MarketChart: React.FC<MarketChartProps> = ({
 
     const loadHistory = async () => {
       try {
-        logKline("loadHistory:init", { symbol: parsed.symbol, timeframe, count: DEFAULT_COUNT });
+        const traceId = `${baseTraceId}-init`;
+        logKline("loadHistory:init", { traceId, symbol: parsed.symbol, timeframe, count: DEFAULT_COUNT });
+        logKlineTrace("history:init:start", {
+          traceId,
+          symbol: parsed.symbol,
+          interval: activeInterval,
+          timeframe,
+          count: DEFAULT_COUNT,
+        });
         const bars = await fetchHistory({
           http: httpRef.current,
           exchange: parsed.exchange,
@@ -614,22 +853,34 @@ const MarketChart: React.FC<MarketChartProps> = ({
           intervalMs,
           count: DEFAULT_COUNT,
           signal: controller.signal,
+          traceId,
+          traceSource: "chart.init",
         });
-        if (disposed) {
+        if (disposed || !isDataVersionCurrent(historyDataVersion)) {
+          logKlineTrace("history:init:skip:stale", {
+            traceId,
+            disposed,
+            historyDataVersion,
+            currentDataVersion: dataVersionRef.current,
+          });
           return;
         }
         logKline("loadHistory:done", {
+          traceId,
           count: bars.length,
           first: bars[0]?.timestamp,
           last: bars[bars.length - 1]?.timestamp,
         });
+        logKlineTrace("history:init:draw:start", { traceId, bars: bars.length });
         chart.applyNewData(bars);
+        logKlineTrace("history:init:draw:done", { traceId, bars: bars.length });
         if (bars.length > 0) {
           lastBarRef.current = bars[bars.length - 1];
           setLatestBar(bars[bars.length - 1]);
         }
       } catch (error) {
         if (!disposed) {
+          logKlineTrace("history:init:error", { traceId: `${baseTraceId}-init`, error });
           console.error("[Klinecharts] Failed to load history", error);
         }
       }
@@ -641,6 +892,16 @@ const MarketChart: React.FC<MarketChartProps> = ({
       if (disposed) {
         return;
       }
+      if (!isDataVersionCurrent(historyDataVersion) || focusModeRef.current) {
+        logKlineTrace("history:loadMore:skip:stale-or-focus", {
+          type: params.type,
+          historyDataVersion,
+          currentDataVersion: dataVersionRef.current,
+          focusMode: focusModeRef.current,
+        });
+        params.callback([], false);
+        return;
+      }
       if (!params.data) {
         logKline("loadMore:skip:no-anchor", { type: params.type });
         params.callback([], false);
@@ -648,14 +909,25 @@ const MarketChart: React.FC<MarketChartProps> = ({
       }
       if (params.type === LoadDataType.Forward) {
         const endTime = params.data.timestamp - intervalMs;
+        const traceId = `${baseTraceId}-load-more-${endTime}`;
         if (!Number.isFinite(endTime) || endTime <= 0) {
-          logKline("loadMore:skip:invalid-end", { endTime });
+          logKline("loadMore:skip:invalid-end", { traceId, endTime });
+          logKlineTrace("history:loadMore:skip:invalid-end", { traceId, endTime, anchor: params.data.timestamp });
           params.callback([], false);
           return;
         }
         try {
           logKline("loadMore:backward", {
+            traceId,
             symbol: parsed.symbol,
+            timeframe,
+            endTime,
+            count: DEFAULT_COUNT,
+          });
+          logKlineTrace("history:loadMore:start", {
+            traceId,
+            symbol: parsed.symbol,
+            interval: activeInterval,
             timeframe,
             endTime,
             count: DEFAULT_COUNT,
@@ -669,12 +941,32 @@ const MarketChart: React.FC<MarketChartProps> = ({
             count: DEFAULT_COUNT,
             endTime,
             signal: controller.signal,
+            traceId,
+            traceSource: "chart.loadMore.forward",
           });
+          if (!isDataVersionCurrent(historyDataVersion) || disposed) {
+            logKlineTrace("history:loadMore:skip:stale-after-fetch", {
+              traceId,
+              disposed,
+              historyDataVersion,
+              currentDataVersion: dataVersionRef.current,
+            });
+            params.callback([], false);
+            return;
+          }
           const more = bars.length === DEFAULT_COUNT;
-          logKline("loadMore:done", { count: bars.length, more });
+          logKline("loadMore:done", { traceId, count: bars.length, more });
+          logKlineTrace("history:loadMore:done", {
+            traceId,
+            count: bars.length,
+            more,
+            first: bars[0]?.timestamp,
+            last: bars[bars.length - 1]?.timestamp,
+          });
           params.callback(bars, more);
         } catch (error) {
           if (!disposed) {
+            logKlineTrace("history:loadMore:error", { traceId, error });
             console.error("[Klinecharts] Failed to load more history", error);
           }
           params.callback([], false);
@@ -690,6 +982,12 @@ const MarketChart: React.FC<MarketChartProps> = ({
     unsubscribeRef.current?.();
     unsubscribeRef.current = subscribeMarket([parsed.symbol], (ticks) => {
       if (disposed) {
+        return;
+      }
+      if (!isDataVersionCurrent(historyDataVersion)) {
+        return;
+      }
+      if (focusModeRef.current) {
         return;
       }
       for (const tick of ticks) {
@@ -713,6 +1011,729 @@ const MarketChart: React.FC<MarketChartProps> = ({
       unsubscribeRef.current = null;
     };
   }, [activeSymbol, activeInterval, reloadKey]);
+
+  useEffect(() => {
+    const traceId = focusRange?.id?.trim() || buildTraceId("focus-range");
+    const chart = chartRef.current;
+    if (!chart) {
+      logKlineTrace("focus:skip:no-chart", { traceId });
+      return;
+    }
+    if (!focusRange) {
+      logKlineTrace("focus:clear", { traceId, reason: "focusRange-empty" });
+      exitFocusMode("focusRange-empty", true);
+      return;
+    }
+
+    logKlineTrace("focus:receive", {
+      traceId,
+      focusId: focusRange.id,
+      chartSymbol: focusRange.chartSymbol,
+      chartInterval: focusRange.chartInterval,
+      startTime: focusRange.startTime,
+      endTime: focusRange.endTime,
+      side: focusRange.side,
+      exitReason: focusRange.exitReason,
+      entryPrice: focusRange.entryPrice,
+      exitPrice: focusRange.exitPrice,
+      stopLossPrice: focusRange.stopLossPrice,
+      takeProfitPrice: focusRange.takeProfitPrice,
+      activeSymbol,
+      activeInterval,
+    });
+
+    const targetSymbol = focusRange.chartSymbol?.trim();
+    if (targetSymbol && targetSymbol !== activeSymbol) {
+      logKlineTrace("focus:skip:symbol-mismatch", { traceId, targetSymbol, activeSymbol });
+      exitFocusMode("symbol-mismatch", true);
+      return;
+    }
+
+    const rawStart = Math.min(focusRange.startTime, focusRange.endTime);
+    const rawEnd = Math.max(focusRange.startTime, focusRange.endTime);
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd) || rawStart <= 0 || rawEnd <= 0) {
+      logKlineTrace("focus:skip:invalid-range", {
+        traceId,
+        rawStart,
+        rawEnd,
+      });
+      exitFocusMode("invalid-range", true);
+      return;
+    }
+
+    const baseInterval = normalizeFocusResolution(toResolution(focusRange.chartInterval) ?? activeInterval) ?? DEFAULT_INTERVAL;
+    const activeIntervalNormalized = normalizeFocusResolution(activeInterval) ?? activeInterval;
+    const maxVisibleBars = estimateFocusMaxVisibleBars(chart);
+    const desiredInterval = pickFocusAutoInterval(rawStart, rawEnd, baseInterval, maxVisibleBars);
+    if (desiredInterval !== activeIntervalNormalized) {
+      logKlineTrace("focus:auto-interval:switch", {
+        traceId,
+        baseInterval,
+        activeInterval,
+        activeIntervalNormalized,
+        desiredInterval,
+        maxVisibleBars,
+        rangeMs: rawEnd - rawStart,
+      });
+      exitFocusMode("auto-interval-switch");
+      setActiveInterval(desiredInterval);
+      return;
+    }
+
+    const parsed = parseSymbolName(activeSymbol);
+    if (!parsed) {
+      logKlineTrace("focus:skip:invalid-symbol", { traceId, activeSymbol });
+      exitFocusMode("invalid-symbol", true);
+      return;
+    }
+    clearFocusOverlays();
+
+    const timeframe = RESOLUTION_TO_TIMEFRAME[activeInterval] ?? "m1";
+    const intervalMs = RESOLUTION_TO_MS[activeInterval] ?? 60_000;
+
+    const barsInRange = Math.max(1, Math.ceil((rawEnd - rawStart) / intervalMs) + 1);
+    const paddingBars = Math.min(180, Math.max(8, Math.ceil(barsInRange * 0.4)));
+    const startTime = rawStart - paddingBars * intervalMs;
+    const endTime = rawEnd + paddingBars * intervalMs;
+    const count = Math.min(1600, barsInRange + paddingBars * 2 + 20);
+    const focusDataVersion = bumpDataVersion(`focus:${traceId}`);
+
+    const controller = new AbortController();
+    let disposed = false;
+    let alignRafId: number | null = null;
+    let lastFocusBackwardAnchor = -1;
+    let lastFocusBackwardAt = 0;
+    const focusBackwardCooldownMs = 450;
+    let focusBackwardLoading = false;
+    chart.setLoadDataCallback(async (params) => {
+      if (disposed) {
+        return;
+      }
+      if (!isDataVersionCurrent(focusDataVersion) || !focusModeRef.current) {
+        logKlineTrace("focus:loadMore:skip:stale-or-not-focused", {
+          traceId,
+          type: params.type,
+          focusDataVersion,
+          currentDataVersion: dataVersionRef.current,
+          focusMode: focusModeRef.current,
+        });
+        params.callback([], false);
+        return;
+      }
+      const anchorTimestamp = params.data?.timestamp;
+      if (!Number.isFinite(anchorTimestamp) || (anchorTimestamp ?? 0) <= 0) {
+        logKlineTrace("focus:loadMore:skip:invalid-anchor", {
+          traceId,
+          type: params.type,
+          anchorTimestamp,
+        });
+        params.callback([], false);
+        return;
+      }
+
+      const forwardFetchCount = DEFAULT_COUNT;
+      const backwardFetchCount = Math.min(120, DEFAULT_COUNT);
+      const anchor = anchorTimestamp as number;
+      const dataList = chart.getDataList();
+      const currentMinTimestamp = dataList.length > 0 ? dataList[0]?.timestamp ?? 0 : 0;
+      const currentMaxTimestamp = dataList.length > 0 ? dataList[dataList.length - 1]?.timestamp ?? 0 : 0;
+      const measureTimestampX = (timestamp: number, value: number) => {
+        const pixel = chart.convertToPixel(
+          { timestamp, value },
+          { paneId: CANDLE_PANE_ID, absolute: false }
+        ) as Partial<Coordinate> | Array<Partial<Coordinate>>;
+        const coordinate = Array.isArray(pixel) ? pixel[0] : pixel;
+        const x = coordinate?.x;
+        return typeof x === "number" && Number.isFinite(x) ? x : null;
+      };
+
+      try {
+        if (params.type === LoadDataType.Forward) {
+          const endTime = anchor - intervalMs;
+          if (!Number.isFinite(endTime) || endTime <= 0) {
+            logKlineTrace("focus:loadMore:skip:invalid-end", {
+              traceId,
+              anchor,
+              endTime,
+            });
+            params.callback([], false);
+            return;
+          }
+          const loadTraceId = `${traceId}-loadMore-forward-${endTime}`;
+          logKlineTrace("focus:loadMore:forward:start", {
+            traceId: loadTraceId,
+            symbol: parsed.symbol,
+            timeframe,
+            endTime,
+            count: forwardFetchCount,
+          });
+          const bars = await fetchHistory({
+            http: httpRef.current,
+            exchange: parsed.exchange,
+            symbol: parsed.symbol,
+            timeframe,
+            intervalMs,
+            count: forwardFetchCount,
+            endTime,
+            signal: controller.signal,
+            traceId: loadTraceId,
+            traceSource: "focus.loadMore.forward",
+          });
+          if (disposed || !isDataVersionCurrent(focusDataVersion)) {
+            logKlineTrace("focus:loadMore:forward:skip:stale-after-fetch", {
+              traceId: loadTraceId,
+              disposed,
+              focusDataVersion,
+              currentDataVersion: dataVersionRef.current,
+            });
+            params.callback([], false);
+            return;
+          }
+          const olderBars = bars.filter((bar) => bar.timestamp < currentMinTimestamp);
+          const more = bars.length === forwardFetchCount && olderBars.length > 0;
+          logKlineTrace("focus:loadMore:forward:done", {
+            traceId: loadTraceId,
+            bars: bars.length,
+            acceptedBars: olderBars.length,
+            more,
+            first: bars[0]?.timestamp,
+            last: bars[bars.length - 1]?.timestamp,
+            currentMinTimestamp,
+          });
+          params.callback(olderBars, more);
+          return;
+        }
+
+        if (params.type === LoadDataType.Backward) {
+          const edgeToleranceMs = Math.max(1, Math.floor(intervalMs * 0.05));
+          if (currentMaxTimestamp > 0 && anchor < currentMaxTimestamp - edgeToleranceMs) {
+            logKlineTrace("focus:loadMore:backward:skip:already-has-right-buffer", {
+              traceId,
+              anchor,
+              currentMaxTimestamp,
+              edgeToleranceMs,
+            });
+            params.callback([], false);
+            return;
+          }
+          if (focusBackwardLoading) {
+            logKlineTrace("focus:loadMore:backward:skip:inflight", {
+              traceId,
+              anchor,
+            });
+            params.callback([], false);
+            return;
+          }
+          const now = Date.now();
+          if (lastFocusBackwardAnchor === anchor && now - lastFocusBackwardAt < focusBackwardCooldownMs) {
+            logKlineTrace("focus:loadMore:backward:skip:cooldown", {
+              traceId,
+              anchor,
+              cooldownMs: focusBackwardCooldownMs,
+              elapsedMs: now - lastFocusBackwardAt,
+            });
+            params.callback([], false);
+            return;
+          }
+          lastFocusBackwardAnchor = anchor;
+          lastFocusBackwardAt = now;
+
+          focusBackwardLoading = true;
+          try {
+            const startTime = anchor + intervalMs;
+            const endTime = startTime + intervalMs * (backwardFetchCount - 1);
+            if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime <= 0 || endTime <= startTime) {
+              logKlineTrace("focus:loadMore:skip:invalid-forward-range", {
+                traceId,
+                anchor,
+                startTime,
+                endTime,
+              });
+              params.callback([], false);
+              return;
+            }
+            const loadTraceId = `${traceId}-loadMore-backward-${startTime}`;
+            logKlineTrace("focus:loadMore:backward:start", {
+              traceId: loadTraceId,
+              symbol: parsed.symbol,
+              timeframe,
+              startTime,
+              endTime,
+              count: backwardFetchCount,
+            });
+            const bars = await fetchHistory({
+              http: httpRef.current,
+              exchange: parsed.exchange,
+              symbol: parsed.symbol,
+              timeframe,
+              intervalMs,
+              count: backwardFetchCount,
+              startTime,
+              endTime,
+              signal: controller.signal,
+              traceId: loadTraceId,
+              traceSource: "focus.loadMore.backward",
+            });
+            if (disposed || !isDataVersionCurrent(focusDataVersion)) {
+              logKlineTrace("focus:loadMore:backward:skip:stale-after-fetch", {
+                traceId: loadTraceId,
+                disposed,
+                focusDataVersion,
+                currentDataVersion: dataVersionRef.current,
+              });
+              params.callback([], false);
+              return;
+            }
+            const newerBars = bars.filter((bar) => bar.timestamp > currentMaxTimestamp);
+            if (newerBars.length === 0) {
+              logKlineTrace("focus:loadMore:backward:done:no-new-bars", {
+                traceId: loadTraceId,
+                bars: bars.length,
+                currentMaxTimestamp,
+              });
+              params.callback([], false);
+              return;
+            }
+
+            // 记录补数据前当前最右锚点的像素位置，补完后回滚位移，避免图表跳到最新处
+            const anchorMeasureValueRaw = dataList[dataList.length - 1]?.close;
+            const anchorMeasureValue =
+              typeof anchorMeasureValueRaw === "number" && Number.isFinite(anchorMeasureValueRaw)
+                ? anchorMeasureValueRaw
+                : newerBars[0].close;
+            const anchorBeforeX =
+              Number.isFinite(anchorMeasureValue) && currentMaxTimestamp > 0
+                ? measureTimestampX(currentMaxTimestamp, anchorMeasureValue)
+                : null;
+
+            // 右侧加载仅按用户触发单次补数据，禁止链式追拉
+            const more = false;
+            logKlineTrace("focus:loadMore:backward:done", {
+              traceId: loadTraceId,
+              bars: bars.length,
+              acceptedBars: newerBars.length,
+              more,
+              first: bars[0]?.timestamp,
+              last: bars[bars.length - 1]?.timestamp,
+              currentMaxTimestamp,
+            });
+            params.callback(newerBars, more);
+
+            if (anchorBeforeX !== null) {
+              window.requestAnimationFrame(() => {
+                if (disposed || !isDataVersionCurrent(focusDataVersion)) {
+                  return;
+                }
+                const anchorAfterX = measureTimestampX(currentMaxTimestamp, anchorMeasureValue);
+                if (anchorAfterX === null) {
+                  return;
+                }
+                const deltaX = anchorBeforeX - anchorAfterX;
+                if (Math.abs(deltaX) <= 0.5) {
+                  return;
+                }
+                chart.scrollByDistance(deltaX, 0);
+                logKlineTrace("focus:loadMore:backward:stabilized", {
+                  traceId: loadTraceId,
+                  currentMaxTimestamp,
+                  anchorBeforeX,
+                  anchorAfterX,
+                  deltaX,
+                });
+              });
+            }
+            return;
+          } finally {
+            focusBackwardLoading = false;
+          }
+        }
+      } catch (error) {
+        if (!disposed) {
+          logKlineTrace("focus:loadMore:error", {
+            traceId,
+            type: params.type,
+            error,
+          });
+          console.error("[Klinecharts] Failed to load focused loadMore data", error);
+        }
+      }
+      params.callback([], false);
+    });
+
+    const loadFocusedRange = async () => {
+      try {
+        logKline("focusRange:load", {
+          traceId,
+          symbol: parsed.symbol,
+          timeframe,
+          startTime,
+          endTime,
+          count,
+        });
+        logKlineTrace("focus:request:prepared", {
+          traceId,
+          symbol: parsed.symbol,
+          interval: activeInterval,
+          timeframe,
+          rawStart,
+          rawEnd,
+          startTime,
+          endTime,
+          barsInRange,
+          paddingBars,
+          count,
+        });
+        const bars = await fetchHistory({
+          http: httpRef.current,
+          exchange: parsed.exchange,
+          symbol: parsed.symbol,
+          timeframe,
+          intervalMs,
+          count,
+          startTime,
+          endTime,
+          signal: controller.signal,
+          traceId,
+          traceSource: "focus.range",
+        });
+        if (disposed || !isDataVersionCurrent(focusDataVersion)) {
+          logKlineTrace("focus:cancelled", {
+            traceId,
+            reason: disposed ? "effect-disposed" : "stale-data-version",
+            focusDataVersion,
+            currentDataVersion: dataVersionRef.current,
+          });
+          return;
+        }
+        if (bars.length === 0) {
+          logKlineTrace("focus:skip:empty-bars", { traceId });
+          exitFocusMode("empty-bars", true);
+          return;
+        }
+
+        logKlineTrace("focus:draw:start", { traceId, bars: bars.length });
+        focusModeRef.current = true;
+        chart.applyNewData(bars);
+        logKlineTrace("focus:draw:done", {
+          traceId,
+          bars: bars.length,
+          first: bars[0]?.timestamp,
+          last: bars[bars.length - 1]?.timestamp,
+        });
+        lastBarRef.current = bars[bars.length - 1];
+        setLatestBar(bars[bars.length - 1]);
+
+        const high = Math.max(...bars.map((bar) => bar.high));
+        const low = Math.min(...bars.map((bar) => bar.low));
+        const fallbackValue = Number.isFinite((high + low) / 2) ? (high + low) / 2 : bars[bars.length - 1].close;
+        const entryPrice = toFinitePrice(focusRange.entryPrice);
+        const exitPrice = toFinitePrice(focusRange.exitPrice);
+        const stopLossPrice = toFinitePrice(focusRange.stopLossPrice);
+        const takeProfitPrice = toFinitePrice(focusRange.takeProfitPrice);
+        const focusZones: FocusZone[] = [];
+        if (entryPrice !== null) {
+          const isLong = resolveFocusDirection(
+            focusRange.side,
+            entryPrice,
+            exitPrice,
+            stopLossPrice,
+            takeProfitPrice
+          );
+          const toProgress = (price: number) => (isLong ? price - entryPrice : entryPrice - price);
+          const fromProgress = (progress: number) => (isLong ? entryPrice + progress : entryPrice - progress);
+          const progressEpsilon = 1e-9;
+          const occupiedRanges: Array<{ start: number; end: number }> = [];
+          const appendProgressZone = (
+            kind: FocusZoneKind,
+            startProgress: number,
+            endProgress: number,
+            options?: { subtractOccupied?: boolean }
+          ) => {
+            const subtractOccupied = options?.subtractOccupied ?? true;
+            const minProgress = Math.min(startProgress, endProgress);
+            const maxProgress = Math.max(startProgress, endProgress);
+            if (
+              !Number.isFinite(minProgress) ||
+              !Number.isFinite(maxProgress) ||
+              Math.abs(maxProgress - minProgress) <= progressEpsilon
+            ) {
+              return;
+            }
+            let segments = [{ start: minProgress, end: maxProgress }];
+            if (subtractOccupied && occupiedRanges.length > 0) {
+              for (const occupied of occupiedRanges) {
+                const nextSegments: Array<{ start: number; end: number }> = [];
+                for (const segment of segments) {
+                  const overlapStart = Math.max(segment.start, occupied.start);
+                  const overlapEnd = Math.min(segment.end, occupied.end);
+                  if (overlapEnd - overlapStart <= progressEpsilon) {
+                    nextSegments.push(segment);
+                    continue;
+                  }
+                  if (overlapStart - segment.start > progressEpsilon) {
+                    nextSegments.push({ start: segment.start, end: overlapStart });
+                  }
+                  if (segment.end - overlapEnd > progressEpsilon) {
+                    nextSegments.push({ start: overlapEnd, end: segment.end });
+                  }
+                }
+                segments = nextSegments;
+                if (segments.length === 0) {
+                  break;
+                }
+              }
+            }
+
+            for (const segment of segments) {
+              if (segment.end - segment.start <= progressEpsilon) {
+                continue;
+              }
+              let upper = Math.max(fromProgress(segment.start), fromProgress(segment.end));
+              let lower = Math.min(fromProgress(segment.start), fromProgress(segment.end));
+              if (!Number.isFinite(upper) || !Number.isFinite(lower)) {
+                continue;
+              }
+              if (Math.abs(upper - lower) <= Number.EPSILON) {
+                const delta = Math.max(Math.abs(upper) * 0.0005, 0.0001);
+                upper += delta;
+                lower -= delta;
+              }
+              focusZones.push({
+                kind,
+                upper,
+                lower,
+                color: FOCUS_ZONE_COLORS[kind],
+              });
+              occupiedRanges.push(segment);
+            }
+          };
+          const normalizedExitReason = focusRange.exitReason?.trim().toLowerCase() ?? "";
+          const isTakeProfitClosed = normalizedExitReason === "takeprofit";
+          const isStopLossClosed = normalizedExitReason === "stoploss";
+
+          if (takeProfitPrice !== null && takeProfitPrice !== entryPrice) {
+            const takeProfitProgress = toProgress(takeProfitPrice);
+            if (takeProfitProgress > progressEpsilon) {
+              const executedProfitProgress = isTakeProfitClosed
+                ? takeProfitProgress
+                : exitPrice === null
+                  ? 0
+                  : clamp(toProgress(exitPrice), 0, takeProfitProgress);
+              appendProgressZone("executedProfit", 0, executedProfitProgress, { subtractOccupied: false });
+              if (!isTakeProfitClosed) {
+                appendProgressZone("takeProfitPlan", executedProfitProgress, takeProfitProgress);
+              }
+            }
+          }
+
+          if (stopLossPrice !== null && stopLossPrice !== entryPrice) {
+            const stopLossProgress = -toProgress(stopLossPrice);
+            if (stopLossProgress > progressEpsilon) {
+              const executedLossProgress = isStopLossClosed
+                ? stopLossProgress
+                : exitPrice === null
+                  ? 0
+                  : clamp(-toProgress(exitPrice), 0, stopLossProgress);
+              appendProgressZone("executedLoss", -executedLossProgress, 0, { subtractOccupied: false });
+              if (!isStopLossClosed) {
+                appendProgressZone("stopLossPlan", -stopLossProgress, -executedLossProgress);
+              }
+            }
+          }
+
+          if (focusZones.length === 0 && exitPrice !== null && exitPrice !== entryPrice) {
+            const exitProgress = toProgress(exitPrice);
+            if (exitProgress > 0) {
+              appendProgressZone("executedProfit", 0, exitProgress, { subtractOccupied: false });
+            } else {
+              appendProgressZone("executedLoss", exitProgress, 0, { subtractOccupied: false });
+            }
+          }
+        }
+
+        clearFocusOverlays();
+        logKlineTrace("focus:overlay:create:start", {
+          traceId,
+          rawStart,
+          rawEnd,
+          side: focusRange.side,
+          exitReason: focusRange.exitReason,
+          entryPrice,
+          exitPrice,
+          stopLossPrice,
+          takeProfitPrice,
+          high,
+          low,
+          zones: focusZones.map((zone) => ({
+            kind: zone.kind,
+            upper: zone.upper,
+            lower: zone.lower,
+          })),
+        });
+        const createdOverlayIds: string[] = [];
+        const appendOverlayIds = (value: string | string[] | null | undefined) => {
+          if (!value) {
+            return;
+          }
+          if (Array.isArray(value)) {
+            createdOverlayIds.push(...value.filter((id): id is string => Boolean(id)));
+            return;
+          }
+          createdOverlayIds.push(value);
+        };
+        for (const zone of focusZones) {
+          const created = chart.createOverlay({
+            name: "rect",
+            lock: true,
+            styles: {
+              polygon: {
+                style: "fill",
+                color: zone.color,
+                borderSize: 0,
+                borderColor: "rgba(0, 0, 0, 0)",
+              },
+            },
+            points: [
+              { timestamp: rawStart, value: zone.upper },
+              { timestamp: rawEnd, value: zone.lower },
+            ],
+          } as any);
+          appendOverlayIds(created as string | string[] | null | undefined);
+        }
+        if (entryPrice !== null && exitPrice !== null) {
+          const link = chart.createOverlay({
+            name: "segment",
+            lock: true,
+            styles: {
+              line: {
+                style: "dashed",
+                size: 1,
+                color: "rgba(30, 41, 59, 0.82)",
+                dashedValue: [6, 4],
+                smooth: false,
+              },
+            },
+            points: [
+              { timestamp: rawStart, value: entryPrice },
+              { timestamp: rawEnd, value: exitPrice },
+            ],
+          } as any);
+          appendOverlayIds(link as string | string[] | null | undefined);
+        }
+        focusOverlayIdsRef.current = createdOverlayIds;
+        logKlineTrace("focus:overlay:create:done", {
+          traceId,
+          zoneCount: focusZones.length,
+          overlayIds: focusOverlayIdsRef.current,
+        });
+
+        const midTimestamp = Math.floor((rawStart + rawEnd) / 2);
+        logKlineTrace("focus:scroll:start", { traceId, midTimestamp });
+        chart.scrollToTimestamp(midTimestamp);
+        logKlineTrace("focus:scroll:done", { traceId, midTimestamp });
+
+        const alignFocusedRangeToCenter = () => {
+          if (disposed || !isDataVersionCurrent(focusDataVersion)) {
+            return;
+          }
+          const paneSize =
+            chart.getSize(CANDLE_PANE_ID, DomPosition.Main) ??
+            chart.getSize(undefined, DomPosition.Main) ??
+            chart.getSize();
+          const paneWidth = paneSize?.width ?? 0;
+          if (!Number.isFinite(paneWidth) || paneWidth <= 0) {
+            logKlineTrace("focus:center:skip:no-pane-size", { traceId, paneSize });
+            return;
+          }
+
+          const toXAxis = (timestamp: number) => {
+            const pixel = chart.convertToPixel(
+              { timestamp, value: fallbackValue },
+              { paneId: CANDLE_PANE_ID, absolute: false }
+            ) as Partial<Coordinate> | Array<Partial<Coordinate>>;
+            const coordinate = Array.isArray(pixel) ? pixel[0] : pixel;
+            if (!coordinate) {
+              return null;
+            }
+            const x = coordinate.x;
+            return typeof x === "number" && Number.isFinite(x) ? x : null;
+          };
+
+          const measureCenterOffset = () => {
+            const startX = toXAxis(rawStart);
+            const endX = toXAxis(rawEnd);
+            if (startX === null || endX === null) {
+              return null;
+            }
+            const currentCenterX = (startX + endX) / 2;
+            const targetCenterX = paneWidth / 2;
+            return {
+              startX,
+              endX,
+              currentCenterX,
+              targetCenterX,
+              deltaX: targetCenterX - currentCenterX,
+            };
+          };
+
+          const before = measureCenterOffset();
+          if (!before) {
+            logKlineTrace("focus:center:skip:measure-failed", {
+              traceId,
+              rawStart,
+              rawEnd,
+            });
+            return;
+          }
+
+          logKlineTrace("focus:center:measure", { traceId, ...before });
+          if (Math.abs(before.deltaX) <= 1) {
+            logKlineTrace("focus:center:already-centered", { traceId, deltaX: before.deltaX });
+            return;
+          }
+
+          chart.scrollByDistance(before.deltaX, 0);
+          const after = measureCenterOffset();
+          logKlineTrace("focus:center:after-scroll", {
+            traceId,
+            beforeDeltaX: before.deltaX,
+            afterDeltaX: after?.deltaX ?? null,
+          });
+
+          if (after && Math.abs(after.deltaX) > Math.abs(before.deltaX)) {
+            // 若方向判断与组件内部实现相反，反向纠偏
+            chart.scrollByDistance(-2 * before.deltaX, 0);
+            const corrected = measureCenterOffset();
+            logKlineTrace("focus:center:after-reverse", {
+              traceId,
+              correctedDeltaX: corrected?.deltaX ?? null,
+            });
+          }
+        };
+
+        alignRafId = window.requestAnimationFrame(() => {
+          alignFocusedRangeToCenter();
+        });
+      } catch (err) {
+        if (!disposed) {
+          logKlineTrace("focus:error", { traceId, err });
+          console.error("[Klinecharts] Failed to load focused range", err);
+          exitFocusMode("focus-error", true);
+        }
+      }
+    };
+
+    loadFocusedRange();
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (alignRafId !== null) {
+        window.cancelAnimationFrame(alignRafId);
+        alignRafId = null;
+      }
+      logKlineTrace("focus:cleanup", { traceId });
+    };
+  }, [focusRange, activeSymbol, activeInterval]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -1278,11 +2299,11 @@ const MarketChart: React.FC<MarketChartProps> = ({
             >
               {magnetMode === "weak_magnet"
                 ? isMagnetEnabled
-                  ? <MagnetWeakOnIcon aria-hidden="true" />
-                  : <MagnetWeakOffIcon aria-hidden="true" />
+                  ? renderIconAsset(MagnetWeakOnIcon)
+                  : renderIconAsset(MagnetWeakOffIcon)
                 : isMagnetEnabled
-                  ? <MagnetStrongOnIcon aria-hidden="true" />
-                  : <MagnetStrongOffIcon aria-hidden="true" />}
+                  ? renderIconAsset(MagnetStrongOnIcon)
+                  : renderIconAsset(MagnetStrongOffIcon)}
             </span>
             <div
               className="icon-arrow"
@@ -1314,7 +2335,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                   }}
                 >
                   <span className="icon-overlay">
-                    <MagnetWeakOffIcon aria-hidden="true" />
+                    {renderIconAsset(MagnetWeakOffIcon)}
                   </span>
                   <span style={{ paddingLeft: 8 }}>弱磁模式</span>
                 </li>
@@ -1325,7 +2346,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                   }}
                 >
                   <span className="icon-overlay">
-                    <MagnetStrongOffIcon aria-hidden="true" />
+                    {renderIconAsset(MagnetStrongOffIcon)}
                   </span>
                   <span style={{ paddingLeft: 8 }}>强磁模式</span>
                 </li>
@@ -1348,9 +2369,9 @@ const MarketChart: React.FC<MarketChartProps> = ({
               title={isDrawingVisible ? "隐藏所有画图" : "显示所有画图"}
             >
               {isDrawingVisible ? (
-                <DrawingHideAllIcon aria-hidden="true" />
+                renderIconAsset(DrawingHideAllIcon)
               ) : (
-                <DrawingShowAllIcon aria-hidden="true" />
+                renderIconAsset(DrawingShowAllIcon)
               )}
             </span>
           </div>
@@ -1360,7 +2381,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
               onClick={handleClearDrawings}
               title="删除所有绘图"
             >
-              <DrawingClearAllIcon aria-hidden="true" />
+              {renderIconAsset(DrawingClearAllIcon)}
             </span>
           </div>
         </div>
@@ -1439,7 +2460,11 @@ async function fetchHistory(options: {
   endTime?: number;
   startTime?: number;
   signal: AbortSignal;
+  traceId?: string;
+  traceSource?: string;
 }): Promise<KLineData[]> {
+  const traceId = options.traceId || buildTraceId("history");
+  const traceSource = options.traceSource || "unknown";
   const endTime = options.endTime ?? Date.now();
   const startTime = options.startTime ?? endTime - options.intervalMs * (options.count - 1);
   const payload = {
@@ -1450,6 +2475,14 @@ async function fetchHistory(options: {
     startTime: formatDateTime(startTime),
     endTime: formatDateTime(endTime),
   };
+  const requestStartedAt = Date.now();
+  logKlineTrace("protocol:send", {
+    traceId,
+    source: traceSource,
+    url: "/api/marketdata/history",
+    type: "marketdata.kline.history",
+    payload,
+  });
 
   const data = await options.http.postProtocol<OHLCV[]>(
     "/api/marketdata/history",
@@ -1457,10 +2490,29 @@ async function fetchHistory(options: {
     payload,
     { signal: options.signal }
   );
-  return data
+  const elapsedMs = Date.now() - requestStartedAt;
+  logKlineTrace("protocol:recv", {
+    traceId,
+    source: traceSource,
+    type: "marketdata.kline.history",
+    rawCount: data.length,
+    elapsedMs,
+    firstRawTs: data[0]?.timestamp ?? null,
+    lastRawTs: data[data.length - 1]?.timestamp ?? null,
+  });
+
+  const bars = data
     .map((item) => toKLine(item))
     .filter((bar): bar is KLineData => bar !== null)
     .sort((a, b) => a.timestamp - b.timestamp);
+  logKlineTrace("history:normalized", {
+    traceId,
+    source: traceSource,
+    barsCount: bars.length,
+    firstBarTs: bars[0]?.timestamp ?? null,
+    lastBarTs: bars[bars.length - 1]?.timestamp ?? null,
+  });
+  return bars;
 }
 
 function toKLine(item: OHLCV): KLineData | null {
@@ -1533,37 +2585,52 @@ function formatNumber(value: number): string {
   return value.toFixed(2);
 }
 
+function renderIconAsset(icon: IconAsset | undefined) {
+  if (!icon) {
+    return null;
+  }
+  if (typeof icon === "string") {
+    return (
+      <img
+        src={icon}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+      />
+    );
+  }
+  const IconComponent = icon;
+  return <IconComponent aria-hidden="true" />;
+}
+
 function ToolIcon({ id }: { id: string }) {
-  const LineIconComponent = LINE_TOOL_ICON_MAP[id];
-  if (LineIconComponent) {
-    return <LineIconComponent aria-hidden="true" />;
+  const lineIcon = renderIconAsset(LINE_TOOL_ICON_MAP[id]);
+  if (lineIcon) {
+    return lineIcon;
   }
 
-  const ChannelAndShapeIconComponent = CHANNEL_AND_SHAPE_TOOL_ICON_MAP[id];
-  if (ChannelAndShapeIconComponent) {
-    return <ChannelAndShapeIconComponent aria-hidden="true" />;
+  const channelAndShapeIcon = renderIconAsset(CHANNEL_AND_SHAPE_TOOL_ICON_MAP[id]);
+  if (channelAndShapeIcon) {
+    return channelAndShapeIcon;
   }
 
-  const FibIconComponent = FIB_TOOL_ICON_MAP[id];
-  if (FibIconComponent) {
-    return <FibIconComponent aria-hidden="true" />;
+  const fibIcon = renderIconAsset(FIB_TOOL_ICON_MAP[id]);
+  if (fibIcon) {
+    return fibIcon;
   }
 
-  const WaveIconComponent = WAVE_TOOL_ICON_MAP[id];
-  if (WaveIconComponent) {
-    return <WaveIconComponent aria-hidden="true" />;
+  const waveIcon = renderIconAsset(WAVE_TOOL_ICON_MAP[id]);
+  if (waveIcon) {
+    return waveIcon;
   }
 
   switch (id) {
     // 功能图标
     case "lock":
-      return (
-        <DrawingLockOnIcon aria-hidden="true" />
-      );
+      return renderIconAsset(DrawingLockOnIcon);
     case "unlock":
-      return (
-        <DrawingLockOffIcon aria-hidden="true" />
-      );
+      return renderIconAsset(DrawingLockOffIcon);
     case "visible":
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">

@@ -65,6 +65,11 @@ builder.Services.AddControllers(options =>
     // 注册协议过滤器
     options.Filters.Add<ServerTest.Protocol.ProtocolRequestFilter>();
     options.Filters.Add<ServerTest.Protocol.ProtocolResponseFilter>();
+})
+.AddJsonOptions(options =>
+{
+    // HTTP 与 WS 共享 ProtocolJson 配置，确保字符串枚举可被一致解析
+    ServerTest.Protocol.ProtocolJson.Apply(options.JsonSerializerOptions);
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

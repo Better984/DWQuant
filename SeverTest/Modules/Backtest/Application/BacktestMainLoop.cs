@@ -492,13 +492,15 @@ namespace ServerTest.Modules.Backtest.Application
             var batchModeSw = System.Diagnostics.Stopwatch.StartNew();
             var openParallelism = ResolveInnerParallelism(symbols.Count);
             var closeParallelism = ResolveBatchCloseParallelism();
-            var allowOverlappingPositions = _configStore.GetBool("Backtest:BatchAllowOverlappingPositions", false);
+            var allowOverlappingPositions = _configStore.GetBool("Backtest:BatchAllowOverlappingPositions", true);
+            var cpuCount = Math.Max(1, Environment.ProcessorCount);
 
             LogSystemInfo(
-                "高速批量模式启动：标的数={SymbolCount} 开仓并行度={OpenParallelism} 平仓并行度={CloseParallelism} 允许重叠仓位={AllowOverlap}",
+                "高速批量模式启动：标的数={SymbolCount} 开仓并行度={OpenParallelism} 平仓并行度={CloseParallelism} CPU核心数={CpuCount} 允许重叠仓位={AllowOverlap}",
                 symbols.Count,
                 openParallelism,
                 closeParallelism,
+                cpuCount,
                 allowOverlappingPositions);
 
             var prepareSw = System.Diagnostics.Stopwatch.StartNew();
@@ -832,7 +834,7 @@ namespace ServerTest.Modules.Backtest.Application
                 .ConfigureAwait(false);
 
             LogSystemInfo(
-                "并行统一平仓完成：候选数={Candidates} 已处理={Processed} 成功平仓={Closed} 过滤淘汰={Filtered} 盈利={Win} 亏损={Loss} 胜率={WinRatePct}% 耗时={Elapsed}ms 吞吐={Throughput}/秒 平仓Top5={TopSymbols} 并行线程数={ThreadCount} 参与核心数={CoreCount} 核心列表={CoreList}",
+                "并行统一平仓完成：候选数={Candidates} 已处理={Processed} 成功平仓={Closed} 过滤淘汰={Filtered} 盈利={Win} 亏损={Loss} 胜率={WinRatePct}% 耗时={Elapsed}ms 吞吐={Throughput}/秒 平仓Top5={TopSymbols} 并行线程数={ThreadCount} 参与核心数={CoreCount} CPU核心数={CpuCount} 核心列表={CoreList}",
                 totalCandidates,
                 finalProcessedCandidates,
                 finalClosedPositions,
@@ -845,6 +847,7 @@ namespace ServerTest.Modules.Backtest.Application
                 closeTopSymbols,
                 closeParallelTracker.ThreadCount,
                 closeParallelTracker.CoreCount,
+                cpuCount,
                 closeParallelTracker.CoreList);
             if (closeParallelTracker.HasData)
             {
@@ -1297,6 +1300,8 @@ namespace ServerTest.Modules.Backtest.Application
                 ExitTime = exitTime,
                 EntryPrice = candidate.EntryPrice,
                 ExitPrice = exitPrice,
+                StopLossPrice = candidate.StopLossPrice,
+                TakeProfitPrice = candidate.TakeProfitPrice,
                 Qty = candidate.Qty,
                 ContractSize = candidate.ContractSize,
                 Fee = candidate.EntryFee + exitFee,
