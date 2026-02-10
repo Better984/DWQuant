@@ -189,6 +189,7 @@ const DRAWING_TOOL_GROUPS = [
       { id: "rect", label: "矩形", overlay: "rect" },
       { id: "parallelogram", label: "平行四边形", overlay: "parallelogram" },
       { id: "triangle", label: "三角形", overlay: "triangle" },
+      { id: "crossStar", label: "十字星", overlay: "crossStar" },
     ],
   },
   // 4. 绘图（斐波那契）
@@ -2626,6 +2627,14 @@ function ToolIcon({ id }: { id: string }) {
   }
 
   switch (id) {
+    case "crossStar":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" strokeWidth="1.8" />
+          <line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="1.8" />
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+        </svg>
+      );
     // 功能图标
     case "lock":
       return renderIconAsset(DrawingLockOnIcon);

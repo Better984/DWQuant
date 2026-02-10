@@ -66,6 +66,13 @@ const Dashboard: React.FC = () => {
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
   const [showIndicatorGenerator, setShowIndicatorGenerator] = useState(false);
   const [showHistoricalCacheDialog, setShowHistoricalCacheDialog] = useState(false);
+
+  // 从右侧行情面板跳转到左侧“行情”菜单
+  const handleOpenMarketFromRightPanel = (symbol: string) => {
+    setSelectedSymbol(symbol);
+    setActiveMenuIndex(1);
+    setBreadcrumbText(menuBreadcrumbMap[1]);
+  };
   
   // 菜单项对应的面包屑文本映射
   const menuBreadcrumbMap: { [key: number]: { first: string; second: string } } = {
@@ -479,7 +486,7 @@ const Dashboard: React.FC = () => {
           allowWidthResize={false}
           allowHeightResize={true}
           selectedSymbol={selectedSymbol}
-          onSelectSymbol={setSelectedSymbol}
+          onSelectSymbol={handleOpenMarketFromRightPanel}
         />
         <WhatsOnRoadPanel
           allowResize

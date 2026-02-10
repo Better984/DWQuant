@@ -135,6 +135,56 @@ const triangleOverlay = {
   ],
 };
 
+// 十字星（单点，横纵向无限延展）
+const crossStarOverlay = {
+  name: "crossStar",
+  totalStep: 2,
+  needDefaultPointFigure: true,
+  needDefaultXAxisFigure: true,
+  needDefaultYAxisFigure: true,
+  createPointFigures: ({
+    coordinates,
+    bounding,
+  }: {
+    coordinates: { x: number; y: number }[];
+    bounding: { width: number; height: number };
+  }) => {
+    if (coordinates.length > 0) {
+      const point = coordinates[0];
+      return [
+        {
+          type: "line",
+          attrs: {
+            coordinates: [
+              { x: 0, y: point.y },
+              { x: bounding.width, y: point.y },
+            ],
+          },
+        },
+        {
+          type: "line",
+          attrs: {
+            coordinates: [
+              { x: point.x, y: 0 },
+              { x: point.x, y: bounding.height },
+            ],
+          },
+        },
+        {
+          type: "circle",
+          attrs: {
+            x: point.x,
+            y: point.y,
+            r: 2.5,
+          },
+          styles: { style: "fill" },
+        },
+      ];
+    }
+    return [];
+  },
+};
+
 // 斐波那契圆
 const fibonacciCircleOverlay = {
   name: "fibonacciCircle",
@@ -481,6 +531,7 @@ export function registerCustomOverlays(): void {
   registerOverlay(rectOverlay);
   registerOverlay(parallelogramOverlay);
   registerOverlay(triangleOverlay);
+  registerOverlay(crossStarOverlay);
 
   // 斐波那契
   registerOverlay(fibonacciCircleOverlay);

@@ -159,14 +159,14 @@ export class TradingViewDatafeed {
   ): Promise<void> {
     const parsed = parseSymbolName(symbolInfo.name);
     if (!parsed) {
-      console.warn("[TV] 获取K线失败，交易对无效:", symbolInfo.name);
+      console.warn("历史K线获取：交易对无效", symbolInfo.name);
       onResult([], { noData: true });
       return;
     }
 
     const timeframe = RESOLUTION_TO_TIMEFRAME[resolution];
     if (!timeframe) {
-      console.warn("[TV] 获取K线失败，不支持的周期:", resolution);
+      console.warn("历史K线获取：不支持的周期", resolution);
       onError("不支持的周期");
       return;
     }
@@ -174,7 +174,7 @@ export class TradingViewDatafeed {
     const startMs = periodParams.from * 1000;
     const endMs = periodParams.to * 1000;
     const count = resolveCount(startMs, endMs, resolution);
-    console.info("[TV] 获取K线请求:", {
+    console.info("历史K线获取：请求", {
       symbol: parsed.symbol,
       exchange: parsed.exchange,
       resolution,
@@ -200,7 +200,7 @@ export class TradingViewDatafeed {
 
     try {
       const data = await this.http.postProtocol<OHLCV[]>("/api/marketdata/history", "marketdata.kline.history", payload);
-      console.info("[TV] 获取K线响应:", {
+      console.info("历史K线获取：响应", {
         symbol: parsed.symbol,
         exchange: parsed.exchange,
         count: data.length,
@@ -214,11 +214,11 @@ export class TradingViewDatafeed {
         this.lastBars.set(lastBarKey, bars[bars.length - 1]);
       }
 
-      console.info("[TV] 获取K线结果:", { bars: bars.length, noData: bars.length === 0 });
+      console.info("历史K线获取：结果", { bars: bars.length, noData: bars.length === 0 });
       onResult(bars, { noData: bars.length === 0 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "历史K线加载失败";
-      console.error("[TV] 获取K线异常:", message);
+      console.error("历史K线获取：异常", message);
       onError(message);
     }
   }

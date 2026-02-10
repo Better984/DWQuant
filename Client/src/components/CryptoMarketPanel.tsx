@@ -6,7 +6,7 @@ import XrpIcon from '../assets/SnowUI/cryptoicon/XRP.svg';
 import SolIcon from '../assets/SnowUI/cryptoicon/SOL.svg';
 import DogeIcon from '../assets/SnowUI/cryptoicon/DOGE.svg';
 import './CryptoMarketPanel.css';
-import { subscribeMarket } from '../network';
+import { getWsStatus, onWsStatusChange, subscribeMarket } from '../network';
 
 type MarketItem = {
   icon: string;
@@ -61,6 +61,7 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
   onSelectSymbol,
 }) => {
   const [items, setItems] = useState<MarketItem[]>(initialItems);
+  const [wsStatus, setWsStatus] = useState(() => getWsStatus());
   const [panelSize, setPanelSize] = useState<PanelSize>(DEFAULT_SIZE);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -137,6 +138,14 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
       resizeObserver.disconnect();
     };
   }, [items, panelSize.height, panelSize.width]);
+
+  // 监听 WebSocket 连接状态，驱动右上角 Live 指示灯
+  useEffect(() => {
+    const unsubscribe = onWsStatusChange((status) => {
+      setWsStatus(status);
+    });
+    return unsubscribe;
+  }, []);
 
   // 检测文本是否被截断并更新隐藏状态
   useEffect(() => {
@@ -345,6 +354,16 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
     window.addEventListener('pointerup', handlePointerUp);
   };
 
+  const isLive = wsStatus === 'connected';
+  const isConnecting = wsStatus === 'connecting';
+  const isDisconnected = wsStatus === 'disconnected' || wsStatus === 'error';
+
+  const actionClassName = `crypto-panel-action ${
+    isLive ? 'is-live' : isConnecting ? 'is-connecting' : 'is-disconnected'
+  }`;
+
+  const actionLabel = isLive ? 'Live' : isConnecting ? 'Connecting' : 'Offline';
+
   return (
     <div
       className={panelClassName}
@@ -359,7 +378,7 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
         <div className="crypto-panel-title">
           <span className="crypto-title">Markets</span>
         </div>
-        <button className="crypto-panel-action">Live</button>
+        <button className={actionClassName}>{actionLabel}</button>
       </div>
 
       <div className="crypto-table-header">
