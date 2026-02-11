@@ -5,6 +5,7 @@ namespace ServerTest.Domain.Entities
         public long PositionId { get; set; }
         public long Uid { get; set; }
         public long UsId { get; set; }
+        public long? StrategyVersionId { get; set; }
         public long? ExchangeApiKeyId { get; set; }
         public string Exchange { get; set; } = string.Empty;
         public string Symbol { get; set; } = string.Empty;
@@ -18,6 +19,8 @@ namespace ServerTest.Domain.Entities
         public decimal? TrailingStopPrice { get; set; }
         public bool TrailingTriggered { get; set; }
         public string? CloseReason { get; set; }
+        public decimal? ClosePrice { get; set; }
+        public decimal? RealizedPnl { get; set; }
         public DateTime OpenedAt { get; set; }
         public DateTime? ClosedAt { get; set; }
     }

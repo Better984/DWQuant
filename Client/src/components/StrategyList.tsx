@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import StrategyItem from './StrategyItem';
 import type { StrategyItemProps } from './StrategyItem.types';
 import StrategyEditorFlow, { type StrategyEditorSubmitPayload } from './StrategyEditorFlow';
@@ -119,7 +119,12 @@ const buildStrategyItem = (
   };
 };
 
-const StrategyList: React.FC = () => {
+type StrategyListProps = {
+  autoOpenImport?: boolean;
+  onAutoOpenHandled?: () => void;
+};
+
+const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenHandled }) => {
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
   const { error: showError, success: showSuccess } = useNotification();
   const [records, setRecords] = useState<StrategyListRecord[]>([]);
@@ -162,6 +167,22 @@ const StrategyList: React.FC = () => {
       window.removeEventListener('strategy:changed', handler);
     };
   }, [fetchStrategies]);
+
+  useEffect(() => {
+    if (!autoOpenImport) {
+      return;
+    }
+    // 先完成路由/菜单切换渲染，再异步打开导入弹窗，避免同步跳转带来的视觉抖动
+    const timerId = window.setTimeout(() => {
+      openImportDialog();
+      if (onAutoOpenHandled) {
+        onAutoOpenHandled();
+      }
+    }, 0);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [autoOpenImport, onAutoOpenHandled]);
 
   const handleCreateVersion = (usId: number) => {
     const target = records.find((item) => item.usId === usId) ?? null;
@@ -329,9 +350,9 @@ const StrategyList: React.FC = () => {
     setDetailTarget(null);
   };
 
-  const openImportDialog = () => {
+  function openImportDialog() {
     setIsImportDialogOpen(true);
-  };
+  }
 
   const closeImportDialog = () => {
     setIsImportDialogOpen(false);

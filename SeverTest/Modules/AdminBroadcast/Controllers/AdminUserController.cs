@@ -274,7 +274,7 @@ ORDER BY created_at DESC;";
                 shareCode = (string)c.ShareCode,
                 defId = (long)c.DefId,
                 createdByUid = (ulong)c.CreatedByUid,
-                isActive = (bool)c.IsActive,
+                isActive = Convert.ToBoolean(c.IsActive),
                 expiredAt = c.ExpiredAt != null ? ((DateTime)c.ExpiredAt).ToString("O") : null,
                 createdAt = ((DateTime)c.CreatedAt).ToString("O"),
             }).Cast<object>().ToList();

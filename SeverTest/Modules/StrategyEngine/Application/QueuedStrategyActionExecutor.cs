@@ -33,6 +33,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 StrategyUid = context.Strategy.UidCode,
                 Uid = context.Strategy.CreatorUserId,
                 UsId = context.Strategy.Id,
+                StrategyVersionId = context.Strategy.VersionId,
+                StrategyVersionNo = context.Strategy.Version,
                 ExchangeApiKeyId = context.Strategy.ExchangeApiKeyId,
                 Exchange = context.StrategyConfig?.Trade?.Exchange ?? string.Empty,
                 Symbol = context.StrategyConfig?.Trade?.Symbol ?? string.Empty,

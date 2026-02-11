@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import './StrategyItem.css';
 import type { StrategyItemProps } from './StrategyItem.types';
 
@@ -76,10 +76,10 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
           </h3>
           <div className="strategy-item-meta">
             <span className="strategy-currency">{currency}</span>
-            <span className="strategy-separator">路</span>
+            <span className="strategy-separator">·</span>
             <span className="strategy-trading-pair">{tradingPair}</span>
-            <span className="strategy-separator">路</span>
-            <span className="strategy-leverage">{leverage}x 鏉犳潌</span>
+            <span className="strategy-separator">·</span>
+            <span className="strategy-leverage">{leverage}x 杠杆</span>
           </div>
         </div>
         <div className="strategy-item-header-right">

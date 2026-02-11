@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import './StrategyModule.css';
 
 import StarIcon from '../assets/SnowUI/icon/Star.svg';
@@ -15,10 +15,20 @@ import StrategyRecommend from './StrategyRecommend';
 import type { MenuItem } from './StrategyModule.types';
 import { HttpClient, getToken } from '../network';
 
-const StrategyModule: React.FC = () => {
-  const [activeMenuId, setActiveMenuId] = useState<string>('recommend');
+type StrategyModuleProps = {
+  initialMenuId?: string;
+};
+
+const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
+  const [activeMenuId, setActiveMenuId] = useState<string>(initialMenuId ?? 'recommend');
   const [isStrategyEditorOpen, setIsStrategyEditorOpen] = useState(false);
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
+
+  useEffect(() => {
+    if (initialMenuId) {
+      setActiveMenuId(initialMenuId);
+    }
+  }, [initialMenuId]);
 
   const menuItems: MenuItem[] = [
     { id: 'recommend', label: '推荐', icon: StarIcon },

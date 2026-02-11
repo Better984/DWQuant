@@ -3,6 +3,8 @@ using ServerTest.Modules.Positions.Domain;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Models.Trading;
 using ServerTest.Modules.TradingExecution.Domain;
+using ServerTest.Modules.MarketStreaming.Application;
+using ServerTest.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,6 +15,7 @@ namespace ServerTest.Modules.Positions.Application
     {
         private readonly StrategyPositionRepository _positionRepository;
         private readonly IOrderExecutor _orderExecutor;
+        private readonly MarketDataEngine _marketDataEngine;
         private readonly PositionRiskConfigStore _riskConfigStore;
         private readonly PositionRiskIndexManager _riskIndexManager;
         private readonly ILogger<StrategyPositionCloseService> _logger;
@@ -20,12 +23,14 @@ namespace ServerTest.Modules.Positions.Application
         public StrategyPositionCloseService(
             StrategyPositionRepository positionRepository,
             IOrderExecutor orderExecutor,
+            MarketDataEngine marketDataEngine,
             PositionRiskConfigStore riskConfigStore,
             PositionRiskIndexManager riskIndexManager,
             ILogger<StrategyPositionCloseService> logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
+            _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
             _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -121,10 +126,37 @@ namespace ServerTest.Modules.Positions.Application
                     continue;
                 }
 
+                // 批量平仓按同一成交口径写回：优先订单均价，其次实时价，最后组内加权开仓价
+                var weightedEntry = qty > 0
+                    ? group.Sum(item => item.EntryPrice * item.Qty) / qty
+                    : 0m;
+                var closePriceResult = ResolveClosePrice(orderResult, group.Key.Exchange, group.Key.Symbol, weightedEntry);
+                if (closePriceResult.IsFallback)
+                {
+                    _logger.LogWarning(
+                        "批量平仓未返回交易所均价，启用兜底价: uid={Uid} usId={UsId} exchange={Exchange} symbol={Symbol} side={Side} groupCount={GroupCount} qty={Qty} source={Source} closePrice={ClosePrice} orderAvg={OrderAvg}",
+                        uid,
+                        usId,
+                        group.Key.Exchange,
+                        group.Key.Symbol,
+                        group.Key.Side,
+                        group.Count(),
+                        qty,
+                        closePriceResult.Source,
+                        closePriceResult.Price,
+                        orderResult.AveragePrice);
+                }
+
                 foreach (var position in group)
                 {
                     // 手动批量平仓需要记录 close_reason=ManualBatch
-                    await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "ManualBatch", ct)
+                    await _positionRepository.CloseAsync(
+                            position.PositionId,
+                            trailingTriggered: false,
+                            closedAt: DateTime.UtcNow,
+                            "ManualBatch",
+                            closePriceResult.Price,
+                            ct)
                         .ConfigureAwait(false);
                     _riskConfigStore.Remove(position.PositionId);
                     _riskIndexManager.RemovePosition(position.PositionId);
@@ -222,7 +254,28 @@ namespace ServerTest.Modules.Positions.Application
             }
 
             // 手动单仓平仓需要记录 close_reason=ManualSingle
-            await _positionRepository.CloseAsync(position.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, "ManualSingle", ct)
+            var closePriceResult = ResolveClosePrice(orderResult, position.Exchange, position.Symbol, position.EntryPrice);
+            if (closePriceResult.IsFallback)
+            {
+                _logger.LogWarning(
+                    "单仓平仓未返回交易所均价，启用兜底价: uid={Uid} positionId={PositionId} exchange={Exchange} symbol={Symbol} side={Side} qty={Qty} source={Source} closePrice={ClosePrice} orderAvg={OrderAvg}",
+                    uid,
+                    position.PositionId,
+                    position.Exchange,
+                    position.Symbol,
+                    position.Side,
+                    position.Qty,
+                    closePriceResult.Source,
+                    closePriceResult.Price,
+                    orderResult.AveragePrice);
+            }
+            await _positionRepository.CloseAsync(
+                    position.PositionId,
+                    trailingTriggered: false,
+                    closedAt: DateTime.UtcNow,
+                    "ManualSingle",
+                    closePriceResult.Price,
+                    ct)
                 .ConfigureAwait(false);
             _riskConfigStore.Remove(position.PositionId);
             _riskIndexManager.RemovePosition(position.PositionId);
@@ -249,6 +302,71 @@ namespace ServerTest.Modules.Positions.Application
             }
 
             return string.Empty;
+        }
+
+        private ClosePriceResolveResult ResolveClosePrice(
+            OrderExecutionResult orderResult,
+            string exchange,
+            string symbol,
+            decimal fallbackPrice)
+        {
+            if (orderResult.AveragePrice.HasValue && orderResult.AveragePrice.Value > 0)
+            {
+                return new ClosePriceResolveResult
+                {
+                    Price = orderResult.AveragePrice.Value,
+                    Source = "exchange_avg",
+                    IsFallback = false
+                };
+            }
+
+            var normalizedExchange = MarketDataKeyNormalizer.NormalizeExchange(exchange);
+            var normalizedSymbol = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
+            var kline = _marketDataEngine.GetLatestKline(normalizedExchange, "1m", normalizedSymbol);
+            if (kline.HasValue)
+            {
+                if (kline.Value.close.HasValue)
+                {
+                    var price = Convert.ToDecimal(kline.Value.close.Value);
+                    if (price > 0)
+                    {
+                        return new ClosePriceResolveResult
+                        {
+                            Price = price,
+                            Source = "kline_close",
+                            IsFallback = true
+                        };
+                    }
+                }
+
+                if (kline.Value.open.HasValue)
+                {
+                    var price = Convert.ToDecimal(kline.Value.open.Value);
+                    if (price > 0)
+                    {
+                        return new ClosePriceResolveResult
+                        {
+                            Price = price,
+                            Source = "kline_open",
+                            IsFallback = true
+                        };
+                    }
+                }
+            }
+
+            return new ClosePriceResolveResult
+            {
+                Price = fallbackPrice > 0 ? fallbackPrice : null,
+                Source = "weighted_entry",
+                IsFallback = true
+            };
+        }
+
+        private sealed class ClosePriceResolveResult
+        {
+            public decimal? Price { get; init; }
+            public string Source { get; init; } = "unknown";
+            public bool IsFallback { get; init; }
         }
     }
 }

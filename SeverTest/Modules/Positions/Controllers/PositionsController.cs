@@ -18,17 +18,20 @@ namespace ServerTest.Controllers
         private readonly StrategyPositionRepository _positionRepository;
         private readonly AuthTokenService _tokenService;
         private readonly StrategyPositionCloseService _closeService;
+        private readonly PositionOverviewService _overviewService;
 
         public PositionsController(
             ILogger<PositionsController> logger,
             StrategyPositionRepository positionRepository,
             AuthTokenService tokenService,
-            StrategyPositionCloseService closeService)
+            StrategyPositionCloseService closeService,
+            PositionOverviewService overviewService)
             : base(logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
             _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
             _closeService = closeService ?? throw new ArgumentNullException(nameof(closeService));
+            _overviewService = overviewService ?? throw new ArgumentNullException(nameof(overviewService));
         }
 
         [ProtocolType("position.list")]
@@ -96,6 +99,107 @@ namespace ServerTest.Controllers
             };
 
             return Ok(ApiResponse<PositionListResponse>.Ok(response));
+        }
+
+        [ProtocolType("position.overview")]
+        [HttpPost("overview")]
+        public async Task<IActionResult> GetOverview([FromBody] ProtocolRequest<PositionOverviewRequest> request)
+        {
+            var payload = request.Data;
+            if (payload == null)
+            {
+                return BadRequest(ApiResponse<object>.Error("缺少请求数据"));
+            }
+
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            var (from, to, parseError) = ParseRange(payload.From, payload.To);
+            if (parseError != null)
+            {
+                return BadRequest(ApiResponse<object>.Error(parseError));
+            }
+
+            if (from.HasValue && to.HasValue && from.Value > to.Value)
+            {
+                return BadRequest(ApiResponse<object>.Error("开始时间不能大于结束时间"));
+            }
+
+            var recentLimit = payload.RecentLimit <= 0 ? 50 : Math.Min(payload.RecentLimit, 200);
+            var currentOpenLimit = payload.CurrentOpenLimit <= 0 ? 200 : Math.Min(payload.CurrentOpenLimit, 500);
+
+            var response = await _overviewService
+                .BuildAsync(uid.Value, from, to, recentLimit, currentOpenLimit, HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
+            return Ok(ApiResponse<PositionOverviewResponse>.Ok(response));
+        }
+
+        [ProtocolType("position.recent.summary")]
+        [HttpPost("recent-summary")]
+        public async Task<IActionResult> GetRecentSummary([FromBody] ProtocolRequest<PositionRecentSummaryRequest> request)
+        {
+            var payload = request.Data;
+            if (payload == null)
+            {
+                return BadRequest(ApiResponse<object>.Error("缺少请求数据"));
+            }
+
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            DateTime? to = null;
+            if (!string.IsNullOrWhiteSpace(payload.To))
+            {
+                if (!DateTime.TryParse(payload.To, out var parsedTo))
+                {
+                    return BadRequest(ApiResponse<object>.Error("结束时间格式错误，请使用 yyyy-MM-dd HH:mm:ss"));
+                }
+
+                to = parsedTo;
+            }
+
+            var response = await _overviewService
+                .BuildRecentSummaryAsync(uid.Value, to, payload.CandidateWindowDays, HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
+            return Ok(ApiResponse<PositionRecentSummaryResponse>.Ok(response));
+        }
+
+        [ProtocolType("position.recent.activity")]
+        [HttpPost("recent-activity")]
+        public async Task<IActionResult> GetRecentActivity([FromBody] ProtocolRequest<PositionRecentActivityRequest> request)
+        {
+            var payload = request.Data ?? new PositionRecentActivityRequest();
+
+            var uid = await GetUserIdAsync();
+            if (!uid.HasValue)
+            {
+                return Unauthorized(ApiResponse<object>.Error("未授权，请重新登录"));
+            }
+
+            DateTime? to = null;
+            if (!string.IsNullOrWhiteSpace(payload.To))
+            {
+                if (!DateTime.TryParse(payload.To, out var parsedTo))
+                {
+                    return BadRequest(ApiResponse<object>.Error("结束时间格式错误，请使用 yyyy-MM-dd HH:mm:ss"));
+                }
+
+                to = parsedTo;
+            }
+
+            var response = await _overviewService
+                .BuildRecentActivityAsync(uid.Value, to, payload.Days, payload.Limit, HttpContext.RequestAborted)
+                .ConfigureAwait(false);
+
+            return Ok(ApiResponse<PositionRecentActivityResponse>.Ok(response));
         }
 
         [ProtocolType("position.close.by_strategy")]
@@ -222,6 +326,7 @@ namespace ServerTest.Controllers
                 PositionId = position.PositionId,
                 Uid = position.Uid,
                 UsId = position.UsId,
+                StrategyVersionId = position.StrategyVersionId,
                 ExchangeApiKeyId = position.ExchangeApiKeyId,
                 Exchange = position.Exchange,
                 Symbol = position.Symbol,
@@ -235,6 +340,8 @@ namespace ServerTest.Controllers
                 TrailingTriggered = position.TrailingTriggered,
                 TrailingStopPrice = position.TrailingStopPrice,
                 CloseReason = position.CloseReason,
+                ClosePrice = position.ClosePrice,
+                RealizedPnl = position.RealizedPnl,
                 OpenedAt = position.OpenedAt,
                 ClosedAt = position.ClosedAt
             };
@@ -254,6 +361,27 @@ namespace ServerTest.Controllers
         public string? From { get; set; }
         public string? To { get; set; }
         public string? Status { get; set; } = "all";
+    }
+
+    public sealed class PositionOverviewRequest
+    {
+        public string? From { get; set; }
+        public string? To { get; set; }
+        public int RecentLimit { get; set; } = 50;
+        public int CurrentOpenLimit { get; set; } = 200;
+    }
+
+    public sealed class PositionRecentSummaryRequest
+    {
+        public string? To { get; set; }
+        public List<int>? CandidateWindowDays { get; set; }
+    }
+
+    public sealed class PositionRecentActivityRequest
+    {
+        public string? To { get; set; }
+        public int Days { get; set; } = 7;
+        public int Limit { get; set; } = 12;
     }
 
     public sealed class PositionCloseByStrategyRequest

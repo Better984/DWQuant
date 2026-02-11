@@ -10,6 +10,8 @@ namespace ServerTest.Models.Strategy
         public string StrategyUid { get; init; } = string.Empty;
         public long? Uid { get; init; }
         public long? UsId { get; init; }
+        public long? StrategyVersionId { get; init; }
+        public int? StrategyVersionNo { get; init; }
         public long? ExchangeApiKeyId { get; init; }
         public string Exchange { get; init; } = string.Empty;
         public string Symbol { get; init; } = string.Empty;

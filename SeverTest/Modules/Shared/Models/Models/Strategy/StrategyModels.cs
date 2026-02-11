@@ -20,6 +20,7 @@ namespace ServerTest.Models.Strategy
         public StrategyState State { get; set; } = StrategyState.Draft;
         public long CreatorUserId { get; set; }
         public long? ExchangeApiKeyId { get; set; }
+        public long? VersionId { get; set; }
         public int Version { get; set; } = 1;
 
         public StrategyVisibility Visibility { get; set; } = new();

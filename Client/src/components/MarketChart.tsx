@@ -97,6 +97,8 @@ const DEFAULT_SYMBOL = "Binance:BTC/USDT";
 const DEFAULT_INTERVAL = "1";
 const DEFAULT_COUNT = 500;
 const CANDLE_PANE_ID = "candle_pane";
+const FIXED_MAIN_INDICATOR = "MA";
+const FIXED_MAIN_INDICATOR_PARAMS = [250];
 const DEBUG_KLINE = import.meta.env.DEV;
 
 const PERIOD_TABS = [
@@ -718,21 +720,31 @@ const MarketChart: React.FC<MarketChartProps> = ({
     const resizeObserver = new ResizeObserver(() => chart.resize());
     resizeObserver.observe(containerRef.current);
 
-    const defaults = ["BOLL", "MA", "VOL", "MACD"];
+    // 默认指标：主图 MA250 + 副图 VOL、MACD
+    const defaults = [
+      { name: FIXED_MAIN_INDICATOR, pane: "main" as const, calcParams: FIXED_MAIN_INDICATOR_PARAMS },
+      { name: "VOL", pane: "sub" as const },
+      { name: "MACD", pane: "sub" as const },
+    ];
     const nextIndicators: string[] = [];
     for (const indicator of defaults) {
-      if (!supportedIndicators.has(indicator)) {
+      if (!supportedIndicators.has(indicator.name)) {
         continue;
       }
-      const option = INDICATOR_OPTIONS.find((item) => item.value === indicator);
+      const option = INDICATOR_OPTIONS.find(
+        (item) => item.value === indicator.name && item.pane === indicator.pane
+      );
+      if (!option) {
+        continue;
+      }
       const paneId = chart.createIndicator(
-        indicator,
-        option?.stack ?? false,
+        indicator.calcParams ? { name: indicator.name, calcParams: indicator.calcParams } : indicator.name,
+        option.stack,
         getIndicatorPaneOptions(option)
       );
       if (paneId) {
-        indicatorPaneRef.current.set(indicator, paneId);
-        nextIndicators.push(indicator);
+        indicatorPaneRef.current.set(indicator.name, paneId);
+        nextIndicators.push(indicator.name);
       }
     }
     if (nextIndicators.length > 0) {
@@ -1756,8 +1768,12 @@ const MarketChart: React.FC<MarketChartProps> = ({
       setActiveIndicators((prev) => prev.filter((name) => name !== option.value));
       return;
     }
+    const createValue =
+      option.value === FIXED_MAIN_INDICATOR && option.pane === "main"
+        ? { name: FIXED_MAIN_INDICATOR, calcParams: FIXED_MAIN_INDICATOR_PARAMS }
+        : option.value;
     const createdPaneId = chart.createIndicator(
-      option.value,
+      createValue,
       option.stack,
       getIndicatorPaneOptions(option)
     );

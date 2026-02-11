@@ -12,6 +12,7 @@
   "dependencies": {
     "@snowui-design-system/resource-base": "^1.0.24",
     "@snowui-design-system/resource-react": "^1.0.24",
+    "echarts": "^6.0.0",
     "klinecharts": "^9.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -2307,7 +2307,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
           className={`strategy-detail-tab ${activeTab === 'info' ? 'is-active' : ''}`}
           onClick={() => handleTabChange('info')}
         >
-          鍩烘湰淇℃伅
+          基础信息
         </button>
         <button
           type="button"
@@ -2637,7 +2637,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                 <div className="backtest-card-title">回测参数</div>
                 <div className="backtest-form">
                   <div className="backtest-section">
-                    <div className="backtest-section-title">鍩虹淇℃伅</div>
+                    <div className="backtest-section-title">基础信息</div>
                     <div className="backtest-form-grid">
                       <label className="backtest-field">
                         <span className="backtest-label">交易所</span>

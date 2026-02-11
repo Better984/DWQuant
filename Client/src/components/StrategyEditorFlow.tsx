@@ -1,6 +1,14 @@
-﻿
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 
+import BinanceIcon from '../assets/SnowUI/cexlogo/Binance.svg';
+import BitgetIcon from '../assets/SnowUI/cexlogo/bitget.svg';
+import OkxIcon from '../assets/SnowUI/cexlogo/OKX.svg';
+import BnbIcon from '../assets/SnowUI/cryptoicon/BNB.svg';
+import BtcIcon from '../assets/SnowUI/cryptoicon/BTC.svg';
+import DogeIcon from '../assets/SnowUI/cryptoicon/DOGE.svg';
+import EthIcon from '../assets/SnowUI/cryptoicon/ETH.svg';
+import SolIcon from '../assets/SnowUI/cryptoicon/SOL.svg';
+import XrpIcon from '../assets/SnowUI/cryptoicon/XRP.svg';
 import IndicatorGeneratorSelector, { type GeneratedIndicatorPayload } from './IndicatorGeneratorSelector';
 import ConditionEditorDialog from './ConditionEditorDialog';
 import StrategyConfigDialog from './StrategyConfigDialog';
@@ -649,18 +657,18 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const MAX_CONDITIONS_PER_GROUP = 6;
 
   const exchangeOptions: TradeOption[] = [
-    { value: 'binance', label: '币安' },
-    { value: 'okx', label: 'OKX' },
-    { value: 'bitget', label: 'Bitget' },
+    { value: 'binance', label: '币安', icon: BinanceIcon },
+    { value: 'okx', label: 'OKX', icon: OkxIcon },
+    { value: 'bitget', label: 'Bitget', icon: BitgetIcon },
   ];
 
   const symbolOptions: TradeOption[] = [
-    { value: 'BTC/USDT', label: 'BTC' },
-    { value: 'ETH/USDT', label: 'ETH' },
-    { value: 'XRP/USDT', label: 'XRP' },
-    { value: 'SOL/USDT', label: 'SOL' },
-    { value: 'DOGE/USDT', label: 'DOGE' },
-    { value: 'BNB/USDT', label: 'BNB' },
+    { value: 'BTC/USDT', label: 'BTC', icon: BtcIcon },
+    { value: 'ETH/USDT', label: 'ETH', icon: EthIcon },
+    { value: 'XRP/USDT', label: 'XRP', icon: XrpIcon },
+    { value: 'SOL/USDT', label: 'SOL', icon: SolIcon },
+    { value: 'DOGE/USDT', label: 'DOGE', icon: DogeIcon },
+    { value: 'BNB/USDT', label: 'BNB', icon: BnbIcon },
   ];
 
   const timeframeOptions: TimeframeOption[] = [

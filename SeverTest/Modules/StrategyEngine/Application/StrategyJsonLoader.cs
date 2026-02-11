@@ -123,6 +123,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 State = MapState(user.State),
                 CreatorUserId = definition.CreatorUid != 0 ? definition.CreatorUid : user.Uid,
                 ExchangeApiKeyId = user.ExchangeApiKeyId,
+                VersionId = version.VersionId > 0 ? version.VersionId : null,
                 Version = version.VersionNo > 0 ? version.VersionNo : 1,
                 Visibility = new StrategyVisibility
                 {

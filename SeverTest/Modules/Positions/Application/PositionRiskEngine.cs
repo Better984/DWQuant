@@ -178,7 +178,13 @@ namespace ServerTest.Modules.Positions.Application
                 return;
             }
 
-            await _positionRepository.CloseAsync(entry.PositionId, trailingTriggered: trailingHit, closedAt: DateTime.UtcNow, closeReason, ct)
+            await _positionRepository.CloseAsync(
+                    entry.PositionId,
+                    trailingTriggered: trailingHit,
+                    closedAt: DateTime.UtcNow,
+                    closeReason,
+                    orderResult.AveragePrice,
+                    ct)
                 .ConfigureAwait(false);
             _riskConfigStore.Remove(entry.PositionId);
             _riskIndexManager.RemovePosition(entry.PositionId);

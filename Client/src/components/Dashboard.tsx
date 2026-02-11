@@ -86,6 +86,10 @@ const Dashboard: React.FC = () => {
   };
   
   const [breadcrumbText, setBreadcrumbText] = useState(menuBreadcrumbMap[0]);
+  const [strategyInitialMenuId, setStrategyInitialMenuId] = useState<string>('recommend');
+  const [autoOpenStrategyImport, setAutoOpenStrategyImport] = useState(false);
+  const [pendingIndicatorFocusId, setPendingIndicatorFocusId] = useState<string | null>(null);
+  const [pendingNewsFocusId, setPendingNewsFocusId] = useState<string | null>(null);
   const rightSidebarMin = 220;
   const rightSidebarMax = 520;
 
@@ -218,19 +222,65 @@ const Dashboard: React.FC = () => {
   const renderMainContent = () => {
     switch (activeMenuIndex) {
       case 0:
-        return <HomeModule />;
+        return (
+          <HomeModule
+            onCreateStrategy={() => {
+              setStrategyInitialMenuId('create');
+              setActiveMenuIndex(2);
+              setBreadcrumbText(menuBreadcrumbMap[2]);
+            }}
+            onOpenStrategyList={() => {
+              setActiveMenuIndex(6);
+              setBreadcrumbText(menuBreadcrumbMap[6]);
+            }}
+            onImportShareCode={() => {
+              setActiveMenuIndex(6);
+              setBreadcrumbText(menuBreadcrumbMap[6]);
+              setAutoOpenStrategyImport(true);
+            }}
+            onOpenMarket={() => {
+              setActiveMenuIndex(1);
+              setBreadcrumbText(menuBreadcrumbMap[1]);
+            }}
+            onOpenIndicatorDetail={(indicatorId: string) => {
+              setActiveMenuIndex(3);
+              setBreadcrumbText(menuBreadcrumbMap[3]);
+              setPendingIndicatorFocusId(indicatorId);
+            }}
+            onOpenNewsDetail={(newsId: string) => {
+              setActiveMenuIndex(4);
+              setBreadcrumbText(menuBreadcrumbMap[4]);
+              setPendingNewsFocusId(newsId);
+            }}
+          />
+        );
       case 1:
         return <MarketModule chartSymbol={`Binance:${selectedSymbol}/USDT`} />;
       case 2:
-        return <StrategyModule />;
+        return <StrategyModule initialMenuId={strategyInitialMenuId} />;
       case 3:
-        return <IndicatorModule />;
+        return (
+          <IndicatorModule
+            focusIndicatorId={pendingIndicatorFocusId}
+            onFocusHandled={() => setPendingIndicatorFocusId(null)}
+          />
+        );
       case 4:
-        return <DiscoverModule />;
+        return (
+          <DiscoverModule
+            focusNewsId={pendingNewsFocusId}
+            onFocusHandled={() => setPendingNewsFocusId(null)}
+          />
+        );
       case 5:
         return <ChatModule />;
       case 6:
-        return <StrategyList />;
+        return (
+          <StrategyList
+            autoOpenImport={autoOpenStrategyImport}
+            onAutoOpenHandled={() => setAutoOpenStrategyImport(false)}
+          />
+        );
       default:
         return <HomeModule />;
     }
@@ -300,6 +350,7 @@ const Dashboard: React.FC = () => {
             onClick={() => {
               setActiveMenuIndex(2);
               setBreadcrumbText(menuBreadcrumbMap[2]);
+              setStrategyInitialMenuId('recommend');
             }}
           >
             <div className="sidebar-menu-icon">

@@ -179,6 +179,7 @@ builder.Services.AddSingleton<PositionRiskConfigStore>();
 builder.Services.AddSingleton<PositionRiskIndexManager>();
 builder.Services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
 builder.Services.AddScoped<ServerTest.Modules.Positions.Application.StrategyPositionCloseService>();
+builder.Services.AddSingleton<ServerTest.Modules.Positions.Application.PositionOverviewService>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Infrastructure.StrategyRuntimeRepository>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Application.StrategyRuntimeLoader>();
 builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Application.StrategyOwnershipService>();

@@ -179,6 +179,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             {
                 Uid = task.Uid.Value,
                 UsId = task.UsId.Value,
+                StrategyVersionId = task.StrategyVersionId,
                 ExchangeApiKeyId = task.ExchangeApiKeyId,
                 Exchange = exchange,
                 Symbol = symbol,
@@ -215,8 +216,8 @@ namespace ServerTest.Modules.TradingExecution.Application
             _riskIndexManager.UpsertPosition(entity, riskConfig);
 
             // 12. 记录开仓成功日志
-            _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
-                positionId, task.Uid, task.UsId, exchange, symbol, positionSide);
+            _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} versionId={VersionId} {Exchange} {Symbol} {Side}",
+                positionId, task.Uid, task.UsId, task.StrategyVersionId, exchange, symbol, positionSide);
 
             var payload = JsonSerializer.Serialize(new
             {
@@ -280,7 +281,15 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            await _positionRepository.CloseAsync(existing.PositionId, trailingTriggered: false, closedAt: DateTime.UtcNow, ct).ConfigureAwait(false);
+            var closePrice = ResolveClosePrice(orderResult, exchange, symbol);
+            await _positionRepository.CloseAsync(
+                    existing.PositionId,
+                    trailingTriggered: false,
+                    closedAt: DateTime.UtcNow,
+                    closeReason: null,
+                    closePrice: closePrice,
+                    ct)
+                .ConfigureAwait(false);
             _riskConfigStore.Remove(existing.PositionId);
             _riskIndexManager.RemovePosition(existing.PositionId);
 
@@ -303,6 +312,17 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             var open = kline.Value.open;
             return open.HasValue ? Convert.ToDecimal(open.Value) : 0m;
+        }
+
+        private decimal? ResolveClosePrice(OrderExecutionResult orderResult, string exchange, string symbol)
+        {
+            if (orderResult.AveragePrice.HasValue && orderResult.AveragePrice.Value > 0)
+            {
+                return orderResult.AveragePrice.Value;
+            }
+
+            var fallbackPrice = ResolveEntryPrice(exchange, symbol);
+            return fallbackPrice > 0 ? fallbackPrice : null;
         }
 
         private static decimal? BuildStopLossPrice(decimal entryPrice, decimal? stopLossPct, int leverage, string side)
