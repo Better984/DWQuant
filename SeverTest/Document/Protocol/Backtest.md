@@ -101,6 +101,8 @@
 
 ## 异步任务队列
 
+> 说明：在分布式模式下，核心节点会将 `queued` 任务分发到已连接的算力节点执行。
+
 ### backtest.submit
 - 路径：`POST /api/backtest/submit`
 - 说明：提交回测任务到异步队列，立即返回 `taskId`。前端通过轮询或 WebSocket 跟踪进度。
@@ -108,6 +110,7 @@
 - data：同 `backtest.run` 的请求参数。
 - 响应 data：`BacktestTaskSummary`
   - `taskId` long（任务唯一标识）
+  - `assignedWorkerId` string?（当前执行该任务的算力节点 ID，排队状态为空）
   - `status` string（`queued`）
   - `progress` decimal（0）
   - `stage` string?
@@ -183,7 +186,7 @@ queued → running → completed
 | 状态 | 说明 |
 |---|---|
 | `queued` | 已入队，等待 Worker 取出执行 |
-| `running` | Worker 已开始执行回测 |
+| `running` | Worker 已开始执行回测（可通过 `assignedWorkerId` 查看当前节点） |
 | `completed` | 回测成功完成，结果已写入 `result_json` |
 | `failed` | 回测执行失败，`error_message` 包含错误信息 |
 | `cancelled` | 用户手动取消 |

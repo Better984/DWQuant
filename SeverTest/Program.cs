@@ -6,19 +6,27 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ServerTest.Infrastructure.Config;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Infrastructure.Repositories;
-using ServerTest.Infrastructure.Config;
 using ServerTest.Middleware;
 using ServerTest.Models;
 using ServerTest.Modules.Accounts.Application;
 using ServerTest.Modules.Accounts.Infrastructure;
+using ServerTest.Modules.AdminBroadcast.Application;
+using ServerTest.Modules.AdminBroadcast.Infrastructure;
 using ServerTest.Modules.Backtest.Application;
+using ServerTest.Modules.Backtest.Infrastructure;
 using ServerTest.Modules.ExchangeApiKeys.Infrastructure;
 using ServerTest.Modules.MarketData.Application;
+using ServerTest.Modules.MarketData.Infrastructure;
 using ServerTest.Modules.MarketStreaming.Application;
+using ServerTest.Modules.MarketStreaming.Infrastructure;
 using ServerTest.Modules.Monitoring.Application;
 using ServerTest.Modules.Monitoring.Infrastructure;
+using ServerTest.Modules.Notifications.Application;
+using ServerTest.Modules.Notifications.Infrastructure;
+using ServerTest.Modules.Notifications.Infrastructure.Delivery;
 using ServerTest.Modules.Positions.Application;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Modules.StrategyEngine.Application;
@@ -29,268 +37,432 @@ using ServerTest.Modules.StrategyEngine.Infrastructure;
 using ServerTest.Modules.StrategyManagement.Application;
 using ServerTest.Modules.StrategyManagement.Infrastructure;
 using ServerTest.Modules.StrategyRuntime.Application;
+using ServerTest.Modules.StrategyRuntime.Infrastructure;
 using ServerTest.Modules.TradingExecution.Application;
-using ServerTest.Protocol;
 using ServerTest.Modules.TradingExecution.Domain;
 using ServerTest.Modules.TradingExecution.Infrastructure;
-using ServerTest.Options;
+using ServerTest.Protocol;
 using ServerTest.RateLimit;
 using ServerTest.Services;
 using ServerTest.WebSockets;
+using ServerTest.Options;
 using StackExchange.Redis;
 using System.Text.Json;
-using AspNetWebSocketOptions = Microsoft.AspNetCore.Builder.WebSocketOptions;
+using System.Net.WebSockets;
+using AppWebSocketOptions = ServerTest.Options.WebSocketOptions;
+
+var roleSelection = ServerRoleBootstrap.Resolve(args, Directory.GetCurrentDirectory(), ServerRoleHelper.DefaultPromptSeconds);
+var selectedRole = roleSelection.Role;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 服务器配置：从数据库加载覆盖 appsettings（失败则回退本地配置）
-var serverConfigConn = builder.Configuration.GetSection("Db")["ConnectionString"];
-if (string.IsNullOrWhiteSpace(serverConfigConn))
-{
-    serverConfigConn = builder.Configuration["ConnectionStrings:DefaultConnection"];
-}
-serverConfigConn ??= string.Empty;
-((Microsoft.Extensions.Configuration.IConfigurationBuilder)builder.Configuration)
-    .Add(new ServerConfigConfigurationSource(serverConfigConn));
+ConfigureServerConfigProvider(builder);
+ApplyRoleSelectionOverrides(builder, roleSelection);
+ConfigureLogging(builder.Logging);
+ConfigureOptions(builder.Services, builder.Configuration);
 
-// ============================================================================
-// 第一阶段：基础服务注册
-// ============================================================================
-// 注册协议过滤器（需要先注册为服务以支持依赖注入）
-builder.Services.AddScoped<ServerTest.Protocol.ProtocolRequestFilter>();
-builder.Services.AddScoped<ServerTest.Protocol.ProtocolResponseFilter>();
+var enableHttpApi = selectedRole == ServerRole.Core || selectedRole == ServerRole.Full;
+var enableUserWebSocket = enableHttpApi;
+var enableWorkerGateway = selectedRole == ServerRole.Core || selectedRole == ServerRole.Full;
 
-builder.Services.AddControllers(options =>
-{
-    // 注册协议过滤器
-    options.Filters.Add<ServerTest.Protocol.ProtocolRequestFilter>();
-    options.Filters.Add<ServerTest.Protocol.ProtocolResponseFilter>();
-})
-.AddJsonOptions(options =>
-{
-    // HTTP 与 WS 共享 ProtocolJson 配置，确保字符串枚举可被一致解析
-    ServerTest.Protocol.ProtocolJson.Apply(options.JsonSerializerOptions);
-});
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+RegisterCommonServices(builder.Services, builder.Configuration, roleSelection, enableHttpApi);
+RegisterRoleServices(builder.Services, builder.Configuration, selectedRole);
 
-// Redis 缓存配置
-builder.Services.AddStackExchangeRedisCache(options =>
-{
-    options.Configuration = builder.Configuration["Redis:ConnectionString"];
-    options.InstanceName = "ServerTest:";
-});
-
-// 日志配置
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.AddDebug();
-
-// Startup monitor window (WinForms)
-builder.Services.AddSingleton<StartupMonitorHost>();
-builder.Services.AddSingleton<ILoggerProvider, StartupMonitorLoggerProvider>();
-
-// CORS 配置
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
-    });
-});
-
-// ============================================================================
-// 第二阶段：系统启动管理器（必须最先注册）
-// ============================================================================
-builder.Services.AddSingleton<SystemStartupManager>();
-
-// ============================================================================
-// 第三阶段：基础设施服务注册
-// ============================================================================
-builder.Services.AddScoped<DatabaseService>();
-builder.Services.AddScoped<JwtService>();
-builder.Services.AddScoped<RedisCacheService>();
-builder.Services.AddScoped<AuthTokenService>();
-builder.Services.AddScoped<VerificationCodeService>();
-builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
-builder.Services.AddDbInfrastructure(builder.Configuration);
-builder.Services.AddSingleton<ServerConfigRepository>();
-builder.Services.AddSingleton<ServerConfigStore>();
-builder.Services.AddSingleton<ServerConfigService>();
-builder.Services.AddHostedService<ServerConfigBootstrapHostedService>();
-builder.Services.AddScoped<AccountRepository>();
-builder.Services.AddScoped<AccountService>();
-builder.Services.AddSingleton<OSSService>();
-builder.Services.Configure<HistoricalMarketDataOptions>(builder.Configuration.GetSection("HistoricalData"));
-builder.Services.AddSingleton<ServerTest.Modules.MarketData.Infrastructure.HistoricalMarketDataRepository>();
-builder.Services.AddSingleton<HistoricalMarketDataCache>();
-builder.Services.AddSingleton<HistoricalMarketDataSyncService>();
-builder.Services.AddSingleton<BinanceHistoricalDataDownloader>();
-builder.Services.AddHostedService<HistoricalMarketDataSyncHostedService>();
-// 合约详情缓存服务
-builder.Services.AddSingleton<ServerTest.Modules.MarketData.Infrastructure.ContractDetailsRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.MarketData.Application.ContractDetailsCacheService>();
-builder.Services.AddHostedService<ServerTest.Modules.MarketData.Application.ContractDetailsCacheHostedService>();
-
-// Redis 连接（用于速率限制和连接管理）
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-        ConnectionMultiplexer.Connect(builder.Configuration["Redis:ConnectionString"] ?? "127.0.0.1:6379"));
-builder.Services.AddSingleton<IRateLimiter, RedisRateLimiter>();
-builder.Services.AddSingleton<WebSocketNodeId>();
-builder.Services.AddSingleton<IConnectionManager, RedisConnectionManager>();
-
-// ============================================================================
-// 第四阶段：实盘交易系统服务注册
-// ============================================================================
-// 行情数据引擎 
-builder.Services.AddSingleton<MarketDataEngine>();
-// 行情数据提供接口（用于指标/条件统一取数）
-builder.Services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
-
-// 价格服务
-builder.Services.AddSingleton<ExchangePriceService>();
-
-// 指标引擎
-builder.Services.AddSingleton<IndicatorEngine>();
-
-// 条件评估相关
-builder.Services.AddSingleton<ConditionCacheService>();
-builder.Services.AddSingleton<ConditionEvaluator>();
-builder.Services.AddSingleton<ConditionUsageTracker>();
-
-// 策略执行相关
-builder.Services.AddSingleton<StrategyActionTaskQueue>();
-builder.Services.AddSingleton<IStrategyValueResolver, IndicatorValueResolver>();
-builder.Services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
-builder.Services.AddSingleton<StrategyJsonLoader>();
-builder.Services.AddSingleton<StrategyEngineRunLogQueue>();
-builder.Services.AddSingleton<StrategyEngineRunLogRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateStore>();
-builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Domain.IStrategyRuntimeTemplateProvider>(sp =>
-    sp.GetRequiredService<ServerTest.Modules.StrategyEngine.Infrastructure.StrategyRuntimeTemplateStore>());
-builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Application.StrategyRuntimeTemplateService>();
-builder.Services.AddSingleton<RealTimeStrategyEngine>();
-builder.Services.AddSingleton<StrategyPositionRepository>();
-builder.Services.AddSingleton<UserExchangeApiKeyRepository>();
-builder.Services.AddSingleton<PositionRiskConfigStore>();
-builder.Services.AddSingleton<PositionRiskIndexManager>();
-builder.Services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
-builder.Services.AddScoped<ServerTest.Modules.Positions.Application.StrategyPositionCloseService>();
-builder.Services.AddSingleton<ServerTest.Modules.Positions.Application.PositionOverviewService>();
-builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Infrastructure.StrategyRuntimeRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Application.StrategyRuntimeLoader>();
-builder.Services.AddSingleton<ServerTest.Modules.StrategyRuntime.Application.StrategyOwnershipService>();
-builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.NotificationRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.NotificationPreferenceRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.NotificationAccountRepository>();
-builder.Services.AddSingleton<ServerTest.Modules.Notifications.Infrastructure.UserNotifyChannelRepository>();
-builder.Services.AddScoped<ServerTest.Modules.Notifications.Application.NotificationPreferenceService>();
-builder.Services.AddSingleton<ServerTest.Modules.Notifications.Application.INotificationPreferenceResolver, ServerTest.Modules.Notifications.Application.NotificationPreferenceResolver>();
-builder.Services.AddSingleton<ServerTest.Modules.Notifications.Application.INotificationPublisher, ServerTest.Modules.Notifications.Application.NotificationPublisher>();
-
-// 策略运行检查相关
-builder.Services.AddScoped<IStrategyRunCheck, ApiKeyRunCheck>();
-builder.Services.AddScoped<IStrategyRunCheck, BalanceRunCheck>();
-builder.Services.AddScoped<IStrategyRunCheck, PositionModeRunCheck>();
-builder.Services.AddScoped<IStrategyRunCheck, ExchangeReadyRunCheck>();
-builder.Services.AddScoped<StrategyRunCheckService>();
-builder.Services.AddScoped<StrategyRunCheckLogRepository>();
-// TestStrategyCheckLogRepository 需要是 Singleton，因为被 RealTimeStrategyEngine (Singleton) 使用
-builder.Services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.TestStrategyCheckLogRepository>();
-
-// 策略管理相关
-builder.Services.AddScoped<StrategyRepository>();
-builder.Services.AddScoped<StrategyService>();
-builder.Services.AddSingleton<BacktestProgressPushService>();
-builder.Services.AddSingleton<BacktestObjectPoolManager>();
-builder.Services.AddScoped<BacktestMainLoop>();
-builder.Services.AddScoped<BacktestRunner>();
-builder.Services.AddScoped<BacktestService>();
-builder.Services.AddHostedService<BacktestObjectPoolWarmupHostedService>();
-// 回测任务队列
-builder.Services.AddScoped<ServerTest.Modules.Backtest.Infrastructure.BacktestTaskRepository>();
-builder.Services.AddScoped<ServerTest.Modules.Backtest.Application.BacktestTaskService>();
-builder.Services.AddHostedService<ServerTest.Modules.Backtest.Application.BacktestTaskWorker>();
-
-builder.Services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
-builder.Services.AddHostedService<TradeActionConsumer>();
-builder.Services.AddHostedService<PositionRiskEngine>();
-builder.Services.AddHostedService<StrategyEngineRunLogWriter>();
-
-// 策略运行时服务（后台服务）
-builder.Services.AddHostedService<StrategyRuntimeHostedService>();
-
-// ============================================================================
-// 第五阶段：网络层服务注册
-// ============================================================================
-builder.Services.AddScoped<WebSocketHandler>();
-builder.Services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.HealthWsHandler>();
-builder.Services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.AccountProfileUpdateHandler>();
-builder.Services.AddScoped<IWsMessageHandler, ServerTest.Modules.MarketStreaming.Application.MarketSubscribeHandler>();
-builder.Services.AddScoped<IWsMessageHandler, ServerTest.Modules.MarketStreaming.Application.MarketUnsubscribeHandler>();
-builder.Services.AddSingleton<ServerTest.Modules.MarketStreaming.Infrastructure.IMarketSubscriptionStore, ServerTest.Modules.MarketStreaming.Infrastructure.InMemoryMarketSubscriptionStore>();
-builder.Services.AddSingleton<MarketTickerBroadcastService>();
-builder.Services.AddHostedService<MarketTickerBroadcastService>(sp => sp.GetRequiredService<MarketTickerBroadcastService>());
-builder.Services.AddHostedService<KlineCloseListenerService>();
-
-// 管理员广播服务
-builder.Services.AddSingleton<ServerTest.Modules.AdminBroadcast.Application.AdminWebSocketBroadcastService>();
-builder.Services.AddSingleton<ServerTest.Modules.AdminBroadcast.Application.ServerStatusService>();
-builder.Services.AddSingleton<ServerTest.Modules.AdminBroadcast.Application.AdminBroadcastService>();
-builder.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider, ServerTest.Modules.AdminBroadcast.Infrastructure.AdminLogBroadcastProvider>();
-
-// 配置选项
-builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection("RateLimit"));
-builder.Services.Configure<Microsoft.AspNetCore.Builder.WebSocketOptions>(builder.Configuration.GetSection("WebSocket"));
-builder.Services.Configure<ServerTest.Options.RequestLimitsOptions>(builder.Configuration.GetSection("RequestLimits"));
-// 交易配置（沙盒模式等）
-builder.Services.Configure<ServerTest.Options.TradingOptions>(builder.Configuration.GetSection("Trading"));
-
-// ============================================================================
-// 构建应用
-// ============================================================================
 var app = builder.Build();
 
-// ============================================================================
-// 第六阶段：系统启动流程
-// ============================================================================
 var startupManager = app.Services.GetRequiredService<SystemStartupManager>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
-var startupMonitorHost = app.Services.GetRequiredService<StartupMonitorHost>();
-startupMonitorHost.Start(startupManager);
-var wsConfig = app.Services.GetRequiredService<IOptions<ServerTest.Options.WebSocketOptions>>().Value;
+var wsConfig = app.Services.GetRequiredService<IOptions<AppWebSocketOptions>>().Value;
+var roleRuntime = app.Services.GetRequiredService<ServerRoleRuntime>();
 
-logger.LogInformation("");
-logger.LogInformation("╔═══════════════════════════════════════════════════════════╗");
-logger.LogInformation("║          DWQuant 量化交易系统启动流程                    ║");
-logger.LogInformation("╚═══════════════════════════════════════════════════════════╝");
-logger.LogInformation("");
+logger.LogInformation("服务器角色: {Role}({RoleValue}), 来源={Source}, 角色文件={RoleFile}",
+    ServerRoleHelper.ToDisplayName(roleRuntime.Role),
+    ServerRoleHelper.ToValue(roleRuntime.Role),
+    roleRuntime.Source,
+    roleRuntime.RoleFilePath);
 
-try
+var monitorHost = app.Services.GetService<StartupMonitorHost>();
+monitorHost?.Start(startupManager);
+
+await RunStartupWorkflowAsync(app, selectedRole, enableHttpApi, enableUserWebSocket || enableWorkerGateway, logger);
+
+if (enableUserWebSocket)
 {
-    // ========================================================================
-    // 步骤 1：启动基础设施
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.Infrastructure, "Redis、数据库等基础设施");
+    MapUserWebSocket(app, wsConfig);
+}
 
-    // 测试 Redis 连接
-    var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
-    var db = redis.GetDatabase();
+if (enableWorkerGateway)
+{
+    app.Map("/ws/worker", wsApp =>
+    {
+        wsApp.Run(async context =>
+        {
+            var gateway = context.RequestServices.GetRequiredService<BacktestWorkerGateway>();
+            await gateway.HandleAsync(context).ConfigureAwait(false);
+        });
+    });
+}
+
+if (enableHttpApi)
+{
+    app.MapControllers();
+}
+else
+{
+    app.MapGet("/api/health", (SystemStartupManager manager, ServerRoleRuntime runtime) =>
+    {
+        return Results.Json(new
+        {
+            status = "healthy",
+            role = ServerRoleHelper.ToValue(runtime.Role),
+            roleName = ServerRoleHelper.ToDisplayName(runtime.Role),
+            systems = manager.GetAllStatuses().ToDictionary(
+                x => x.Key.ToString(),
+                x => new
+                {
+                    status = x.Value.Status.ToString(),
+                    ready = x.Value.Status == SystemStatus.Ready,
+                    error = x.Value.Error
+                })
+        });
+    });
+
+    app.MapPost("/api/health/get", (SystemStartupManager manager, ServerRoleRuntime runtime) =>
+    {
+        return Results.Json(new
+        {
+            status = "healthy",
+            role = ServerRoleHelper.ToValue(runtime.Role),
+            roleName = ServerRoleHelper.ToDisplayName(runtime.Role),
+            systems = manager.GetAllStatuses().ToDictionary(
+                x => x.Key.ToString(),
+                x => new
+                {
+                    status = x.Value.Status.ToString(),
+                    ready = x.Value.Status == SystemStatus.Ready,
+                    error = x.Value.Error
+                })
+        });
+    });
+}
+
+logger.LogInformation("HTTP 服务已启动");
+app.Run();
+
+static void ConfigureServerConfigProvider(WebApplicationBuilder builder)
+{
+    var serverConfigConn = builder.Configuration.GetSection("Db")["ConnectionString"];
+    if (string.IsNullOrWhiteSpace(serverConfigConn))
+    {
+        serverConfigConn = builder.Configuration["ConnectionStrings:DefaultConnection"];
+    }
+
+    serverConfigConn ??= string.Empty;
+    ((IConfigurationBuilder)builder.Configuration)
+        .Add(new ServerConfigConfigurationSource(serverConfigConn));
+}
+
+static void ApplyRoleSelectionOverrides(
+    WebApplicationBuilder builder,
+    ServerRoleBootstrap.ServerRoleSelection roleSelection)
+{
+    if (string.IsNullOrWhiteSpace(roleSelection.WorkerCoreWsUrls))
+    {
+        return;
+    }
+
+    builder.Configuration["BacktestWorker:CoreWsUrls"] = roleSelection.WorkerCoreWsUrls;
+    var firstEndpoint = roleSelection.WorkerCoreWsUrls
+        .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(firstEndpoint))
+    {
+        // 兼容只读取单地址字段的旧逻辑
+        builder.Configuration["BacktestWorker:CoreWsUrl"] = firstEndpoint;
+    }
+}
+
+static void ConfigureLogging(ILoggingBuilder logging)
+{
+    logging.ClearProviders();
+    logging.AddConsole();
+    logging.AddDebug();
+}
+
+static void ConfigureOptions(IServiceCollection services, IConfiguration configuration)
+{
+    services.Configure<HistoricalMarketDataOptions>(configuration.GetSection("HistoricalData"));
+    services.Configure<MarketDataQueryOptions>(configuration.GetSection("MarketDataQuery"));
+    services.Configure<ConditionCacheOptions>(configuration.GetSection("ConditionCache"));
+    services.Configure<MonitoringOptions>(configuration.GetSection("Monitoring"));
+    services.Configure<RateLimitOptions>(configuration.GetSection("RateLimit"));
+    services.Configure<AppWebSocketOptions>(configuration.GetSection("WebSocket"));
+    services.Configure<RequestLimitsOptions>(configuration.GetSection("RequestLimits"));
+    services.Configure<TradingOptions>(configuration.GetSection("Trading"));
+    services.Configure<RuntimeQueueOptions>(configuration.GetSection("RuntimeQueue"));
+    services.Configure<StrategyOwnershipOptions>(configuration.GetSection("StrategyOwnership"));
+    services.Configure<StartupOptions>(configuration.GetSection("Startup"));
+    services.Configure<RedisKeyOptions>(configuration.GetSection("RedisKey"));
+    services.Configure<BusinessRulesOptions>(configuration.GetSection("BusinessRules"));
+    services.Configure<BacktestWorkerOptions>(configuration.GetSection("BacktestWorker"));
+
+    services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
+    services.AddSingleton<IValidateOptions<ConditionCacheOptions>, ConditionCacheOptionsValidator>();
+    services.AddSingleton<IValidateOptions<MarketDataQueryOptions>, MarketDataQueryOptionsValidator>();
+    services.AddSingleton<IValidateOptions<MonitoringOptions>, MonitoringOptionsValidator>();
+    services.AddSingleton<IValidateOptions<RedisKeyOptions>, RedisKeyOptionsValidator>();
+    services.AddSingleton<IValidateOptions<RequestLimitsOptions>, RequestLimitsOptionsValidator>();
+    services.AddSingleton<IValidateOptions<RuntimeQueueOptions>, RuntimeQueueOptionsValidator>();
+    services.AddSingleton<IValidateOptions<StrategyOwnershipOptions>, StrategyOwnershipOptionsValidator>();
+    services.AddSingleton<IValidateOptions<BacktestWorkerOptions>, BacktestWorkerOptionsValidator>();
+}
+
+static void RegisterCommonServices(
+    IServiceCollection services,
+    IConfiguration configuration,
+    ServerRoleBootstrap.ServerRoleSelection roleSelection,
+    bool enableHttpApi)
+{
+    var role = roleSelection.Role;
+    services.AddSingleton(new ServerRoleRuntime(
+        role,
+        source: roleSelection.Source,
+        roleFilePath: roleSelection.RoleFilePath,
+        promptSeconds: roleSelection.PromptSeconds));
+
+    if (enableHttpApi)
+    {
+        services.AddScoped<ProtocolRequestFilter>();
+        services.AddScoped<ProtocolResponseFilter>();
+
+        services.AddControllers(options =>
+        {
+            options.Filters.Add<ProtocolRequestFilter>();
+            options.Filters.Add<ProtocolResponseFilter>();
+        }).AddJsonOptions(options =>
+        {
+            ProtocolJson.Apply(options.JsonSerializerOptions);
+        });
+        services.AddEndpointsApiExplorer();
+        services.AddSwaggerGen();
+    }
+
+    services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = configuration["Redis:ConnectionString"];
+        options.InstanceName = "ServerTest:";
+    });
+
+    services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
+        {
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        });
+    });
+
+    services.AddSingleton<SystemStartupManager>();
+
+    if (role != ServerRole.BacktestWorker)
+    {
+        services.AddSingleton<StartupMonitorHost>();
+        services.AddSingleton<ILoggerProvider, StartupMonitorLoggerProvider>();
+    }
+
+    services.AddScoped<DatabaseService>();
+    services.AddScoped<JwtService>();
+    services.AddScoped<RedisCacheService>();
+    services.AddScoped<AuthTokenService>();
+    services.AddScoped<VerificationCodeService>();
+    services.AddSingleton<IEmailSender, LogEmailSender>();
+    services.AddDbInfrastructure(configuration);
+
+    services.AddSingleton<ServerConfigRepository>();
+    services.AddSingleton<ServerConfigStore>();
+    services.AddSingleton<ServerConfigService>();
+    services.AddHostedService<ServerConfigBootstrapHostedService>();
+
+    services.AddScoped<AccountRepository>();
+    services.AddScoped<AccountService>();
+    services.AddSingleton<OSSService>();
+
+    services.AddSingleton<IConnectionMultiplexer>(_ =>
+        ConnectionMultiplexer.Connect(configuration["Redis:ConnectionString"] ?? "127.0.0.1:6379"));
+    services.AddSingleton<IRateLimiter, RedisRateLimiter>();
+    services.AddSingleton<WebSocketNodeId>();
+
+    if (role == ServerRole.BacktestWorker)
+    {
+        services.AddSingleton<IConnectionManager, InMemoryConnectionManager>();
+    }
+    else
+    {
+        services.AddSingleton<IConnectionManager, RedisConnectionManager>();
+        services.AddHostedService<RedisConnectionKickSubscriber>();
+    }
+
+    services.AddSingleton<HistoricalMarketDataRepository>();
+    services.AddSingleton<HistoricalMarketDataCache>();
+    services.AddSingleton<HistoricalMarketDataSyncService>();
+    services.AddSingleton<BinanceHistoricalDataDownloader>();
+    services.AddSingleton<ContractDetailsRepository>();
+    services.AddSingleton<ContractDetailsCacheService>();
+    services.AddHostedService<ContractDetailsCacheHostedService>();
+
+    if (role != ServerRole.BacktestWorker)
+    {
+        services.AddHostedService<HistoricalMarketDataSyncHostedService>();
+    }
+
+    services.AddSingleton<StrategyRuntimeTemplateRepository>();
+    services.AddSingleton<StrategyRuntimeTemplateStore>();
+    services.AddSingleton<IStrategyRuntimeTemplateProvider>(sp =>
+        sp.GetRequiredService<StrategyRuntimeTemplateStore>());
+    services.AddSingleton<StrategyRuntimeTemplateService>();
+    services.AddSingleton<StrategyJsonLoader>();
+
+    services.AddSingleton<BacktestProgressPushService>();
+    services.AddSingleton<BacktestObjectPoolManager>();
+    services.AddScoped<BacktestMainLoop>();
+    services.AddScoped<BacktestRunner>();
+    services.AddScoped<BacktestService>();
+    services.AddHostedService<BacktestObjectPoolWarmupHostedService>();
+    services.AddScoped<BacktestTaskRepository>();
+    services.AddScoped<BacktestTaskService>();
+
+    services.AddSingleton<BacktestWorkerRegistry>();
+    services.AddScoped<BacktestWorkerMessageService>();
+    services.AddScoped<BacktestWorkerGateway>();
+}
+
+static void RegisterRoleServices(IServiceCollection services, IConfiguration configuration, ServerRole role)
+{
+    if (role == ServerRole.BacktestWorker)
+    {
+        services.AddSingleton<IMarketDataProvider, NoopMarketDataProvider>();
+        services.AddHostedService<BacktestWorkerClientHostedService>();
+        return;
+    }
+
+    services.AddSingleton<MarketDataEngine>();
+    services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
+    services.AddSingleton<ExchangePriceService>();
+    services.AddSingleton<IndicatorEngine>();
+
+    services.AddSingleton<ConditionCacheService>();
+    services.AddSingleton<ConditionEvaluator>();
+    services.AddSingleton<ConditionUsageTracker>();
+
+    services.AddSingleton<StrategyActionTaskQueue>();
+    services.AddSingleton<IStrategyValueResolver, IndicatorValueResolver>();
+    services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
+    services.AddSingleton<StrategyEngineRunLogQueue>();
+    services.AddSingleton<StrategyEngineRunLogRepository>();
+    services.AddSingleton<RealTimeStrategyEngine>();
+
+    services.AddSingleton<StrategyPositionRepository>();
+    services.AddSingleton<UserExchangeApiKeyRepository>();
+    services.AddSingleton<PositionRiskConfigStore>();
+    services.AddSingleton<PositionRiskIndexManager>();
+    services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
+    services.AddScoped<StrategyPositionCloseService>();
+    services.AddSingleton<PositionOverviewService>();
+    services.AddSingleton<StrategyRuntimeRepository>();
+    services.AddSingleton<StrategyRuntimeLoader>();
+    services.AddSingleton<StrategyOwnershipService>();
+
+    services.AddSingleton<NotificationRepository>();
+    services.AddSingleton<NotificationPreferenceRepository>();
+    services.AddSingleton<NotificationAccountRepository>();
+    services.AddSingleton<UserNotifyChannelRepository>();
+    services.AddScoped<NotificationPreferenceService>();
+    services.AddSingleton<INotificationPreferenceResolver, NotificationPreferenceResolver>();
+    services.AddSingleton<INotificationPublisher, NotificationPublisher>();
+    services.AddSingleton<INotificationTemplateRenderer, NotificationTemplateRenderer>();
+    services.AddSingleton<INotificationSender, EmailNotificationSender>();
+    services.AddSingleton<INotificationSender, DingTalkNotificationSender>();
+    services.AddSingleton<INotificationSender, WeComNotificationSender>();
+    services.AddSingleton<INotificationSender, TelegramNotificationSender>();
+
+    services.AddScoped<IStrategyRunCheck, ApiKeyRunCheck>();
+    services.AddScoped<IStrategyRunCheck, BalanceRunCheck>();
+    services.AddScoped<IStrategyRunCheck, PositionModeRunCheck>();
+    services.AddScoped<IStrategyRunCheck, ExchangeReadyRunCheck>();
+    services.AddScoped<StrategyRunCheckService>();
+    services.AddScoped<StrategyRunCheckLogRepository>();
+    services.AddSingleton<TestStrategyCheckLogRepository>();
+
+    services.AddScoped<StrategyRepository>();
+    services.AddScoped<StrategyService>();
+
+    services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
+    services.AddHostedService<StrategyRuntimeLeaseHostedService>();
+    services.AddHostedService<TradeActionConsumer>();
+    services.AddHostedService<PositionRiskEngine>();
+    services.AddHostedService<StrategyEngineRunLogWriter>();
+    services.AddHostedService<StrategyRuntimeHostedService>();
+    services.AddHostedService<ConditionCacheCleanupHostedService>();
+    services.AddHostedService<NotificationDeliveryWorker>();
+
+    if (role == ServerRole.Full)
+    {
+        services.AddHostedService<BacktestTaskWorker>();
+    }
+    else
+    {
+        services.AddHostedService<BacktestWorkerDispatchHostedService>();
+    }
+
+    services.AddScoped<WebSocketHandler>();
+    services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.HealthWsHandler>();
+    services.AddScoped<IWsMessageHandler, ServerTest.WebSockets.Handlers.AccountProfileUpdateHandler>();
+    services.AddScoped<IWsMessageHandler, MarketSubscribeHandler>();
+    services.AddScoped<IWsMessageHandler, MarketUnsubscribeHandler>();
+
+    var useRedisSubscriptionStore = configuration.GetValue<bool?>("MarketStreaming:UseRedisSubscriptionStore") ?? true;
+    if (useRedisSubscriptionStore)
+    {
+        services.AddSingleton<IMarketSubscriptionStore, RedisMarketSubscriptionStore>();
+    }
+    else
+    {
+        services.AddSingleton<IMarketSubscriptionStore, InMemoryMarketSubscriptionStore>();
+    }
+
+    services.AddSingleton<MarketTickerBroadcastService>();
+    services.AddHostedService<MarketTickerBroadcastService>(sp => sp.GetRequiredService<MarketTickerBroadcastService>());
+    services.AddHostedService<KlineCloseListenerService>();
+
+    services.AddSingleton<AdminWebSocketBroadcastService>();
+    services.AddSingleton<ServerStatusService>();
+    services.AddSingleton<AdminBroadcastService>();
+    services.AddSingleton<ILoggerProvider, AdminLogBroadcastProvider>();
+}
+
+static async Task RunStartupWorkflowAsync(
+    WebApplication app,
+    ServerRole role,
+    bool enableHttpApi,
+    bool enableWebSocket,
+    ILogger logger)
+{
+    var startupManager = app.Services.GetRequiredService<SystemStartupManager>();
+    startupManager.MarkStarting(SystemModule.Infrastructure, "基础设施初始化");
+
     try
     {
-        await db.StringSetAsync("__startup_test__", "ok", TimeSpan.FromSeconds(1));
-        var testValue = await db.StringGetAsync("__startup_test__");
-        if (testValue == "ok")
+        var redis = app.Services.GetRequiredService<IConnectionMultiplexer>();
+        var db = redis.GetDatabase();
+        await db.StringSetAsync("__startup_test__", "ok", TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        var value = await db.StringGetAsync("__startup_test__").ConfigureAwait(false);
+        if (value != "ok")
         {
-            startupManager.MarkReady(SystemModule.Infrastructure, "Redis 连接正常");
+            throw new InvalidOperationException("Redis 连通性测试失败");
         }
-        else
-        {
-            throw new Exception("Redis 测试失败");
-        }
+
+        startupManager.MarkReady(SystemModule.Infrastructure, "Redis 连接正常");
     }
     catch (Exception ex)
     {
@@ -298,235 +470,211 @@ try
         throw;
     }
 
-    // ========================================================================
-    // 步骤 2：启动行情数据引擎
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.MarketDataEngine, "行情数据引擎（WebSocket 订阅）");
-
-    var marketDataEngine = app.Services.GetRequiredService<MarketDataEngine>();
-
-    // 等待行情引擎初始化完成（带超时）
-    var marketDataTimeout = TimeSpan.FromMinutes(2);
-    logger.LogInformation("等待行情引擎初始化（超时时间: {Timeout}秒）...", marketDataTimeout.TotalSeconds);
-
-    try
+    if (role == ServerRole.Core || role == ServerRole.Full)
     {
-        await marketDataEngine.WaitForInitializationAsync();
-        startupManager.MarkReady(SystemModule.MarketDataEngine, "行情数据引擎已就绪");
+        startupManager.MarkStarting(SystemModule.MarketDataEngine, "行情数据引擎");
+        try
+        {
+            var marketDataEngine = app.Services.GetRequiredService<MarketDataEngine>();
+            var startupOptions = app.Services.GetRequiredService<IOptions<StartupOptions>>().Value;
+            var timeout = TimeSpan.FromSeconds(Math.Max(1, startupOptions.MarketDataInitTimeoutSeconds));
+            await marketDataEngine.WaitForInitializationAsync().WaitAsync(timeout).ConfigureAwait(false);
+            startupManager.MarkReady(SystemModule.MarketDataEngine, "行情数据引擎已就绪");
+        }
+        catch (Exception ex)
+        {
+            startupManager.MarkFailed(SystemModule.MarketDataEngine, $"行情引擎初始化失败: {ex.Message}");
+            throw;
+        }
+
+        startupManager.MarkStarting(SystemModule.IndicatorEngine, "指标引擎");
+        _ = app.Services.GetRequiredService<IndicatorEngine>();
+        startupManager.MarkReady(SystemModule.IndicatorEngine, "指标引擎已注册");
+
+        startupManager.MarkStarting(SystemModule.StrategyEngine, "策略引擎");
+        _ = app.Services.GetRequiredService<RealTimeStrategyEngine>();
+        startupManager.MarkReady(SystemModule.StrategyEngine, "策略引擎已注册");
+
+        startupManager.MarkStarting(SystemModule.TradingSystem, "交易系统");
+        var startupWarmup = app.Services.GetRequiredService<IOptions<StartupOptions>>().Value.StrategyRuntimeWarmupSeconds;
+        if (startupWarmup > 0)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(startupWarmup)).ConfigureAwait(false);
+        }
+        startupManager.MarkReady(SystemModule.TradingSystem, "交易系统已就绪");
     }
-    catch (Exception ex)
+    else
     {
-        startupManager.MarkFailed(SystemModule.MarketDataEngine, $"行情引擎初始化失败: {ex.Message}");
-        logger.LogError(ex, "行情引擎初始化失败");
-        throw;
+        startupManager.MarkReady(SystemModule.MarketDataEngine, "当前角色不启用行情引擎");
+        startupManager.MarkReady(SystemModule.IndicatorEngine, "当前角色不启用指标引擎");
+        startupManager.MarkReady(SystemModule.StrategyEngine, "当前角色不启用策略引擎");
+        startupManager.MarkReady(SystemModule.TradingSystem, "当前角色不启用交易系统");
     }
 
-    // ========================================================================
-    // 步骤 3：启动指标引擎
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.IndicatorEngine, "指标计算引擎");
+    startupManager.MarkStarting(SystemModule.Network, "网络层");
+    ConfigurePipeline(app, enableHttpApi, enableWebSocket);
+    startupManager.MarkReady(SystemModule.Network, "网络层已就绪");
 
-    var indicatorEngine = app.Services.GetRequiredService<IndicatorEngine>();
-    // 指标引擎在 StrategyRuntimeHostedService 中启动，这里只标记
-    startupManager.MarkReady(SystemModule.IndicatorEngine, "指标引擎已注册");
+    startupManager.PrintStatusSummary();
+    logger.LogInformation("系统启动完成");
+}
 
-    // ========================================================================
-    // 步骤 4：启动策略引擎
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.StrategyEngine, "实时策略执行引擎");
-
-    var strategyEngine = app.Services.GetRequiredService<RealTimeStrategyEngine>();
-    // 策略引擎在 StrategyRuntimeHostedService 中启动，这里只标记
-    startupManager.MarkReady(SystemModule.StrategyEngine, "策略引擎已注册");
-
-    // ========================================================================
-    // 步骤 5：启动实盘交易系统（整体）
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.TradingSystem, "实盘交易系统（行情+指标+策略）");
-
-    // 等待策略运行时服务启动（通过检查策略引擎是否有策略注册来判断）
-    logger.LogInformation("等待策略运行时服务启动...");
-    await Task.Delay(2000); // 给 StrategyRuntimeHostedService 一些启动时间
-
-    startupManager.MarkReady(SystemModule.TradingSystem, "实盘交易系统已就绪");
-
-    // ========================================================================
-    // 步骤 6：启动网络层
-    // ========================================================================
-    startupManager.MarkStarting(SystemModule.Network, "网络层（HTTP API + WebSocket）");
-
-    // HTTP 管道配置
-    if (app.Environment.IsDevelopment())
+static void ConfigurePipeline(WebApplication app, bool enableHttpApi, bool enableWebSocket)
+{
+    if (enableHttpApi && app.Environment.IsDevelopment())
     {
         app.UseSwagger();
         app.UseSwaggerUI();
     }
 
     app.UseMiddleware<ExceptionHandlingMiddleware>();
-
-    // ⚠️ 重要：系统就绪检查中间件必须在其他中间件之前
-    app.UseMiddleware<SystemReadinessMiddleware>();
-
-    // Dev: keep HTTP only to avoid preflight redirect.
     app.UseCors();
-    app.UseAuthentication();
-    app.UseAuthorization();
-    app.UseMiddleware<HttpRateLimitMiddleware>();
 
-    // WebSocket 配置
-    app.UseWebSockets(new AspNetWebSocketOptions
+    if (enableHttpApi)
     {
-        KeepAliveInterval = TimeSpan.FromSeconds(wsConfig.KeepAliveSeconds)
-    });
+        app.UseMiddleware<SystemReadinessMiddleware>();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseMiddleware<HttpRateLimitMiddleware>();
+    }
 
-    startupManager.MarkReady(SystemModule.Network, "网络层已就绪");
-
-    // ========================================================================
-    // 启动完成，打印状态摘要
-    // ========================================================================
-    startupManager.PrintStatusSummary();
-
-    logger.LogInformation("╔═══════════════════════════════════════════════════════════╗");
-    logger.LogInformation("║          ✅ 系统启动完成，开始监听请求                    ║");
-    logger.LogInformation("╚═══════════════════════════════════════════════════════════╝");
-    logger.LogInformation("");
-}
-catch (Exception ex)
-{
-    logger.LogCritical(ex, "❌ 系统启动失败，应用将退出");
-    startupManager.PrintStatusSummary();
-    throw;
+    if (enableWebSocket)
+    {
+        var wsConfig = app.Services.GetRequiredService<IOptions<AppWebSocketOptions>>().Value;
+        app.UseWebSockets(new Microsoft.AspNetCore.Builder.WebSocketOptions
+        {
+            KeepAliveInterval = TimeSpan.FromSeconds(wsConfig.KeepAliveSeconds)
+        });
+    }
 }
 
-// ============================================================================
-// 第七阶段：路由配置
-// ============================================================================
-// WebSocket 路由
-app.Map(wsConfig.Path, wsApp =>
+static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
 {
-    wsApp.Run(async context =>
+    app.Map(wsConfig.Path, wsApp =>
     {
-        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-        if (!context.WebSockets.IsWebSocketRequest)
+        wsApp.Run(async context =>
         {
-            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, "bad_request", "WebSocket request required");
-            return;
-        }
-
-        var system = context.Request.Query["system"].ToString();
-        if (string.IsNullOrWhiteSpace(system))
-        {
-            logger.LogWarning("WebSocket缺少system参数");
-            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, "bad_request", "Missing system");
-            return;
-        }
-
-        var token = GetWebSocketToken(context);
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            logger.LogWarning("WebSocket缺少token");
-            await WriteErrorAsync(context, StatusCodes.Status401Unauthorized, "unauthorized", "Missing token");
-            return;
-        }
-
-        var tokenService = context.RequestServices.GetRequiredService<AuthTokenService>();
-        var tokenValidation = await tokenService.ValidateTokenAsync(token);
-        if (!tokenValidation.IsValid)
-        {
-            logger.LogWarning("WS invalid token");
-            await WriteErrorAsync(context, StatusCodes.Status401Unauthorized, "unauthorized", "Invalid token");
-            return;
-        }
-
-        var userId = tokenValidation.UserId;
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            logger.LogWarning("WS missing user id claim");
-            await WriteErrorAsync(context, StatusCodes.Status403Forbidden, "forbidden", "Missing user id");
-            return;
-        }
-
-        var connectionManager = context.RequestServices.GetRequiredService<IConnectionManager>();
-        var handler = context.RequestServices.GetRequiredService<WebSocketHandler>();
-        var connectionId = Guid.NewGuid();
-        if (!connectionManager.TryReserve(userId, system, connectionId))
-        {
-            var kicked = false;
-            var reserved = false;
-            if (string.Equals(wsConfig.KickPolicy, "KickOld", StringComparison.OrdinalIgnoreCase))
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            if (!context.WebSockets.IsWebSocketRequest)
             {
-                var existing = connectionManager.GetConnections(userId)
-                    .Where(c => string.Equals(c.System, system, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                foreach (var connectionItem in existing)
-                {
-                    await handler.KickAsync(connectionItem, "replaced", context.RequestAborted);
-                    connectionManager.Remove(connectionItem.UserId, connectionItem.System, connectionItem.ConnectionId);
-                    kicked = true;
-                }
-
-                if (!kicked)
-                {
-                    connectionManager.ClearUserSystem(userId, system);
-                    reserved = connectionManager.TryReserve(userId, system, connectionId);
-                    kicked = reserved;
-                }
-                else
-                {
-                    reserved = connectionManager.TryReserve(userId, system, connectionId);
-                }
-            }
-
-            if (!kicked || !reserved)
-            {
-                logger.LogWarning("WS connection limit reached for user {UserId} system {System}", userId, system);
-                await WriteErrorAsync(context, StatusCodes.Status403Forbidden, "connection_limit", "Too many connections for this system");
+                await WriteWsErrorAsync(context, StatusCodes.Status400BadRequest, ProtocolErrorCodes.InvalidRequest, "WebSocket request required")
+                    .ConfigureAwait(false);
                 return;
             }
-        }
 
-        WebSocketConnection connection;
-        try
-        {
-            var socket = await context.WebSockets.AcceptWebSocketAsync();
-            var remoteIp = context.Connection.RemoteIpAddress?.ToString();
-            connection = new WebSocketConnection(connectionId, userId, system, socket, DateTime.UtcNow, remoteIp);
-            connectionManager.RegisterLocal(connection);
-        }
-        catch
-        {
-            connectionManager.Remove(userId, system, connectionId);
-            throw;
-        }
+            var system = context.Request.Query["system"].ToString();
+            if (string.IsNullOrWhiteSpace(system))
+            {
+                await WriteWsErrorAsync(context, StatusCodes.Status400BadRequest, ProtocolErrorCodes.MissingField, "Missing system")
+                    .ConfigureAwait(false);
+                return;
+            }
 
-        logger.LogInformation("WS connected: user {UserId} system {System} connection {ConnectionId}", userId, system, connection.ConnectionId);
+            var token = GetWebSocketToken(context);
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                await WriteWsErrorAsync(context, StatusCodes.Status401Unauthorized, ProtocolErrorCodes.Unauthorized, "Missing token")
+                    .ConfigureAwait(false);
+                return;
+            }
 
-        try
-        {
-            await handler.HandleAsync(connection, context.RequestAborted);
-        }
-        finally
-        {
-            logger.LogInformation("WS disconnected: user {UserId} system {System} connection {ConnectionId}", userId, system, connection.ConnectionId);
-        }
+            var tokenService = context.RequestServices.GetRequiredService<AuthTokenService>();
+            var validation = await tokenService.ValidateTokenAsync(token).ConfigureAwait(false);
+            if (!validation.IsValid)
+            {
+                await WriteWsErrorAsync(context, StatusCodes.Status401Unauthorized, ProtocolErrorCodes.TokenInvalid, "Invalid token")
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(validation.UserId))
+            {
+                await WriteWsErrorAsync(context, StatusCodes.Status403Forbidden, ProtocolErrorCodes.Forbidden, "Missing user id")
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            var userId = validation.UserId;
+            var connectionManager = context.RequestServices.GetRequiredService<IConnectionManager>();
+            var handler = context.RequestServices.GetRequiredService<WebSocketHandler>();
+            var connectionId = Guid.NewGuid();
+
+            if (!connectionManager.TryReserve(userId, system, connectionId))
+            {
+                var reserved = false;
+                if (string.Equals(wsConfig.KickPolicy, "KickOld", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 分布式场景先广播踢线，确保其他节点同 user/system 连接可被挤出。
+                    connectionManager.BroadcastKick(userId, system, "replaced");
+
+                    var existing = connectionManager.GetConnections(userId)
+                        .Where(c => string.Equals(c.System, system, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    foreach (var old in existing)
+                    {
+                        await handler.KickAsync(old, "replaced", context.RequestAborted).ConfigureAwait(false);
+                        connectionManager.Remove(old.UserId, old.System, old.ConnectionId);
+                    }
+
+                    // 给跨节点踢线留出极短传播时间，避免立即重试仍被旧连接占位。
+                    for (var attempt = 0; attempt < 5 && !reserved; attempt++)
+                    {
+                        if (attempt > 0)
+                        {
+                            await Task.Delay(80, context.RequestAborted).ConfigureAwait(false);
+                        }
+
+                        reserved = connectionManager.TryReserve(userId, system, connectionId);
+                    }
+                }
+
+                if (!reserved)
+                {
+                    await WriteWsErrorAsync(
+                        context,
+                        StatusCodes.Status403Forbidden,
+                        ProtocolErrorCodes.LimitExceeded,
+                        "Too many connections for this system").ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            WebSocketConnection connection;
+            try
+            {
+                var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+                var remoteIp = context.Connection.RemoteIpAddress?.ToString();
+                connection = new WebSocketConnection(connectionId, userId, system, socket, DateTime.UtcNow, remoteIp);
+                connectionManager.RegisterLocal(connection);
+            }
+            catch
+            {
+                connectionManager.Remove(userId, system, connectionId);
+                throw;
+            }
+
+            logger.LogInformation(
+                "WS connected: user={UserId} system={System} connection={ConnectionId}",
+                userId,
+                system,
+                connection.ConnectionId);
+
+            try
+            {
+                await handler.HandleAsync(connection, context.RequestAborted).ConfigureAwait(false);
+            }
+            finally
+            {
+                logger.LogInformation(
+                    "WS disconnected: user={UserId} system={System} connection={ConnectionId}",
+                    userId,
+                    system,
+                    connection.ConnectionId);
+            }
+        });
     });
-});
-
-// HTTP API 路由
-app.MapControllers();
-
-// ============================================================================
-// 第八阶段：启动 HTTP 服务器
-// ============================================================================
-var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
-startupLogger.LogInformation("🌐 HTTP 服务器启动");
-startupLogger.LogInformation("📍 监听地址: http://localhost:9635");
-startupLogger.LogInformation("📖 Swagger UI: http://localhost:9635/swagger");
-startupLogger.LogInformation("❤️  健康检查: http://localhost:9635/api/health");
-startupLogger.LogInformation("");
-
-app.Run();
+}
 
 static string? GetWebSocketToken(HttpContext context)
 {
@@ -538,24 +686,23 @@ static string? GetWebSocketToken(HttpContext context)
 
     var authorization = context.Request.Headers.Authorization.ToString();
     const string prefix = "Bearer ";
-    if (!string.IsNullOrWhiteSpace(authorization) && authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+    if (!string.IsNullOrWhiteSpace(authorization) &&
+        authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
     {
-        return authorization.Substring(prefix.Length).Trim();
+        return authorization[prefix.Length..].Trim();
     }
 
     return null;
 }
 
-static async Task WriteErrorAsync(HttpContext context, int statusCode, string code, string message)
+static async Task WriteWsErrorAsync(HttpContext context, int statusCode, int code, string message)
 {
     context.Response.StatusCode = statusCode;
     context.Response.ContentType = "application/json";
-
-    var payload = ProtocolEnvelopeFactory.Error(null, int.Parse(code), message, null, context.TraceIdentifier);
+    var payload = ProtocolEnvelopeFactory.Error(null, code, message, null, context.TraceIdentifier);
     var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     });
-
-    await context.Response.WriteAsync(json);
+    await context.Response.WriteAsync(json).ConfigureAwait(false);
 }

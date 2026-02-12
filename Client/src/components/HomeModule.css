@@ -12,6 +12,9 @@
   gap: 16px;
   /* 关闭同一网格行默认拉伸，避免“快捷入口”被高内容卡片撑高 */
   align-items: start;
+  /* 避免容器额外高度被分配到各行，导致主界面出现大面积空隙 */
+  align-content: start;
+  grid-auto-rows: max-content;
   grid-auto-flow: row dense;
 }
 

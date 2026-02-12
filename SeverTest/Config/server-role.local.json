@@ -1,0 +1,5 @@
+{
+  "Role": "backtest-worker",
+  "WorkerCoreWsUrls": "ws://127.0.0.1:9635/ws/worker|ws://192.168.1.10:9635/ws/worker",
+  "UpdatedAtUtc": "2026-02-12T05:58:49.8825092Z"
+}

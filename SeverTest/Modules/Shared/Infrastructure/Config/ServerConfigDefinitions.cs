@@ -50,6 +50,12 @@ namespace ServerTest.Infrastructure.Config
             new ServerConfigDefinition("WebSocket:ConnectionKeyRefreshSeconds", "WebSocket", "int", "连接键刷新间隔（秒，需重启）", false),
 
             new ServerConfigDefinition("Trading:EnableSandboxMode", "交易", "bool", "是否启用沙盒模式（需重启）", false),
+            new ServerConfigDefinition("MarketStreaming:UseRedisSubscriptionStore", "行情推送", "bool", "是否使用 Redis 作为订阅存储（需重启）", false),
+
+            new ServerConfigDefinition("BacktestWorker:DispatchPollingIntervalMs", "回测分布式", "int", "核心节点任务分发轮询间隔（毫秒，需重启）", false),
+            new ServerConfigDefinition("BacktestWorker:HeartbeatSeconds", "回测分布式", "int", "算力节点心跳上报间隔（秒，需重启）", false),
+            new ServerConfigDefinition("BacktestWorker:ReconnectDelaySeconds", "回测分布式", "int", "算力节点断线重连间隔（秒，需重启）", false),
+            new ServerConfigDefinition("BacktestWorker:MaxParallelTasksPerWorker", "回测分布式", "int", "算力节点可并行执行任务数（需重启）", false),
 
             new ServerConfigDefinition("Backtest:MaxConcurrentTasks", "回测", "int", "全局最大并发回测任务数（实时生效）", true),
             new ServerConfigDefinition("Backtest:InnerParallelism", "回测", "int", "单任务主循环每个时间点的 symbol 并行度（<=0 表示按 CPU 核心数，实时生效）", true),

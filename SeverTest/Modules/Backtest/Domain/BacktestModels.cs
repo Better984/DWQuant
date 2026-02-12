@@ -428,6 +428,7 @@ namespace ServerTest.Modules.Backtest.Domain
         public long TaskId { get; set; }
         public long UserId { get; set; }
         public string? ReqId { get; set; }
+        public string? AssignedWorkerId { get; set; }
         public string Status { get; set; } = BacktestTaskStatus.Queued;
         public decimal Progress { get; set; }
         public string? Stage { get; set; }
@@ -466,6 +467,7 @@ namespace ServerTest.Modules.Backtest.Domain
     public sealed class BacktestTaskSummary
     {
         public long TaskId { get; set; }
+        public string? AssignedWorkerId { get; set; }
         public string Status { get; set; } = string.Empty;
         public decimal Progress { get; set; }
         public string? Stage { get; set; }

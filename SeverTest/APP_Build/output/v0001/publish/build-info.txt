@@ -1,0 +1,4 @@
+buildTime=20260212_184254
+buildConfig=Release
+buildRuntime=win-x64
+selfContained=false

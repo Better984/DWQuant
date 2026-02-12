@@ -123,6 +123,7 @@ namespace ServerTest.Modules.Backtest.Application
             return new BacktestTaskSummary
             {
                 TaskId = task.TaskId,
+                AssignedWorkerId = task.AssignedWorkerId,
                 Status = task.Status,
                 Progress = task.Progress,
                 Stage = task.Stage,

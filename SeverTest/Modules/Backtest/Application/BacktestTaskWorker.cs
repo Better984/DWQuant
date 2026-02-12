@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,11 +9,10 @@ using ServerTest.Modules.Backtest.Infrastructure;
 namespace ServerTest.Modules.Backtest.Application
 {
     /// <summary>
-    /// 回测任务后台消费者（HostedService）：
-    /// - 轮询 backtest_task 表中 status=queued 的任务
-    /// - 按 MaxConcurrentTasks 控制并发
-    /// - 调用 BacktestService 执行回测
-    /// - 更新任务状态和结果
+    /// 本地回测任务处理器（HostedService）：
+    /// - 轮询 backtest_task 中 queued 任务；
+    /// - 受 Backtest:MaxConcurrentTasks 控制；
+    /// - 本地执行回测并写回结果。
     /// </summary>
     public sealed class BacktestTaskWorker : BackgroundService
     {
@@ -25,6 +21,7 @@ namespace ServerTest.Modules.Backtest.Application
         private readonly IServiceProvider _serviceProvider;
         private readonly ServerConfigStore _configStore;
         private readonly ILogger<BacktestTaskWorker> _logger;
+        private readonly string _localWorkerId = $"local:{Environment.MachineName}:{Environment.ProcessId}";
         private DateTime _nextCleanupAtUtc = DateTime.MinValue;
 
         public BacktestTaskWorker(
@@ -39,9 +36,9 @@ namespace ServerTest.Modules.Backtest.Application
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("回测任务Worker启动");
+            _logger.LogInformation("本地回测任务 Worker 启动");
 
-            // 等待系统启动完成
+            // 等待其他启动流程基本完成
             await Task.Delay(3000, stoppingToken).ConfigureAwait(false);
             try
             {
@@ -53,7 +50,7 @@ namespace ServerTest.Modules.Backtest.Application
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "回测任务Worker启动时建表失败，后续将继续重试执行");
+                _logger.LogError(ex, "本地回测 Worker 初始化建表失败，后续将继续重试执行");
             }
 
             while (!stoppingToken.IsCancellationRequested)
@@ -68,12 +65,12 @@ namespace ServerTest.Modules.Backtest.Application
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "回测任务Worker异常");
+                    _logger.LogError(ex, "本地回测 Worker 循环异常");
                     await Task.Delay(5000, stoppingToken).ConfigureAwait(false);
                 }
             }
 
-            _logger.LogInformation("回测任务Worker停止");
+            _logger.LogInformation("本地回测任务 Worker 停止");
         }
 
         private async Task ProcessNextTaskAsync(CancellationToken ct)
@@ -85,7 +82,6 @@ namespace ServerTest.Modules.Backtest.Application
             var repository = scope.ServiceProvider.GetRequiredService<BacktestTaskRepository>();
             await TryCleanupAsync(repository, ct).ConfigureAwait(false);
 
-            // 检查并发限制
             var running = await repository.CountRunningAsync(ct).ConfigureAwait(false);
             if (running >= maxConcurrent)
             {
@@ -93,22 +89,23 @@ namespace ServerTest.Modules.Backtest.Application
                 return;
             }
 
-            // 取出队首任务
-            var task = await repository.DequeueAsync(ct).ConfigureAwait(false);
+            // 原子抢占队列任务，避免多实例重复消费
+            var task = await repository.TryAcquireQueuedTaskAsync(_localWorkerId, ct).ConfigureAwait(false);
             if (task == null)
             {
                 await Task.Delay(pollingInterval, ct).ConfigureAwait(false);
                 return;
             }
 
-            // 标记为执行中
-            await repository.MarkRunningAsync(task.TaskId, ct).ConfigureAwait(false);
-            await repository.UpdateProgressAsync(task.TaskId, 0m, "running", "正在执行", "任务已开始执行", ct).ConfigureAwait(false);
+            await repository.UpdateProgressAsync(task.TaskId, 0m, "running", "正在执行", "任务已由本地 Worker 接管", ct)
+                .ConfigureAwait(false);
 
-            _logger.LogInformation("回测任务开始执行: taskId={TaskId} userId={UserId} exchange={Exchange}",
-                task.TaskId, task.UserId, task.Exchange);
+            _logger.LogInformation(
+                "本地回测任务开始执行: taskId={TaskId} userId={UserId} exchange={Exchange}",
+                task.TaskId,
+                task.UserId,
+                task.Exchange);
 
-            // 在新的 scope 中执行回测（BacktestRunner 是 Scoped）
             _ = Task.Run(async () =>
             {
                 using var executeScope = _serviceProvider.CreateScope();
@@ -126,7 +123,6 @@ namespace ServerTest.Modules.Backtest.Application
 
             try
             {
-                // 反序列化请求
                 var request = JsonConvert.DeserializeObject<BacktestRunRequest>(task.RequestJson);
                 if (request == null)
                 {
@@ -134,12 +130,10 @@ namespace ServerTest.Modules.Backtest.Application
                     return;
                 }
 
-                // 执行回测
                 var result = await backtestService
                     .RunAsync(request, task.ReqId, task.UserId, task.TaskId, cts.Token)
                     .ConfigureAwait(false);
 
-                // 序列化结果并保存
                 var resultJson = JsonConvert.SerializeObject(result);
                 var tradeCount = result.TotalStats?.TradeCount ?? 0;
 
@@ -151,18 +145,21 @@ namespace ServerTest.Modules.Backtest.Application
                     result.DurationMs).ConfigureAwait(false);
 
                 _logger.LogInformation(
-                    "回测任务完成: taskId={TaskId} bars={Bars} trades={Trades} durationMs={Duration}",
-                    task.TaskId, result.TotalBars, tradeCount, result.DurationMs);
+                    "本地回测任务完成: taskId={TaskId} bars={Bars} trades={Trades} durationMs={Duration}",
+                    task.TaskId,
+                    result.TotalBars,
+                    tradeCount,
+                    result.DurationMs);
             }
             catch (OperationCanceledException)
             {
                 await repository.MarkFailedAsync(task.TaskId, "回测执行超时").ConfigureAwait(false);
-                _logger.LogWarning("回测任务超时: taskId={TaskId}", task.TaskId);
+                _logger.LogWarning("本地回测任务超时: taskId={TaskId}", task.TaskId);
             }
             catch (Exception ex)
             {
                 await repository.MarkFailedAsync(task.TaskId, ex.Message).ConfigureAwait(false);
-                _logger.LogError(ex, "回测任务失败: taskId={TaskId}", task.TaskId);
+                _logger.LogError(ex, "本地回测任务失败: taskId={TaskId}", task.TaskId);
             }
         }
 
@@ -191,7 +188,7 @@ namespace ServerTest.Modules.Backtest.Application
             var removed = await repository.CleanupExpiredAsync(retentionDays, ct).ConfigureAwait(false);
             if (removed > 0)
             {
-                _logger.LogInformation("回测任务过期清理完成: removed={Removed} retentionDays={RetentionDays}", removed, retentionDays);
+                _logger.LogInformation("回测历史清理完成: removed={Removed} retentionDays={RetentionDays}", removed, retentionDays);
             }
         }
     }
