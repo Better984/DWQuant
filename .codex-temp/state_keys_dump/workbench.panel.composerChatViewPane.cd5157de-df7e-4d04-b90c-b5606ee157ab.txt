@@ -1,0 +1,1 @@
+{"workbench.panel.aichat.view.e85c728d-fa85-46b5-8659-613db36a1e64":{"collapsed":false,"isHidden":false,"size":1308}}

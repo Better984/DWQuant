@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "source": "TALib.NETCore Abstract.cs (parsed)",
-  "count": 10,
+  "count": 160,
   "common": {
     "maType": {
       "key": "MA Type",
@@ -59,15 +59,158 @@
   },
   "indicators": [
     {
-      "code": "EMA",
-      "abbr_en": "EMA",
-      "name_en": "Exponential Moving Average",
-      "method": "Ema",
+      "code": "ACCBANDS",
+      "abbr_en": "ACCBANDS",
+      "name_en": "Acceleration Bands",
+      "method": "Accbands",
       "group": "Overlap Studies",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real Upper Band",
+          "hint": "UpperLimit"
+        },
+        {
+          "key": "Real Middle Band",
+          "hint": "Line"
+        },
+        {
+          "key": "Real Lower Band",
+          "hint": "LowerLimit"
+        }
+      ],
+      "name_cn": "加速通道",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "ACOS",
+      "abbr_en": "ACOS",
+      "name_en": "Vector Trigonometric ACos",
+      "method": "Acos",
+      "group": "Math Transform",
       "inputs": {
         "shape": "Real",
         "series": [
           "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数ACos",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "AD",
+      "abbr_en": "AD",
+      "name_en": "Chaikin A/D Line",
+      "method": "Ad",
+      "group": "Volume Indicators",
+      "inputs": {
+        "shape": "HLCV",
+        "series": [
+          "High",
+          "Low",
+          "Close",
+          "Volume"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "蔡金累积/派发线",
+      "indicator_type": "Volume Indicators"
+    },
+    {
+      "code": "ADD",
+      "abbr_en": "ADD",
+      "name_en": "Vector Arithmetic Addition",
+      "method": "Add",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real2",
+        "series": [
+          "Real",
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量算术Addition",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "ADOSC",
+      "abbr_en": "ADOSC",
+      "name_en": "Chaikin A/D Oscillator",
+      "method": "AdOsc",
+      "group": "Volume Indicators",
+      "inputs": {
+        "shape": "HLCV",
+        "series": [
+          "High",
+          "Low",
+          "Close",
+          "Volume"
+        ]
+      },
+      "options": [
+        {
+          "key": "Fast Period",
+          "desc": "Number of periods for the fast moving average"
+        },
+        {
+          "key": "Slow Period",
+          "desc": "Number of periods for the slow moving average"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "蔡金A/D振荡器",
+      "indicator_type": "Volume Indicators"
+    },
+    {
+      "code": "ADX",
+      "abbr_en": "ADX",
+      "name_en": "Average Directional Movement Index",
+      "method": "Adx",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
         ]
       },
       "options": [
@@ -82,15 +225,44 @@
           "hint": "Line"
         }
       ],
-      "name_cn": "指数移动平均线",
-      "indicator_type": "Overlap Studies"
+      "name_cn": "平均趋向指数",
+      "indicator_type": "Momentum Indicators"
     },
     {
-      "code": "MA",
-      "abbr_en": "MA",
-      "name_en": "Moving Average",
-      "method": "Ma",
-      "group": "Overlap Studies",
+      "code": "ADXR",
+      "abbr_en": "ADXR",
+      "name_en": "Average Directional Movement Index Rating",
+      "method": "Adxr",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "平均趋向指数评级",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "APO",
+      "abbr_en": "APO",
+      "name_en": "Absolute Price Oscillator",
+      "method": "Apo",
+      "group": "Momentum Indicators",
       "inputs": {
         "shape": "Real",
         "series": [
@@ -99,8 +271,12 @@
       },
       "options": [
         {
-          "key": "Time Period",
-          "desc": "Number of periods"
+          "key": "Fast Period",
+          "desc": "Number of periods for the fast moving average"
+        },
+        {
+          "key": "Slow Period",
+          "desc": "Number of periods for the slow moving average"
         },
         {
           "$ref": "#/common/maType"
@@ -112,8 +288,193 @@
           "hint": "Line"
         }
       ],
-      "name_cn": "移动平均线",
-      "indicator_type": "Overlap Studies"
+      "name_cn": "绝对价格振荡器",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "AROON",
+      "abbr_en": "AROON",
+      "name_en": "Aroon",
+      "method": "Aroon",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Aroon Down",
+          "hint": "DashLine"
+        },
+        {
+          "key": "Aroon Up",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "阿隆指标",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "AROONOSC",
+      "abbr_en": "AROONOSC",
+      "name_en": "Aroon Oscillator",
+      "method": "AroonOsc",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "阿隆振荡器",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "ASIN",
+      "abbr_en": "ASIN",
+      "name_en": "Vector Trigonometric ASin",
+      "method": "Asin",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数ASin",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "ATAN",
+      "abbr_en": "ATAN",
+      "name_en": "Vector Trigonometric ATan",
+      "method": "Atan",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数ATan",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "ATR",
+      "abbr_en": "ATR",
+      "name_en": "Average True Range",
+      "method": "Atr",
+      "group": "Volatility Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "平均真实波幅",
+      "indicator_type": "Volatility Indicators"
+    },
+    {
+      "code": "AVGDEV",
+      "abbr_en": "AVGDEV",
+      "name_en": "Average Deviation",
+      "method": "AvgDev",
+      "group": "Price Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "平均偏差",
+      "indicator_type": "Price Transform"
+    },
+    {
+      "code": "AVGPRICE",
+      "abbr_en": "AVGPRICE",
+      "name_en": "Average Price",
+      "method": "AvgPrice",
+      "group": "Price Transform",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "平均价",
+      "indicator_type": "Price Transform"
     },
     {
       "code": "BBANDS",
@@ -162,26 +523,22 @@
       "indicator_type": "Overlap Studies"
     },
     {
-      "code": "SAR",
-      "abbr_en": "SAR",
-      "name_en": "Parabolic SAR",
-      "method": "Sar",
-      "group": "Overlap Studies",
+      "code": "BETA",
+      "abbr_en": "BETA",
+      "name_en": "Beta",
+      "method": "Beta",
+      "group": "Statistic Functions",
       "inputs": {
-        "shape": "HL",
+        "shape": "Real2",
         "series": [
-          "High",
-          "Low"
+          "Real",
+          "Real"
         ]
       },
       "options": [
         {
-          "key": "Acceleration",
-          "desc": "Acceleration Factor used up to the Maximum value"
-        },
-        {
-          "key": "Maximum",
-          "desc": "Acceleration Factor Maximum value"
+          "key": "Time Period",
+          "desc": "Number of periods"
         }
       ],
       "outputs": [
@@ -190,14 +547,90 @@
           "hint": "Line"
         }
       ],
-      "name_cn": "抛物线转向",
-      "indicator_type": "Overlap Studies"
+      "name_cn": "贝塔",
+      "indicator_type": "Statistic Functions"
     },
     {
-      "code": "RSI",
-      "abbr_en": "RSI",
-      "name_en": "Relative Strength Index",
-      "method": "Rsi",
+      "code": "BOP",
+      "abbr_en": "BOP",
+      "name_en": "Balance of Power",
+      "method": "Bop",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "力量平衡",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "CCI",
+      "abbr_en": "CCI",
+      "name_en": "Commodity Channel Index",
+      "method": "Cci",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "顺势指标",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "CEIL",
+      "abbr_en": "CEIL",
+      "name_en": "Vector Ceil",
+      "method": "Ceil",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量Ceil",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "CMO",
+      "abbr_en": "CMO",
+      "name_en": "Chande Momentum Oscillator",
+      "method": "Cmo",
       "group": "Momentum Indicators",
       "inputs": {
         "shape": "Real",
@@ -217,8 +650,579 @@
           "hint": "Line"
         }
       ],
-      "name_cn": "相对强弱指数",
+      "name_cn": "钱德动量振荡器",
       "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "CORREL",
+      "abbr_en": "CORREL",
+      "name_en": "Pearson's Correlation Coefficient (r)",
+      "method": "Correl",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real2",
+        "series": [
+          "Real",
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "皮尔逊相关系数(r)",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "COS",
+      "abbr_en": "COS",
+      "name_en": "Vector Trigonometric Cos",
+      "method": "Cos",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数Cos",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "COSH",
+      "abbr_en": "COSH",
+      "name_en": "Vector Trigonometric Cosh",
+      "method": "Cosh",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数Cosh",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "DEMA",
+      "abbr_en": "DEMA",
+      "name_en": "Double Exponential Moving Average",
+      "method": "Dema",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "双指数移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "DIV",
+      "abbr_en": "DIV",
+      "name_en": "Vector Arithmetic Division",
+      "method": "Div",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real2",
+        "series": [
+          "Real",
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量算术Division",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "DX",
+      "abbr_en": "DX",
+      "name_en": "Directional Movement Index",
+      "method": "Dx",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "动向指数",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "EMA",
+      "abbr_en": "EMA",
+      "name_en": "Exponential Moving Average",
+      "method": "Ema",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指数移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "EXP",
+      "abbr_en": "EXP",
+      "name_en": "Vector Arithmetic Exp",
+      "method": "Exp",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量算术Exp",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "FLOOR",
+      "abbr_en": "FLOOR",
+      "name_en": "Vector Floor",
+      "method": "Floor",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量Floor",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "HTDCPERIOD",
+      "abbr_en": "HTDCPERIOD",
+      "name_en": "Hilbert Transform - Dominant Cycle Period",
+      "method": "HtDcPeriod",
+      "group": "Cycle Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "希尔伯特变换-主导周期",
+      "indicator_type": "Cycle Indicators"
+    },
+    {
+      "code": "HTDCPHASE",
+      "abbr_en": "HTDCPHASE",
+      "name_en": "Hilbert Transform - Dominant Cycle Phase",
+      "method": "HtDcPhase",
+      "group": "Cycle Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "希尔伯特变换-主导周期相位",
+      "indicator_type": "Cycle Indicators"
+    },
+    {
+      "code": "HTPHASOR",
+      "abbr_en": "HTPHASOR",
+      "name_en": "Hilbert Transform - Phasor Components",
+      "method": "HtPhasor",
+      "group": "Cycle Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "In Phase",
+          "hint": "Line"
+        },
+        {
+          "key": "Quadrature",
+          "hint": "DashLine"
+        }
+      ],
+      "name_cn": "希尔伯特变换-相量分量",
+      "indicator_type": "Cycle Indicators"
+    },
+    {
+      "code": "HTSINE",
+      "abbr_en": "HTSINE",
+      "name_en": "Hilbert Transform - SineWave",
+      "method": "HtSine",
+      "group": "Cycle Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Sine",
+          "hint": "Line"
+        },
+        {
+          "key": "Lead Sine",
+          "hint": "DashLine"
+        }
+      ],
+      "name_cn": "希尔伯特变换-正弦波",
+      "indicator_type": "Cycle Indicators"
+    },
+    {
+      "code": "HTTRENDLINE",
+      "abbr_en": "HTTRENDLINE",
+      "name_en": "Hilbert Transform - Instantaneous Trendline",
+      "method": "HtTrendline",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "希尔伯特变换-即时趋势线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "HTTRENDMODE",
+      "abbr_en": "HTTRENDMODE",
+      "name_en": "Hilbert Transform - Trend vs Cycle Mode",
+      "method": "HtTrendMode",
+      "group": "Cycle Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Integer",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "希尔伯特变换-趋势/周期模式",
+      "indicator_type": "Cycle Indicators"
+    },
+    {
+      "code": "KAMA",
+      "abbr_en": "KAMA",
+      "name_en": "Kaufman Adaptive Moving Average",
+      "method": "Kama",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "考夫曼自适应移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "LINEARREG",
+      "abbr_en": "LINEARREG",
+      "name_en": "Linear Regression",
+      "method": "LinearReg",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "线性回归",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "LINEARREGANGLE",
+      "abbr_en": "LINEARREGANGLE",
+      "name_en": "Linear Regression Angle",
+      "method": "LinearRegAngle",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "线性回归角度",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "LINEARREGINTERCEPT",
+      "abbr_en": "LINEARREGINTERCEPT",
+      "name_en": "Linear Regression Intercept",
+      "method": "LinearRegIntercept",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "线性回归截距",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "LINEARREGSLOPE",
+      "abbr_en": "LINEARREGSLOPE",
+      "name_en": "Linear Regression Slope",
+      "method": "LinearRegSlope",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "线性回归斜率",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "LN",
+      "abbr_en": "LN",
+      "name_en": "Vector Log Natural",
+      "method": "Ln",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量自然对数",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "LOG10",
+      "abbr_en": "LOG10",
+      "name_en": "Vector Log10",
+      "method": "Log10",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量Log10",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "MA",
+      "abbr_en": "MA",
+      "name_en": "Moving Average",
+      "method": "Ma",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        },
+        {
+          "$ref": "#/common/maType"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "移动平均线",
+      "indicator_type": "Overlap Studies"
     },
     {
       "code": "MACD",
@@ -264,10 +1268,451 @@
       "indicator_type": "Momentum Indicators"
     },
     {
-      "code": "ADX",
-      "abbr_en": "ADX",
-      "name_en": "Average Directional Movement Index",
-      "method": "Adx",
+      "code": "MACDEXT",
+      "abbr_en": "MACDEXT",
+      "name_en": "MACD with controllable MA type",
+      "method": "MacdExt",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Fast Period",
+          "desc": "Number of periods for the fast moving average"
+        },
+        {
+          "key": "Fast MA Type",
+          "desc": "Type of Moving Average for fast MA",
+          "$ref": "#/common/maType"
+        },
+        {
+          "key": "Slow Period",
+          "desc": "Number of periods for the slow moving average"
+        },
+        {
+          "key": "Slow MA Type",
+          "desc": "Type of Moving Average for slow MA",
+          "$ref": "#/common/maType"
+        },
+        {
+          "key": "Signal Period",
+          "desc": "Smoothing for the signal line (nb of period)"
+        },
+        {
+          "key": "Signal MA Type",
+          "desc": "Type of Moving Average for signal line",
+          "$ref": "#/common/maType"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "MACD",
+          "hint": "Line"
+        },
+        {
+          "key": "MACD Signal",
+          "hint": "DashLine"
+        },
+        {
+          "key": "MACD Hist",
+          "hint": "Histo"
+        }
+      ],
+      "name_cn": "可控均线类型的指数平滑异同移动平均线",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "MACDFIX",
+      "abbr_en": "MACDFIX",
+      "name_en": "Moving Average Convergence/Divergence Fix 12/26",
+      "method": "MacdFix",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Signal Period",
+          "desc": "Smoothing for the signal line (nb of period)"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "MACD",
+          "hint": "Line"
+        },
+        {
+          "key": "MACD Signal",
+          "hint": "DashLine"
+        },
+        {
+          "key": "MACD Hist",
+          "hint": "Histo"
+        }
+      ],
+      "name_cn": "固定12/26的指数平滑异同移动平均线",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "MAMA",
+      "abbr_en": "MAMA",
+      "name_en": "MESA Adaptive Moving Average",
+      "method": "Mama",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Fast Limit",
+          "desc": "Upper limit use in the adaptive algorithm"
+        },
+        {
+          "key": "Slow Limit",
+          "desc": "Lower limit use in the adaptive algorithm"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "MAMA",
+          "hint": "Line"
+        },
+        {
+          "key": "FAMA",
+          "hint": "DashLine"
+        }
+      ],
+      "name_cn": "MESA自适应移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "MAVP",
+      "abbr_en": "MAVP",
+      "name_en": "Moving average with variable period",
+      "method": "Mavp",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Custom",
+        "series": [
+          "Real",
+          "Periods"
+        ]
+      },
+      "options": [
+        {
+          "key": "Min Period",
+          "desc": "Value less than minimum will be changed to Minimum period"
+        },
+        {
+          "key": "Max Period",
+          "desc": "Value higher than maximum will be changed to Maximum period"
+        },
+        {
+          "$ref": "#/common/maType"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "可变周期移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "MAX",
+      "abbr_en": "MAX",
+      "name_en": "Highest value over a specified period",
+      "method": "Max",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指定周期最高值",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "MAXINDEX",
+      "abbr_en": "MAXINDEX",
+      "name_en": "Index of highest value over a specified period",
+      "method": "MaxIndex",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Integer",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指定周期最高值索引",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "MEDPRICE",
+      "abbr_en": "MEDPRICE",
+      "name_en": "Median Price",
+      "method": "MedPrice",
+      "group": "Price Transform",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "中位价",
+      "indicator_type": "Price Transform"
+    },
+    {
+      "code": "MFI",
+      "abbr_en": "MFI",
+      "name_en": "Money Flow Index",
+      "method": "Mfi",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLCV",
+        "series": [
+          "High",
+          "Low",
+          "Close",
+          "Volume"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "资金流量指标",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "MIDPOINT",
+      "abbr_en": "MIDPOINT",
+      "name_en": "MidPoint over period",
+      "method": "MidPoint",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "周期内中点",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "MIDPRICE",
+      "abbr_en": "MIDPRICE",
+      "name_en": "Midpoint Price over period",
+      "method": "MidPrice",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "周期内中点价",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "MIN",
+      "abbr_en": "MIN",
+      "name_en": "Lowest value over a specified period",
+      "method": "Min",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指定周期最低值",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "MININDEX",
+      "abbr_en": "MININDEX",
+      "name_en": "Index of lowest value over a specified period",
+      "method": "MinIndex",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Integer",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指定周期最低值索引",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "MINMAX",
+      "abbr_en": "MINMAX",
+      "name_en": "Lowest and highest values over a specified period",
+      "method": "MinMax",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Min",
+          "hint": "Line"
+        },
+        {
+          "key": "Max",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指定周期内最低值与最高值",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "MINMAXINDEX",
+      "abbr_en": "MINMAXINDEX",
+      "name_en": "Indexes of lowest and highest values over a specified period",
+      "method": "MinMaxIndex",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Min Idx",
+          "hint": "Line"
+        },
+        {
+          "key": "Max Idx",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "指定周期内最低/最高值索引",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "MINUSDI",
+      "abbr_en": "MINUSDI",
+      "name_en": "Minus Directional Indicator",
+      "method": "MinusDI",
       "group": "Momentum Indicators",
       "inputs": {
         "shape": "HLC",
@@ -289,7 +1734,668 @@
           "hint": "Line"
         }
       ],
-      "name_cn": "平均趋向指数",
+      "name_cn": "负向动向指标",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "MINUSDM",
+      "abbr_en": "MINUSDM",
+      "name_en": "Minus Directional Movement",
+      "method": "MinusDM",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "负向动向变动",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "MOM",
+      "abbr_en": "MOM",
+      "name_en": "Momentum",
+      "method": "Mom",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "动量",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "MULT",
+      "abbr_en": "MULT",
+      "name_en": "Vector Arithmetic Multiplication",
+      "method": "Mult",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real2",
+        "series": [
+          "Real",
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量算术Multiplication",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "NATR",
+      "abbr_en": "NATR",
+      "name_en": "Normalized Average True Range",
+      "method": "Natr",
+      "group": "Volatility Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "归一化平均真实波幅",
+      "indicator_type": "Volatility Indicators"
+    },
+    {
+      "code": "OBV",
+      "abbr_en": "OBV",
+      "name_en": "On Balance Volume",
+      "method": "Obv",
+      "group": "Volume Indicators",
+      "inputs": {
+        "shape": "Custom",
+        "series": [
+          "Real",
+          "Volume"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "能量潮",
+      "indicator_type": "Volume Indicators"
+    },
+    {
+      "code": "PLUSDI",
+      "abbr_en": "PLUSDI",
+      "name_en": "Plus Directional Indicator",
+      "method": "PlusDI",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "正向动向指标",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "PLUSDM",
+      "abbr_en": "PLUSDM",
+      "name_en": "Plus Directional Movement",
+      "method": "PlusDM",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "正向动向变动",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "PPO",
+      "abbr_en": "PPO",
+      "name_en": "Percentage Price Oscillator",
+      "method": "Ppo",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Fast Period",
+          "desc": "Number of periods for the fast moving average"
+        },
+        {
+          "key": "Slow Period",
+          "desc": "Number of periods for the slow moving average"
+        },
+        {
+          "$ref": "#/common/maType"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "价格百分比振荡器",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "ROC",
+      "abbr_en": "ROC",
+      "name_en": "Rate of change : ((price/prevPrice)-1)*100",
+      "method": "Roc",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "变化率 : ((price/prevPrice)-1)*100",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "ROCP",
+      "abbr_en": "ROCP",
+      "name_en": "Rate of change Percentage: (price-prevPrice)/prevPrice",
+      "method": "RocP",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "变化率 Percentage: (price-prevPrice)/prevPrice",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "ROCR",
+      "abbr_en": "ROCR",
+      "name_en": "Rate of change ratio: (price/prevPrice)",
+      "method": "RocR",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "变化率 ratio: (price/prevPrice)",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "ROCR100",
+      "abbr_en": "ROCR100",
+      "name_en": "Rate of change ratio 100 scale: (price/prevPrice)*100",
+      "method": "RocR100",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "变化率 ratio 100 scale: (price/prevPrice)*100",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "RSI",
+      "abbr_en": "RSI",
+      "name_en": "Relative Strength Index",
+      "method": "Rsi",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "相对强弱指数",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "SAR",
+      "abbr_en": "SAR",
+      "name_en": "Parabolic SAR",
+      "method": "Sar",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Acceleration",
+          "desc": "Acceleration Factor used up to the Maximum value"
+        },
+        {
+          "key": "Maximum",
+          "desc": "Acceleration Factor Maximum value"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "抛物线转向",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "SAREXT",
+      "abbr_en": "SAREXT",
+      "name_en": "Parabolic SAR - Extended",
+      "method": "SarExt",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "HL",
+        "series": [
+          "High",
+          "Low"
+        ]
+      },
+      "options": [
+        {
+          "key": "Start Value",
+          "desc": "Start value and direction. 0 for Auto, >0 for Long, <0 for Short"
+        },
+        {
+          "key": "Offset On Reverse",
+          "desc": "Percent offset added/removed to initial stop on short/long reversal"
+        },
+        {
+          "key": "Acceleration Init Long",
+          "desc": "Acceleration Factor initial value for the Long direction"
+        },
+        {
+          "key": "Acceleration Long",
+          "desc": "Acceleration Factor for the Long direction"
+        },
+        {
+          "key": "Acceleration Max Long",
+          "desc": "Acceleration Factor maximum value for the Long direction"
+        },
+        {
+          "key": "Acceleration Init Short",
+          "desc": "Acceleration Factor initial value for the Short direction"
+        },
+        {
+          "key": "Acceleration Short",
+          "desc": "Acceleration Factor for the Short direction"
+        },
+        {
+          "key": "Acceleration Max Short",
+          "desc": "Acceleration Factor maximum value for the Short direction"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "抛物线SAR（扩展）",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "SIN",
+      "abbr_en": "SIN",
+      "name_en": "Vector Trigonometric Sin",
+      "method": "Sin",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数Sin",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "SINH",
+      "abbr_en": "SINH",
+      "name_en": "Vector Trigonometric Sinh",
+      "method": "Sinh",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数Sinh",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "SMA",
+      "abbr_en": "SMA",
+      "name_en": "Simple Moving Average",
+      "method": "Sma",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "简单移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "SQRT",
+      "abbr_en": "SQRT",
+      "name_en": "Vector Square Root",
+      "method": "Sqrt",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量平方根",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "STDDEV",
+      "abbr_en": "STDDEV",
+      "name_en": "Standard Deviation",
+      "method": "StdDev",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        },
+        {
+          "key": "Nb Dev",
+          "desc": "Nb of deviations"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "标准差",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "STOCH",
+      "abbr_en": "STOCH",
+      "name_en": "Stochastic",
+      "method": "Stoch",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Fast K Period",
+          "desc": "Time period for building the Fast-K line"
+        },
+        {
+          "key": "Slow K Period",
+          "desc": "Smoothing for making the Slow-K line. Usually set to 3"
+        },
+        {
+          "key": "Slow K MA Type",
+          "desc": "Type of Moving Average for Slow-K",
+          "$ref": "#/common/maType"
+        },
+        {
+          "key": "Slow D Period",
+          "desc": "Smoothing for making the Slow-D line"
+        },
+        {
+          "key": "Slow D MA Type",
+          "desc": "Type of Moving Average for Slow-D",
+          "$ref": "#/common/maType"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Slow K",
+          "hint": "DashLine"
+        },
+        {
+          "key": "Slow D",
+          "hint": "DashLine"
+        }
+      ],
+      "name_cn": "随机指标",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "STOCHF",
+      "abbr_en": "STOCHF",
+      "name_en": "Stochastic Fast",
+      "method": "StochF",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Fast K Period",
+          "desc": "Time period for building the Fast-K line"
+        },
+        {
+          "key": "Fast D Period",
+          "desc": "Smoothing for making the Fast-D line. Usually set to 3"
+        },
+        {
+          "key": "Fast D MA Type",
+          "desc": "Type of Moving Average for Fast-D",
+          "$ref": "#/common/maType"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Fast K",
+          "hint": "Line"
+        },
+        {
+          "key": "Fast D",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "快速随机指标",
       "indicator_type": "Momentum Indicators"
     },
     {
@@ -337,11 +2443,380 @@
       "indicator_type": "Momentum Indicators"
     },
     {
-      "code": "ATR",
-      "abbr_en": "ATR",
-      "name_en": "Average True Range",
-      "method": "Atr",
+      "code": "SUB",
+      "abbr_en": "SUB",
+      "name_en": "Vector Arithmetic Subtraction",
+      "method": "Sub",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real2",
+        "series": [
+          "Real",
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量算术Subtraction",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "SUM",
+      "abbr_en": "SUM",
+      "name_en": "Summation",
+      "method": "Sum",
+      "group": "Math Operators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "求和",
+      "indicator_type": "Math Operators"
+    },
+    {
+      "code": "T3",
+      "abbr_en": "T3",
+      "name_en": "T3 Moving Average",
+      "method": "T3",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        },
+        {
+          "key": "V Factor",
+          "desc": "Volume Factor"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "T3移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "TAN",
+      "abbr_en": "TAN",
+      "name_en": "Vector Trigonometric Tan",
+      "method": "Tan",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数Tan",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "TANH",
+      "abbr_en": "TANH",
+      "name_en": "Vector Trigonometric Tanh",
+      "method": "Tanh",
+      "group": "Math Transform",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "向量三角函数Tanh",
+      "indicator_type": "Math Transform"
+    },
+    {
+      "code": "TEMA",
+      "abbr_en": "TEMA",
+      "name_en": "Triple Exponential Moving Average",
+      "method": "Tema",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "三重指数移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "TRANGE",
+      "abbr_en": "TRANGE",
+      "name_en": "True Range",
+      "method": "TRange",
       "group": "Volatility Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "真实波幅",
+      "indicator_type": "Volatility Indicators"
+    },
+    {
+      "code": "TRIMA",
+      "abbr_en": "TRIMA",
+      "name_en": "Triangular Moving Average",
+      "method": "Trima",
+      "group": "Overlap Studies",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "三角形移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "TRIX",
+      "abbr_en": "TRIX",
+      "name_en": "1-day Rate-Of-Change (ROC) of a Triple Smooth EMA",
+      "method": "Trix",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "三重平滑EMA的1日变动率",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "TSF",
+      "abbr_en": "TSF",
+      "name_en": "Time Series Forecast",
+      "method": "Tsf",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "时间序列预测",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "TYPPRICE",
+      "abbr_en": "TYPPRICE",
+      "name_en": "Typical Price",
+      "method": "TypPrice",
+      "group": "Price Transform",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "典型价",
+      "indicator_type": "Price Transform"
+    },
+    {
+      "code": "ULTOSC",
+      "abbr_en": "ULTOSC",
+      "name_en": "Ultimate Oscillator",
+      "method": "UltOsc",
+      "group": "Momentum Indicators",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period 1",
+          "desc": "Number of bars for 1st period"
+        },
+        {
+          "key": "Time Period 2",
+          "desc": "Number of bars for 2nd period"
+        },
+        {
+          "key": "Time Period 3",
+          "desc": "Number of bars for 3rd period"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "终极振荡器",
+      "indicator_type": "Momentum Indicators"
+    },
+    {
+      "code": "VAR",
+      "abbr_en": "VAR",
+      "name_en": "Variance",
+      "method": "Var",
+      "group": "Statistic Functions",
+      "inputs": {
+        "shape": "Real",
+        "series": [
+          "Real"
+        ]
+      },
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "方差",
+      "indicator_type": "Statistic Functions"
+    },
+    {
+      "code": "WCLPRICE",
+      "abbr_en": "WCLPRICE",
+      "name_en": "Weighted Close Price",
+      "method": "WclPrice",
+      "group": "Price Transform",
+      "inputs": {
+        "shape": "HLC",
+        "series": [
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "Real",
+          "hint": "Line"
+        }
+      ],
+      "name_cn": "加权收盘价",
+      "indicator_type": "Price Transform"
+    },
+    {
+      "code": "WILLR",
+      "abbr_en": "WILLR",
+      "name_en": "Williams' %R",
+      "method": "WillR",
+      "group": "Momentum Indicators",
       "inputs": {
         "shape": "HLC",
         "series": [
@@ -362,31 +2837,1595 @@
           "hint": "Line"
         }
       ],
-      "name_cn": "平均真实波幅",
-      "indicator_type": "Volatility Indicators"
+      "name_cn": "威廉指标",
+      "indicator_type": "Momentum Indicators"
     },
     {
-      "code": "OBV",
-      "abbr_en": "OBV",
-      "name_en": "On Balance Volume",
-      "method": "Obv",
-      "group": "Volume Indicators",
+      "code": "WMA",
+      "abbr_en": "WMA",
+      "name_en": "Weighted Moving Average",
+      "method": "Wma",
+      "group": "Overlap Studies",
       "inputs": {
-        "shape": "Custom",
+        "shape": "Real",
         "series": [
-          "Real",
-          "Volume"
+          "Real"
         ]
       },
-      "options": [],
+      "options": [
+        {
+          "key": "Time Period",
+          "desc": "Number of periods"
+        }
+      ],
       "outputs": [
         {
           "key": "Real",
           "hint": "Line"
         }
       ],
-      "name_cn": "能量潮",
-      "indicator_type": "Volume Indicators"
+      "name_cn": "加权移动平均线",
+      "indicator_type": "Overlap Studies"
+    },
+    {
+      "code": "ABANDONEDBABY",
+      "abbr_en": "ABANDONEDBABY",
+      "name_en": "Abandoned Baby",
+      "method": "AbandonedBaby",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "弃婴",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "ADVANCEBLOCK",
+      "abbr_en": "ADVANCEBLOCK",
+      "name_en": "Advance Block",
+      "method": "AdvanceBlock",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "前进受阻",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "BELTHOLD",
+      "abbr_en": "BELTHOLD",
+      "name_en": "Belt-hold",
+      "method": "BeltHold",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "腰带线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "BREAKAWAY",
+      "abbr_en": "BREAKAWAY",
+      "name_en": "Breakaway",
+      "method": "Breakaway",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "脱离形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "CLOSINGMARUBOZU",
+      "abbr_en": "CLOSINGMARUBOZU",
+      "name_en": "Closing Marubozu",
+      "method": "ClosingMarubozu",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "收盘光头光脚线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "CONCEALINGBABYSWALLOW",
+      "abbr_en": "CONCEALINGBABYSWALLOW",
+      "name_en": "Concealing Baby Swallow",
+      "method": "ConcealingBabySwallow",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "藏婴吞没",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "COUNTERATTACK",
+      "abbr_en": "COUNTERATTACK",
+      "name_en": "Counterattack",
+      "method": "Counterattack",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "反击线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "DARKCLOUDCOVER",
+      "abbr_en": "DARKCLOUDCOVER",
+      "name_en": "Dark Cloud Cover",
+      "method": "DarkCloudCover",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "乌云盖顶",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "DOJI",
+      "abbr_en": "DOJI",
+      "name_en": "Doji",
+      "method": "Doji",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "十字星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "DOJISTAR",
+      "abbr_en": "DOJISTAR",
+      "name_en": "Doji Star",
+      "method": "DojiStar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "十字星 Star",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "DRAGONFLYDOJI",
+      "abbr_en": "DRAGONFLYDOJI",
+      "name_en": "Dragonfly Doji",
+      "method": "DragonflyDoji",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "Dragonfly 十字星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "ENGULFING",
+      "abbr_en": "ENGULFING",
+      "name_en": "Engulfing Pattern",
+      "method": "Engulfing",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "吞没形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "EVENINGDOJISTAR",
+      "abbr_en": "EVENINGDOJISTAR",
+      "name_en": "Evening Doji Star",
+      "method": "EveningDojiStar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "Evening 十字星 Star",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "EVENINGSTAR",
+      "abbr_en": "EVENINGSTAR",
+      "name_en": "Evening Star",
+      "method": "EveningStar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "黄昏星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "GAPSIDEBYSIDEWHITELINES",
+      "abbr_en": "GAPSIDEBYSIDEWHITELINES",
+      "name_en": "Up/Down-gap side-by-side white lines",
+      "method": "GapSideBySideWhiteLines",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "向上/向下跳空并列白色线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "GRAVESTONEDOJI",
+      "abbr_en": "GRAVESTONEDOJI",
+      "name_en": "Gravestone Doji",
+      "method": "GravestoneDoji",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "Gravestone 十字星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HAMMER",
+      "abbr_en": "HAMMER",
+      "name_en": "Hammer",
+      "method": "Hammer",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "锤子线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HANGINGMAN",
+      "abbr_en": "HANGINGMAN",
+      "name_en": "Hanging Man",
+      "method": "HangingMan",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "上吊线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HARAMI",
+      "abbr_en": "HARAMI",
+      "name_en": "Harami Pattern",
+      "method": "Harami",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "孕线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HARAMICROSS",
+      "abbr_en": "HARAMICROSS",
+      "name_en": "Harami Cross Pattern",
+      "method": "HaramiCross",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "十字孕线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HIGHWAVE",
+      "abbr_en": "HIGHWAVE",
+      "name_en": "High-Wave Candle",
+      "method": "HighWave",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "高浪线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HIKKAKE",
+      "abbr_en": "HIKKAKE",
+      "name_en": "Hikkake Pattern",
+      "method": "Hikkake",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear|PatternStrength"
+        }
+      ],
+      "name_cn": "陷阱形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HIKKAKEMODIFIED",
+      "abbr_en": "HIKKAKEMODIFIED",
+      "name_en": "Modified Hikkake Pattern",
+      "method": "HikkakeModified",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear|PatternStrength"
+        }
+      ],
+      "name_cn": "改良陷阱形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "HOMINGPIGEON",
+      "abbr_en": "HOMINGPIGEON",
+      "name_en": "Homing Pigeon",
+      "method": "HomingPigeon",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "归巢鸽",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "IDENTICALTHREECROWS",
+      "abbr_en": "IDENTICALTHREECROWS",
+      "name_en": "Identical Three Crows",
+      "method": "IdenticalThreeCrows",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "同形三乌鸦",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "INNECK",
+      "abbr_en": "INNECK",
+      "name_en": "In-Neck Pattern",
+      "method": "InNeck",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "颈内线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "INVERTEDHAMMER",
+      "abbr_en": "INVERTEDHAMMER",
+      "name_en": "Inverted Hammer",
+      "method": "InvertedHammer",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "Inverted 锤子线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "KICKING",
+      "abbr_en": "KICKING",
+      "name_en": "Kicking",
+      "method": "Kicking",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "反冲形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "KICKINGBYLENGTH",
+      "abbr_en": "KICKINGBYLENGTH",
+      "name_en": "Kicking - bull/bear determined by the longer marubozu",
+      "method": "KickingByLength",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "反冲形态（由更长光头光脚线判定多空）",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "LADDERBOTTOM",
+      "abbr_en": "LADDERBOTTOM",
+      "name_en": "Ladder Bottom",
+      "method": "LadderBottom",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "梯底",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "LONGLEGGEDDOJI",
+      "abbr_en": "LONGLEGGEDDOJI",
+      "name_en": "Long Legged Doji",
+      "method": "LongLeggedDoji",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "Long Legged 十字星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "LONGLINE",
+      "abbr_en": "LONGLINE",
+      "name_en": "Long Line Candle",
+      "method": "LongLine",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "长线蜡烛",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "MARUBOZU",
+      "abbr_en": "MARUBOZU",
+      "name_en": "Marubozu",
+      "method": "Marubozu",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "光头光脚线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "MATCHINGLOW",
+      "abbr_en": "MATCHINGLOW",
+      "name_en": "Matching Low",
+      "method": "MatchingLow",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "相同低位",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "MATHOLD",
+      "abbr_en": "MATHOLD",
+      "name_en": "Mat Hold",
+      "method": "MatHold",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "垫底形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "MORNINGDOJISTAR",
+      "abbr_en": "MORNINGDOJISTAR",
+      "name_en": "Morning Doji Star",
+      "method": "MorningDojiStar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "Morning 十字星 Star",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "MORNINGSTAR",
+      "abbr_en": "MORNINGSTAR",
+      "name_en": "Morning Star",
+      "method": "MorningStar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [
+        {
+          "key": "Penetration",
+          "desc": "Percentage of penetration of a candle within another candle"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "启明星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "ONNECK",
+      "abbr_en": "ONNECK",
+      "name_en": "On-Neck Pattern",
+      "method": "OnNeck",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "颈上线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "PIERCINGLINE",
+      "abbr_en": "PIERCINGLINE",
+      "name_en": "Piercing Line",
+      "method": "PiercingLine",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "刺透形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "RICKSHAWMAN",
+      "abbr_en": "RICKSHAWMAN",
+      "name_en": "Rickshaw Man",
+      "method": "RickshawMan",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "黄包车夫",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "RISINGFALLINGTHREEMETHODS",
+      "abbr_en": "RISINGFALLINGTHREEMETHODS",
+      "name_en": "Rising/Falling Three Methods",
+      "method": "RisingFallingThreeMethods",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "上升/下降三法",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "SEPARATINGLINES",
+      "abbr_en": "SEPARATINGLINES",
+      "name_en": "Separating Lines",
+      "method": "SeparatingLines",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "分离线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "SHOOTINGSTAR",
+      "abbr_en": "SHOOTINGSTAR",
+      "name_en": "Shooting Star",
+      "method": "ShootingStar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "流星线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "SHORTLINE",
+      "abbr_en": "SHORTLINE",
+      "name_en": "Short Line Candle",
+      "method": "ShortLine",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "短线蜡烛",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "SPINNINGTOP",
+      "abbr_en": "SPINNINGTOP",
+      "name_en": "Spinning Top",
+      "method": "SpinningTop",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "纺锤线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "STALLED",
+      "abbr_en": "STALLED",
+      "name_en": "Stalled Pattern",
+      "method": "Stalled",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "停滞形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "STICKSANDWICH",
+      "abbr_en": "STICKSANDWICH",
+      "name_en": "Stick Sandwich",
+      "method": "StickSandwich",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "夹心线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "TAKURILINE",
+      "abbr_en": "TAKURILINE",
+      "name_en": "Takuri Line",
+      "method": "TakuriLine",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "探水线",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "TASUKIGAP",
+      "abbr_en": "TASUKIGAP",
+      "name_en": "Tasuki Gap",
+      "method": "TasukiGap",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "塔苏基跳空",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THREEBLACKCROWS",
+      "abbr_en": "THREEBLACKCROWS",
+      "name_en": "Three Black Crows",
+      "method": "ThreeBlackCrows",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "三只乌鸦",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THREEINSIDE",
+      "abbr_en": "THREEINSIDE",
+      "name_en": "Three Inside Up/Down",
+      "method": "ThreeInside",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "三内升/三内降",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THREELINESTRIKE",
+      "abbr_en": "THREELINESTRIKE",
+      "name_en": "Three-Line Strike",
+      "method": "ThreeLineStrike",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "三线打击",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THREEOUTSIDE",
+      "abbr_en": "THREEOUTSIDE",
+      "name_en": "Three Outside Up/Down",
+      "method": "ThreeOutside",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "三外升/三外降",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THREESTARSINSOUTH",
+      "abbr_en": "THREESTARSINSOUTH",
+      "name_en": "Three Stars In The South",
+      "method": "ThreeStarsInSouth",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "南方三星",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THREEWHITESOLDIERS",
+      "abbr_en": "THREEWHITESOLDIERS",
+      "name_en": "Three Advancing White Soldiers",
+      "method": "ThreeWhiteSoldiers",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "三白兵",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "THRUSTING",
+      "abbr_en": "THRUSTING",
+      "name_en": "Thrusting Pattern",
+      "method": "Thrusting",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "插入形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "TRISTAR",
+      "abbr_en": "TRISTAR",
+      "name_en": "Tristar Pattern",
+      "method": "Tristar",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "三星形态",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "TWOCROWS",
+      "abbr_en": "TWOCROWS",
+      "name_en": "Two Crows",
+      "method": "TwoCrows",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "两只乌鸦",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "UNIQUETHREERIVER",
+      "abbr_en": "UNIQUETHREERIVER",
+      "name_en": "Unique Three River",
+      "method": "UniqueThreeRiver",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "独特三河",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "UPDOWNSIDEGAPTHREEMETHODS",
+      "abbr_en": "UPDOWNSIDEGAPTHREEMETHODS",
+      "name_en": "Upside/Downside Gap Three Methods",
+      "method": "UpDownSideGapThreeMethods",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "上升/下降跳空三法",
+      "indicator_type": "Pattern Recognition"
+    },
+    {
+      "code": "UPSIDEGAPTWOCROWS",
+      "abbr_en": "UPSIDEGAPTWOCROWS",
+      "name_en": "Upside Gap Two Crows",
+      "method": "UpsideGapTwoCrows",
+      "group": "Pattern Recognition",
+      "inputs": {
+        "shape": "OHLC",
+        "series": [
+          "Open",
+          "High",
+          "Low",
+          "Close"
+        ]
+      },
+      "options": [],
+      "outputs": [
+        {
+          "key": "IntType",
+          "hint": "PatternBullBear"
+        }
+      ],
+      "name_cn": "上升跳空两只乌鸦",
+      "indicator_type": "Pattern Recognition"
     }
   ]
 }

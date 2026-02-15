@@ -14,6 +14,10 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "klinecharts": ["./vendors/klinecharts_local/dist/index.d.ts"]
+    },
     "jsx": "react-jsx",
 
     /* Linting */

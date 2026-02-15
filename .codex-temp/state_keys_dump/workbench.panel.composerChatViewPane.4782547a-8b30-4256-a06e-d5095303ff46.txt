@@ -1,0 +1,1 @@
+{"workbench.panel.aichat.view.5cedc752-f665-458e-a8cb-681b234f7c18":{"collapsed":false,"isHidden":false},"workbench.panel.aichat.view.41706cff-eee8-40e6-a788-47c99f8db1df":{"collapsed":false,"isHidden":false}}

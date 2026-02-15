@@ -1,0 +1,1 @@
+[{"id":"workbench.panel.markers","visible":true},{"id":"workbench.panel.output","visible":true},{"id":"workbench.panel.repl","visible":true},{"id":"terminal","visible":true},{"id":"workbench.panel.testResults","visible":false},{"id":"~remote.forwardedPortsContainer","visible":true},{"id":"refactorPreview","visible":false}]

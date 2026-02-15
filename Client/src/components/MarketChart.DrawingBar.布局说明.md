@@ -282,3 +282,24 @@ CSS 变量示例：`--klinecharts-pro-border-color`、`--klinecharts-pro-backgro
 - [ ] 主题变量与 hover/selected 样式一致。
 
 按上述 DOM、分组、按键、SVG 与 CSS 逐项实现即可完整复刻绘图栏。
+
+---
+
+## TA Indicator Integration (talib-web)
+
+- `Client` installs `talib-web` (`npm install talib-web`).
+- WASM is self-hosted at `Client/public/talib.wasm`.
+- Runtime init is done by `ensureTalibReady("/talib.wasm")` in `Client/src/lib/talibInit.ts`.
+- KLine custom indicators are batch-registered in `Client/src/lib/registerTalibIndicators.ts`.
+- Registered indicator names use `ta_` prefix so they are distinguishable from built-ins.
+- Registration is metadata-driven:
+  - reads `Client/public/talib_indicators_config.json` (backend-aligned 160 indicators)
+  - reads `Client/public/talib_web_api_meta.json` (talib-web function metadata)
+  - maps backend indicator code/method to talib-web API and registers all resolvable items
+- `MarketChart` waits for `registerTalibIndicators()` before creating indicator instances, then uses `ta_` names in the indicator panel.
+- Indicator selection UI is now a dedicated dialog in `MarketChart`:
+  - open from toolbar `指标` button
+  - supports keyword search (`name/code`)
+  - supports pane filter (`全部/主图/副图`)
+  - supports category filter (grouped by TA indicator group)
+  - supports quick `关闭副图`
