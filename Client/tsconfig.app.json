@@ -16,7 +16,10 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "klinecharts": ["./vendors/klinecharts_local/dist/index.d.ts"]
+      "klinecharts": [
+        "./vendors/klinecharts_local/dist/index.d.ts",
+        "./vendors/klinecharts_local/src/index.ts"
+      ]
     },
     "jsx": "react-jsx",
 
