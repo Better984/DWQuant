@@ -242,7 +242,7 @@ const Y_AXIS_OPTIONS = [
 ] as const;
 
 const TIMEZONE_OPTIONS = [
-  { label: "鏈湴", value: "local" },
+  { label: "本地", value: "local" },
   { label: "UTC", value: "UTC" },
   { label: "Shanghai", value: "Asia/Shanghai" },
   { label: "Berlin", value: "Europe/Berlin" },
@@ -314,10 +314,10 @@ const POLYGON_TOOLS: DrawingToolItem[] = [
 ];
 
 const FIBONACCI_TOOLS: DrawingToolItem[] = [
-  { id: "fibonacciLine", label: "鏂愭尝閭ｅ鍥炶皟鐩寸嚎", overlay: "fibonacciLine", icon: FibonacciLineIcon },
-  { id: "fibonacciSegment", label: "鏂愭尝閭ｅ鍥炶皟绾挎", overlay: "fibonacciSegment", icon: FibonacciSegmentIcon },
-  { id: "fibonacciCircle", label: "鏂愭尝閭ｅ鍦嗙幆", overlay: "fibonacciCircle", icon: FibonacciCircleIcon },
-  { id: "fibonacciSpiral", label: "鏂愭尝閭ｅ铻烘棆", overlay: "fibonacciSpiral", icon: FibonacciSpiralIcon },
+  { id: "fibonacciLine", label: "斐波那契回撤直线", overlay: "fibonacciLine", icon: FibonacciLineIcon },
+  { id: "fibonacciSegment", label: "斐波那契回撤线段", overlay: "fibonacciSegment", icon: FibonacciSegmentIcon },
+  { id: "fibonacciCircle", label: "斐波那契圆环", overlay: "fibonacciCircle", icon: FibonacciCircleIcon },
+  { id: "fibonacciSpiral", label: "斐波那契螺旋", overlay: "fibonacciSpiral", icon: FibonacciSpiralIcon },
   {
     id: "fibonacciSpeedResistanceFan",
     label: "Fibonacci Fan",
@@ -394,14 +394,14 @@ const INDICATOR_DEFAULT_PARAMS: Record<string, number[]> = {
 };
 
 const INDICATOR_PARAM_LABELS: Record<string, string[]> = {
-  MA: ["鍛ㄦ湡1", "鍛ㄦ湡2", "鍛ㄦ湡3"],
-  EMA: ["鍛ㄦ湡1", "鍛ㄦ湡2", "鍛ㄦ湡3"],
-  BOLL: ["鍛ㄦ湡", "鍊嶆暟"],
-  SAR: ["鍒濆", "姝ラ暱", "涓婇檺"],
-  VOL: ["鍧囩嚎1", "鍧囩嚎2", "鍧囩嚎3"],
-  MACD: ["蹇嚎", "鎱㈢嚎", "淇″彿"],
-  KDJ: ["鍛ㄦ湡", "K", "D"],
-  RSI: ["鍛ㄦ湡1", "鍛ㄦ湡2", "鍛ㄦ湡3"],
+  MA: ["周期1", "周期2", "周期3"],
+  EMA: ["周期1", "周期2", "周期3"],
+  BOLL: ["周期", "倍数"],
+  SAR: ["初始", "步长", "上限"],
+  VOL: ["均线1", "均线2", "均线3"],
+  MACD: ["快线", "慢线", "信号"],
+  KDJ: ["周期", "K", "D"],
+  RSI: ["周期1", "周期2", "周期3"],
 };
 
 const RESOLUTION_TO_TIMEFRAME: Record<string, string> = {
@@ -660,7 +660,7 @@ function getIndicatorParamLabels(name: string, count: number): string[] {
   if (count <= 0) {
     return [];
   }
-  return Array.from({ length: count }, (_, index) => labels[index] ?? `鍙傛暟${index + 1}`);
+  return Array.from({ length: count }, (_, index) => labels[index] ?? `参数${index + 1}`);
 }
 
 function buildFallbackParamDefinitions(name: string, values: number[]): TalibIndicatorParamDefinition[] {
@@ -1127,7 +1127,8 @@ const MarketChart: React.FC<MarketChartProps> = ({
       chartRef.current = null;
       dispose(chart);
     };
-  // 鍥捐〃瀹炰緥鍙垵濮嬪寲涓€娆★紝鍚庣画閫氳繃鐙珛 effect 鍚屾鏍峰紡/璇█/鏃跺尯锛岄伩鍏嶉噸澶嶉攢姣侀噸寤恒€?  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // 图表实例只初始化一次，后续通过独立 effect 同步样式/语言/时区，避免重复销毁重建
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearFocusOverlays]);
 
   useEffect(() => {
@@ -2164,13 +2165,13 @@ const MarketChart: React.FC<MarketChartProps> = ({
                 type="button"
                 className={`market-chart-btn market-chart-btn-period-trigger ${intervalMoreOpen ? "is-active" : ""}`}
                 onClick={() => setIntervalMoreOpen((prev) => !prev)}
-                title="閫夋嫨鍛ㄦ湡"
+                title="选择周期"
               >
-                鍛ㄦ湡
+                周期
               </button>
               {intervalMoreOpen && (
                 <div className="market-chart-popover-panel market-chart-period-selector">
-                  <div className="market-chart-period-selector-title">閫夋嫨鍛ㄦ湡</div>
+                  <div className="market-chart-period-selector-title">选择周期</div>
                   {INTERVAL_CATEGORIES.map((cat) => (
                     <div key={cat.id} className="market-chart-period-category">
                       <span className="market-chart-period-category-label">{cat.label}</span>
@@ -2200,7 +2201,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                     </div>
                   ))}
                   {selectedIntervals.length >= MAX_SELECTED_INTERVALS && (
-                    <div className="market-chart-period-hint">鏈€澶氶€夋嫨鍏釜</div>
+                    <div className="market-chart-period-hint">最多选择五个</div>
                   )}
                 </div>
               )}
@@ -2217,7 +2218,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                 className={`market-chart-btn market-chart-btn-more ${rightMoreOpen ? "is-active" : ""}`}
                 onClick={() => setRightMoreOpen((prev) => !prev)}
               >
-                鏇村
+                更多
               </button>
               {rightMoreOpen && (
                 <div className="market-chart-popover-panel market-chart-popover-panel-sm market-chart-right-more">
@@ -2228,7 +2229,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                       openIndicatorDialog();
                     }}
                   >
-                    鎸囨爣
+                    指标
                   </button>
                   <button
                     type="button"
@@ -2238,7 +2239,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                       setRightMoreOpen(false);
                     }}
                   >
-                    鏃跺尯
+                    时区
                   </button>
                   <button
                     type="button"
@@ -2248,7 +2249,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                       setRightMoreOpen(false);
                     }}
                   >
-                    璁剧疆
+                    设置
                   </button>
                   <button
                     type="button"
@@ -2258,7 +2259,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                       setRightMoreOpen(false);
                     }}
                   >
-                    鎴浘
+                    截图
                   </button>
                   <button
                     type="button"
@@ -2281,7 +2282,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                   className={`market-chart-btn ${indicatorDialogOpen ? "is-active" : ""}`}
                   onClick={openIndicatorDialog}
                 >
-                  鎸囨爣
+                  指标
                 </button>
               </div>
 
@@ -2291,7 +2292,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                   className={`market-chart-btn ${activeToolbarPanel === "timezone" ? "is-active" : ""}`}
                   onClick={() => handleToggleToolbarPanel("timezone")}
                 >
-                  鏃跺尯
+                  时区
                 </button>
               </div>
 
@@ -2301,12 +2302,12 @@ const MarketChart: React.FC<MarketChartProps> = ({
                   className={`market-chart-btn ${activeToolbarPanel === "settings" ? "is-active" : ""}`}
                   onClick={() => handleToggleToolbarPanel("settings")}
                 >
-                  璁剧疆
+                  设置
                 </button>
               </div>
 
               <button type="button" className="market-chart-btn" onClick={handleScreenshot}>
-                鎴浘
+                截图
               </button>
               <button type="button" className="market-chart-btn" onClick={handleToggleFullscreen}>
                 {isFullscreen ? "退出全屏" : "全屏"}
@@ -2334,10 +2335,10 @@ const MarketChart: React.FC<MarketChartProps> = ({
             {activeToolbarPanel === "settings" && (
               <div className="market-chart-popover-panel market-chart-popover-panel-settings">
                 <div className="market-chart-panel-section">
-                  <div className="market-chart-panel-title">鏄剧ず璁剧疆</div>
+                  <div className="market-chart-panel-title">显示设置</div>
                   <div className="market-chart-toggle-list">
                     <div className="market-chart-toggle-row" onClick={handleToggleShowLatest} role="button" tabIndex={0}>
-                      <span className="market-chart-toggle-label">鏈€鏂颁环</span>
+                      <span className="market-chart-toggle-label">最新价</span>
                       <button
                         type="button"
                         role="switch"
@@ -2352,7 +2353,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                       </button>
                     </div>
                     <div className="market-chart-toggle-row" onClick={handleToggleShowHigh} role="button" tabIndex={0}>
-                      <span className="market-chart-toggle-label">鏈€楂樹环</span>
+                      <span className="market-chart-toggle-label">最高价</span>
                       <button
                         type="button"
                         role="switch"
@@ -2367,7 +2368,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                       </button>
                     </div>
                     <div className="market-chart-toggle-row" onClick={handleToggleShowLow} role="button" tabIndex={0}>
-                      <span className="market-chart-toggle-label">鏈€浣庝环</span>
+                      <span className="market-chart-toggle-label">最低价</span>
                       <button
                         type="button"
                         role="switch"
@@ -2472,7 +2473,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                 <button
                   type="button"
                   className="icon-arrow"
-                  aria-label={`灞曞紑${group.label}`}
+                  aria-label={`展开${group.label}`}
                   onClick={() => handleToggleDrawingMenu(group.id)}
                 >
                   <DrawingMenuArrow expanded={expanded} />
@@ -2502,7 +2503,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
           <div className={`item ${expandedDrawingMenu === "magnet" ? "is-expanded" : ""}`}>
             <span
               className={`icon-overlay ${isMagnetEnabled ? "selected" : ""}`}
-              title="纾佸惛"
+              title="磁吸"
               onClick={handleToggleMagnetEnabled}
             >
               <MagnetIcon />
@@ -2510,7 +2511,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
             <button
               type="button"
               className="icon-arrow"
-              aria-label="灞曞紑纾佸惛妯″紡"
+              aria-label="展开磁吸模式"
               onClick={() => handleToggleDrawingMenu("magnet")}
             >
               <DrawingMenuArrow expanded={expandedDrawingMenu === "magnet"} />
@@ -2536,7 +2537,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
           <div className="item">
             <span
               className={`icon-overlay ${isDrawingLocked ? "selected" : ""}`}
-              title={isDrawingLocked ? "瑙ｉ攣缁樺浘" : "閿佸畾缁樺浘"}
+              title={isDrawingLocked ? "解锁绘图" : "锁定绘图"}
               onClick={handleToggleDrawingLock}
             >
               <DrawingLockIcon />
@@ -2546,7 +2547,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
           <div className="item">
             <span
               className={`icon-overlay ${!isDrawingVisible ? "selected" : ""}`}
-              title={isDrawingVisible ? "闅愯棌鍏ㄩ儴缁樺浘" : "鏄剧ず鍏ㄩ儴缁樺浘"}
+              title={isDrawingVisible ? "隐藏全部绘图" : "显示全部绘图"}
               onClick={handleToggleDrawingVisible}
             >
               <DrawingVisibilityIcon />
@@ -2554,7 +2555,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
           </div>
 
           <div className="item">
-            <span className="icon-overlay" title="娓呯┖缁樺浘" onClick={handleClearDrawings}>
+            <span className="icon-overlay" title="清空绘图" onClick={handleClearDrawings}>
               <DrawingClearAllIcon />
             </span>
           </div>

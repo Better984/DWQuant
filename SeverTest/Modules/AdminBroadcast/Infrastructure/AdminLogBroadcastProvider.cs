@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 namespace ServerTest.Modules.AdminBroadcast.Infrastructure
 {
     /// <summary>
-    /// 日志提供者，用于拦截日志并推送给管理�?
+    /// 日志提供者，用于拦截日志并推送给管理员
     /// </summary>
     public sealed class AdminLogBroadcastProvider : ILoggerProvider
     {
@@ -97,13 +97,13 @@ namespace ServerTest.Modules.AdminBroadcast.Infrastructure
                         }
                         catch
                         {
-                            // 静默失败，避免影响日志记�?
+                            // 静默失败，避免影响日志记录
                         }
                     });
                 }
                 catch
                 {
-                    // 静默失败，避免影响日志记�?
+                    // 静默失败，避免影响日志记录
                 }
             }
         }
