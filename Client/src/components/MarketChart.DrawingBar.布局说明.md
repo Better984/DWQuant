@@ -31,6 +31,8 @@
   <div class="item">...</div>
   <!-- 第 5 组：形态（波浪） -->
   <div class="item">...</div>
+  <!-- 第 6 组：风险区（多/空止盈止损） -->
+  <div class="item">...</div>
 
   <span class="split-line"></span>
 
@@ -59,11 +61,12 @@
 | 3 | polygon | 绘图 | 圆、矩形、平行四边形、三角形、十字星 | 是 |
 | 4 | fibonacci | 绘图 | 斐波那契与江恩箱类工具 | 是 |
 | 5 | wave | 形态 | 波浪形态（XABCD、ABCD、三/五/八浪等） | 是 |
+| 6 | risk | 风险区 | 多/空头止盈止损区间（自动预设 TP/SL，可拖拽调整） | 是 |
 | — | — | **分割线** | 仅视觉分隔 | 否 |
-| 6 | magnet | （磁吸） | 弱磁/强磁吸附到 K 线或关键点 | 是 |
-| 7 | — | 锁定 | 锁定/解锁绘图，防止误选误移 | 否 |
-| 8 | — | 显示/隐藏 | 一键显示或隐藏所有绘图 | 否 |
-| 9 | — | 清除 | 删除图表上全部绘图 | 否 |
+| 7 | magnet | （磁吸） | 弱磁/强磁吸附到 K 线或关键点 | 是 |
+| 8 | — | 锁定 | 锁定/解锁绘图，防止误选误移 | 否 |
+| 9 | — | 显示/隐藏 | 一键显示或隐藏所有绘图 | 否 |
+| 10 | — | 清除 | 删除图表上全部绘图 | 否 |
 
 ---
 
@@ -128,12 +131,33 @@
 | eightWaves | 八浪 | eightWaves | 22_wave_eight.svg |
 | anyWaves | 任意浪 | anyWaves | 23_wave_any.svg |
 
-### 4.6 分割线（split-line）
+### 4.6 风险区（risk）
+
+| 工具 id | 中文名 | overlay | SVG 文件名 |
+|---------|--------|---------|-------------|
+| riskRewardLong | 多头止盈止损区间 | riskRewardLong | 24_risk_reward_long.svg |
+| riskRewardShort | 空头止盈止损区间 | riskRewardShort | 25_risk_reward_short.svg |
+
+- 点击主图标后与其它绘图工具一致，直接进入画图模式（不弹窗）。
+- 用户先在图上选择区间与开仓锚点，系统自动生成默认 TP/SL（可继续拖动调整）。
+- 默认预设：止盈与止损均为开仓价的 1% 偏移（1x 杠杆基准）。
+- 文本显示规则：`开仓/止盈/止损/真实区间` 仅在鼠标悬停该风险区或该风险区处于选中状态时显示；未悬停且未选中时隐藏。
+- 真实交易区间实时计算规则：
+  - 开始点：在已选区间内，第一根触及开仓价的 K 线（若未触及则不生成真实区间）。
+  - 结束点：优先取触及止盈/止损的 K 线；若未触发，则取区间最后一根 K 线收盘价。
+  - 以上结果在拖动区间、开仓价、TP/SL 时会实时重算并更新。
+- 区域颜色标准：
+  - 止盈计划区：`rgba(34, 197, 94, 0.16)`
+  - 止损计划区：`rgba(239, 68, 68, 0.20)`
+  - 已实现盈利区：`rgba(21, 128, 61, 0.32)`
+  - 已实现亏损区：`rgba(220, 38, 38, 0.32)`
+
+### 4.7 分割线（split-line）
 
 - 仅一个 `<span class="split-line">`，无点击逻辑。
 - 样式：宽 100%，高 1px，背景为边框色，上边距 8px。
 
-### 4.7 磁吸（magnet）
+### 4.8 磁吸（magnet）
 
 - **主图标**：根据 `magnetMode` 与 `isMagnetEnabled` 显示四者之一：
   - 弱磁关：magnet-weak-off.svg
@@ -146,19 +170,19 @@
   - 强磁模式（MagnetStrongOffIcon）
 - 选中项在 `.icon-overlay` 上带 `.selected`。
 
-### 4.8 锁定
+### 4.9 锁定
 
 - **主图标**：锁定用 drawing-lock-on.svg，解锁用 drawing-lock-off.svg。
 - **点击**：切换 `isDrawingLocked`（锁定后不可选/移绘图）。
 - 无展开列表。
 
-### 4.9 显示/隐藏所有绘图
+### 4.10 显示/隐藏所有绘图
 
 - **主图标**：当前为「显示」时用 drawing-hide-all.svg（表示可执行「隐藏」）；当前为「隐藏」时用 drawing-show-all.svg（表示可执行「显示」）。
 - **点击**：切换 `isDrawingVisible`，并调用图表 API 显示/隐藏所有绘图。
 - 隐藏状态时该按钮带 `.selected`。
 
-### 4.10 清除所有绘图
+### 4.11 清除所有绘图
 
 - **主图标**：drawing-clear-all.svg。
 - **点击**：调用 `handleClearDrawings`，删除图表上全部绘图。
@@ -273,15 +297,27 @@ CSS 变量示例：`--klinecharts-pro-border-color`、`--klinecharts-pro-backgro
 ## 8. 复刻检查清单
 
 - [ ] 容器：52px 宽、全高、左侧边框与背景。
-- [ ] 5 个绘图工具组，每组：主图标 + 右箭头，展开后为带标签的列表。
+- [ ] 6 个绘图工具组，每组：主图标 + 右箭头，展开后为带标签的列表。
 - [ ] 分割线。
 - [ ] 磁吸（4 个 SVG 切换）、锁定（2 个 SVG 切换）、显示/隐藏（2 个 SVG 切换）、清除（1 个 SVG）。
-- [ ] 线段 10 项、通道 2 项、形状 5 项、斐波 7 项、波浪 6 项，id/overlay/文件名与上表一致。
+- [ ] 线段 10 项、通道 2 项、形状 5 项、斐波 7 项、波浪 6 项、风险区 2 项，id/overlay/文件名与上表一致。
 - [ ] 十字星为内联 SVG，无文件。
 - [ ] 列表最大高度与 is-up 方向逻辑。
 - [ ] 主题变量与 hover/selected 样式一致。
 
 按上述 DOM、分组、按键、SVG 与 CSS 逐项实现即可完整复刻绘图栏。
+
+---
+
+## 9. 风险区 API（MarketChart）
+
+- `MarketChart` 新增可选属性：`onRiskZoneApiReady?: (api: MarketChartRiskZoneApi | null) => void`
+- 可暴露的方法：
+  - `addRiskZone(input)`：新增一个风险区，返回 overlay id
+  - `replaceRiskZone(id, input)`：删除旧风险区并按新参数重建，返回新 overlay id
+  - `removeRiskZone(id)`：删除指定风险区
+  - `clearRiskZones()`：清空全部风险区
+  - `listRiskZones()`：列出当前图表上的风险区数据（含创建时间）
 
 ---
 
