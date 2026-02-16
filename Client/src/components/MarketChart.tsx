@@ -1371,8 +1371,8 @@ const MarketChart: React.FC<MarketChartProps> = ({
         if (disposed || controller.signal.aborted) {
           return;
         }
-        const message = error instanceof Error ? error.message : "鍔犺浇鍘嗗彶琛屾儏澶辫触";
-        setLoadError(message || "鍔犺浇鍘嗗彶琛屾儏澶辫触");
+        const message = error instanceof Error ? error.message : "加载历史行情失败";
+        setLoadError(message || "加载历史行情失败");
       } finally {
         if (!disposed && version === dataVersionRef.current) {
           setLoading(false);
@@ -2563,7 +2563,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
 
         <div className="market-chart-stage">
           <div ref={containerRef} className="market-chart-container" />
-          {loading && <div className="market-chart-state">鍔犺浇鍘嗗彶琛屾儏...</div>}
+          {loading && <div className="market-chart-state">加载历史行情...</div>}
           {!loading && loadError && <div className="market-chart-state is-error">{loadError}</div>}
         </div>
       </div>
@@ -2763,4 +2763,3 @@ const MarketChart: React.FC<MarketChartProps> = ({
 };
 
 export default MarketChart;
-
