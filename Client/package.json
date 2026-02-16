@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "ensure:klinecharts-local": "node ./scripts/ensure-local-klinecharts.mjs",
+    "dev": "npm run ensure:klinecharts-local && vite",
+    "build": "npm run ensure:klinecharts-local && tsc -b && vite build",
     "postinstall": "patch-package",
     "lint": "eslint .",
     "preview": "vite preview"
