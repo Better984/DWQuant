@@ -43,6 +43,8 @@ import WaveThreeIcon from "../assets/KLineCharts/20_wave_three.svg?react";
 import WaveFiveIcon from "../assets/KLineCharts/21_wave_five.svg?react";
 import WaveEightIcon from "../assets/KLineCharts/22_wave_eight.svg?react";
 import WaveAnyIcon from "../assets/KLineCharts/23_wave_any.svg?react";
+import RiskRewardLongIcon from "../assets/KLineCharts/24_risk_reward_long.svg?react";
+import RiskRewardShortIcon from "../assets/KLineCharts/25_risk_reward_short.svg?react";
 import MagnetWeakOffIcon from "../assets/KLineCharts/magnet-weak-off.svg?react";
 import MagnetWeakOnIcon from "../assets/KLineCharts/magnet-weak-on.svg?react";
 import MagnetStrongOffIcon from "../assets/KLineCharts/magnet-strong-off.svg?react";
@@ -112,7 +114,7 @@ type IntervalOption = {
 };
 
 type ToolIconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
-type DrawingToolGroupId = "singleLine" | "moreLine" | "polygon" | "fibonacci" | "wave";
+type DrawingToolGroupId = "singleLine" | "moreLine" | "polygon" | "fibonacci" | "wave" | "risk";
 type ExpandableDrawingMenuId = DrawingToolGroupId | "magnet";
 type DrawingListDirection = "down" | "up";
 type MagnetMode = "weak" | "strong";
@@ -337,12 +339,18 @@ const WAVE_TOOLS: DrawingToolItem[] = [
   { id: "anyWaves", label: "Any Waves", overlay: "anyWaves", icon: WaveAnyIcon },
 ];
 
+const RISK_TOOLS: DrawingToolItem[] = [
+  { id: "riskRewardLong", label: "多头止盈止损区间", overlay: "riskRewardLong", icon: RiskRewardLongIcon },
+  { id: "riskRewardShort", label: "空头止盈止损区间", overlay: "riskRewardShort", icon: RiskRewardShortIcon },
+];
+
 const DRAWING_TOOL_GROUPS: DrawingToolGroup[] = [
   { id: "singleLine", label: "Line Tools", tools: SINGLE_LINE_TOOLS },
   { id: "moreLine", label: "Channel Tools", tools: MORE_LINE_TOOLS },
   { id: "polygon", label: "Shapes", tools: POLYGON_TOOLS },
   { id: "fibonacci", label: "Fibonacci", tools: FIBONACCI_TOOLS },
   { id: "wave", label: "Waves", tools: WAVE_TOOLS },
+  { id: "risk", label: "风险区", tools: RISK_TOOLS },
 ];
 
 const DRAWING_TOOL_GROUP_BY_ID: Record<DrawingToolGroupId, DrawingToolGroup> = {
@@ -351,6 +359,7 @@ const DRAWING_TOOL_GROUP_BY_ID: Record<DrawingToolGroupId, DrawingToolGroup> = {
   polygon: DRAWING_TOOL_GROUPS[2],
   fibonacci: DRAWING_TOOL_GROUPS[3],
   wave: DRAWING_TOOL_GROUPS[4],
+  risk: DRAWING_TOOL_GROUPS[5],
 };
 
 const DRAWING_GROUP_DEFAULT_TOOL_ID: Record<DrawingToolGroupId, string> = {
@@ -359,6 +368,7 @@ const DRAWING_GROUP_DEFAULT_TOOL_ID: Record<DrawingToolGroupId, string> = {
   polygon: POLYGON_TOOLS[0].id,
   fibonacci: FIBONACCI_TOOLS[0].id,
   wave: WAVE_TOOLS[0].id,
+  risk: RISK_TOOLS[0].id,
 };
 
 const MAGNET_OPTIONS: Array<{ mode: MagnetMode; label: string; icon: ToolIconComponent }> = [
@@ -373,6 +383,7 @@ const DEFAULT_SELECTED_DRAWING_TOOLS: Record<DrawingToolGroupId, string> = {
   polygon: DRAWING_GROUP_DEFAULT_TOOL_ID.polygon,
   fibonacci: DRAWING_GROUP_DEFAULT_TOOL_ID.fibonacci,
   wave: DRAWING_GROUP_DEFAULT_TOOL_ID.wave,
+  risk: DRAWING_GROUP_DEFAULT_TOOL_ID.risk,
 };
 const DRAWING_TOOL_ITEM_BY_ID = new Map<string, DrawingToolItem>();
 for (const group of DRAWING_TOOL_GROUPS) {
@@ -1855,12 +1866,23 @@ const MarketChart: React.FC<MarketChartProps> = ({
       if (!chart) {
         return;
       }
-      const created = chart.createOverlay({
+      const payload: Record<string, unknown> = {
         name: overlay,
         lock: isDrawingLocked,
         visible: isDrawingVisible,
         mode: drawingMode,
-      });
+      };
+      if (overlay === "riskRewardLong" || overlay === "riskRewardShort") {
+        // 风险区绘图需要实时读取当前K线，供真实交易区间自动计算。
+        const direction = overlay === "riskRewardLong" ? "long" : "short";
+        const getBars = () => chart.getDataList();
+        payload.extendData = {
+          direction,
+          getBars,
+          bars: getBars(),
+        };
+      }
+      const created = chart.createOverlay(payload as never);
       for (const id of normalizeOverlayIds(created as string | null | Array<string | null>)) {
         drawingOverlayIdsRef.current.add(id);
       }
@@ -2001,6 +2023,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
         DRAWING_TOOL_ITEM_BY_ID.get(selectedDrawingTools.fibonacci) ??
         DRAWING_TOOL_GROUP_BY_ID.fibonacci.tools[0],
       wave: DRAWING_TOOL_ITEM_BY_ID.get(selectedDrawingTools.wave) ?? DRAWING_TOOL_GROUP_BY_ID.wave.tools[0],
+      risk: DRAWING_TOOL_ITEM_BY_ID.get(selectedDrawingTools.risk) ?? DRAWING_TOOL_GROUP_BY_ID.risk.tools[0],
     }),
     [selectedDrawingTools]
   );
