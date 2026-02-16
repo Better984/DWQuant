@@ -18,17 +18,20 @@ namespace ServerTest.Controllers
         private readonly AccountRepository _accountRepository;
         private readonly JwtService _jwtService;
         private readonly AuthTokenService _tokenService;
+        private readonly AccountSessionKickService _sessionKickService;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
             AccountRepository accountRepository,
             JwtService jwtService,
             AuthTokenService tokenService,
+            AccountSessionKickService sessionKickService,
             ILogger<AuthController> logger)
         {
             _accountRepository = accountRepository ?? throw new ArgumentNullException(nameof(accountRepository));
             _jwtService = jwtService;
             _tokenService = tokenService;
+            _sessionKickService = sessionKickService ?? throw new ArgumentNullException(nameof(sessionKickService));
             _logger = logger;
         }
 
@@ -176,12 +179,24 @@ namespace ServerTest.Controllers
 
                 var role = account.Role;
                 var uidString = account.Uid.ToString();
+                var loginSystem = AuthTokenService.NormalizeSystem(payload.System);
                 var token = _jwtService.GenerateToken(uidString, payload.Email);
-                await _tokenService.StoreTokenAsync(uidString, token, TimeSpan.FromDays(30));
+                var tokenStoreResult = await _tokenService.StoreTokenAsync(uidString, loginSystem, token, TimeSpan.FromDays(30))
+                    .ConfigureAwait(false);
+                var kickedLocalCount = await _sessionKickService
+                    .KickByUserSystemAsync(uidString, loginSystem, HttpContext.RequestAborted)
+                    .ConfigureAwait(false);
+                var kickedOtherSession = tokenStoreResult.ReplacedExisting || kickedLocalCount > 0;
 
                 await _accountRepository.UpdateLastLoginAsync(account.Uid).ConfigureAwait(false);
 
-                return Ok(ApiResponse<object>.Ok(new { token, role }, "登录成功"));
+                return Ok(ApiResponse<object>.Ok(new
+                {
+                    token,
+                    role,
+                    system = loginSystem,
+                    kickedOtherSession
+                }, kickedOtherSession ? "登录成功，另一台同类型设备已下线" : "登录成功"));
             }
             catch (Exception ex)
             {

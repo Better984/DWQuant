@@ -1,12 +1,12 @@
 /* SnowUI PeopleList Component - 基于 Figma 设计稿 */
 
-.snowui-people-list {
+.ui-people-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.snowui-people-list__item {
+.ui-people-list__item {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -16,19 +16,19 @@
   transition: background-color 0.2s ease;
 }
 
-.snowui-people-list__item:hover {
+.ui-people-list__item:hover {
   background-color: rgba(0, 0, 0, 0.02);
 }
 
-.snowui-people-list__item[role="button"] {
+.ui-people-list__item[role="button"] {
   cursor: pointer;
 }
 
-.snowui-people-list__item[role="button"]:active {
+.ui-people-list__item[role="button"]:active {
   background-color: rgba(0, 0, 0, 0.04);
 }
 
-.snowui-people-list__content {
+.ui-people-list__content {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -36,7 +36,7 @@
   min-width: 0;
 }
 
-.snowui-people-list__name {
+.ui-people-list__name {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-weight: 500;
   font-size: 14px;
@@ -48,7 +48,7 @@
   white-space: nowrap;
 }
 
-.snowui-people-list__description {
+.ui-people-list__description {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-weight: 400;
   font-size: 12px;

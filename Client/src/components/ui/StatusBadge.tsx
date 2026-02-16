@@ -21,10 +21,10 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   className = '',
 }) => {
   const badgeClasses = [
-    'snowui-status-badge',
-    `snowui-status-badge--${color}`,
-    `snowui-status-badge--${size}`,
-    `snowui-status-badge--${variant}`,
+    'ui-status-badge',
+    `ui-status-badge--${color}`,
+    `ui-status-badge--${size}`,
+    `ui-status-badge--${variant}`,
     className,
   ]
     .filter(Boolean)
@@ -95,15 +95,15 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({
   return (
     <div className={badgeClasses}>
       {variant === 'dot' && (
-        <div className="snowui-status-badge__dot">{dotIcon}</div>
+        <div className="ui-status-badge__dot">{dotIcon}</div>
       )}
       {variant === 'background' && (
         <div 
-          className="snowui-status-badge__background" 
+          className="ui-status-badge__background" 
           style={{ backgroundColor }} 
         />
       )}
-      <span className="snowui-status-badge__label">{label}</span>
+      <span className="ui-status-badge__label">{label}</span>
     </div>
   );
 };

@@ -17,9 +17,9 @@ const SelectItem: React.FC<SelectItemProps> = ({
   className = '',
 }) => {
   const itemClasses = [
-    'snowui-select-item',
-    selected ? 'snowui-select-item--selected' : '',
-    disabled ? 'snowui-select-item--disabled' : '',
+    'ui-select-item',
+    selected ? 'ui-select-item--selected' : '',
+    disabled ? 'ui-select-item--disabled' : '',
     className,
   ]
     .filter(Boolean)
@@ -40,7 +40,7 @@ const SelectItem: React.FC<SelectItemProps> = ({
         }
       }}
     >
-      <span className="snowui-select-item__text">{children}</span>
+      <span className="ui-select-item__text">{children}</span>
       {selected && (
         <svg
           width="24"
@@ -48,7 +48,7 @@ const SelectItem: React.FC<SelectItemProps> = ({
           viewBox="0 0 24 24"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          className="snowui-select-item__icon"
+          className="ui-select-item__icon"
         >
           <circle
             cx="12"

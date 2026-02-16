@@ -9,8 +9,8 @@ const TestPage: React.FC = () => {
     navigate('/dashboard');
   };
 
-  const handleSnowUIClick = () => {
-    navigate('/ui-components-test');
+  const handleUIClick = () => {
+    navigate('/ui-test');
   };
 
   const handleKlineChartsClick = () => {
@@ -25,8 +25,8 @@ const TestPage: React.FC = () => {
           <button type="button" className="quick-action-button">
             创建策略
           </button>
-          <button type="button" className="quick-action-button" onClick={handleSnowUIClick}>
-            SnowUI
+          <button type="button" className="quick-action-button" onClick={handleUIClick}>
+            UI 组件
           </button>
           <button type="button" className="quick-action-button" onClick={handleKlineChartsClick}>
             klinecharts示范

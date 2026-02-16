@@ -1,6 +1,6 @@
 /* SnowUI StatusBadge Component - 基于 Figma 设计稿 */
 
-.snowui-status-badge {
+.ui-status-badge {
   display: inline-flex;
   align-items: center;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -8,14 +8,14 @@
   position: relative;
 }
 
-.snowui-status-badge__dot {
+.ui-status-badge__dot {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.snowui-status-badge__background {
+.ui-status-badge__background {
   position: absolute;
   left: 0;
   top: 0;
@@ -25,7 +25,7 @@
   z-index: 0;
 }
 
-.snowui-status-badge__label {
+.ui-status-badge__label {
   position: relative;
   z-index: 1;
   white-space: nowrap;
@@ -35,34 +35,34 @@
 /* ========== Size Variants ========== */
 
 /* Small Size */
-.snowui-status-badge--small {
+.ui-status-badge--small {
   gap: 0;
 }
 
-.snowui-status-badge--small .snowui-status-badge__dot {
+.ui-status-badge--small .ui-status-badge__dot {
   width: 16px;
   height: 16px;
   margin-right: 0;
 }
 
-.snowui-status-badge--small .snowui-status-badge__label {
+.ui-status-badge--small .ui-status-badge__label {
   font-size: 12px;
   line-height: 1.3333333333333333em;
   margin-left: 0;
 }
 
 /* Large Size */
-.snowui-status-badge--large {
+.ui-status-badge--large {
   gap: 0;
 }
 
-.snowui-status-badge--large .snowui-status-badge__dot {
+.ui-status-badge--large .ui-status-badge__dot {
   width: 20px;
   height: 20px;
   margin-right: 0;
 }
 
-.snowui-status-badge--large .snowui-status-badge__label {
+.ui-status-badge--large .ui-status-badge__label {
   font-size: 14px;
   line-height: 1.4285714285714286em;
   margin-left: 0;
@@ -71,59 +71,59 @@
 /* ========== Variant Styles ========== */
 
 /* Dot Variant (无背景) */
-.snowui-status-badge--dot {
+.ui-status-badge--dot {
   border-radius: 4px;
   padding: 0;
   gap: 0;
 }
 
-.snowui-status-badge--dot .snowui-status-badge__label {
+.ui-status-badge--dot .ui-status-badge__label {
   margin-left: 0;
 }
 
 /* Background Variant (有背景) */
-.snowui-status-badge--background {
+.ui-status-badge--background {
   border-radius: 80px;
   position: relative;
 }
 
-.snowui-status-badge--background.snowui-status-badge--small {
+.ui-status-badge--background.ui-status-badge--small {
   padding: 2px 8px;
   min-height: 20px;
 }
 
-.snowui-status-badge--background.snowui-status-badge--large {
+.ui-status-badge--background.ui-status-badge--large {
   padding: 4px 12px;
   min-height: 28px;
 }
 
-.snowui-status-badge--background .snowui-status-badge__label {
+.ui-status-badge--background .ui-status-badge__label {
   margin-left: 0;
 }
 
 /* ========== Color Variants ========== */
 
 /* Purple */
-.snowui-status-badge--purple .snowui-status-badge__label {
+.ui-status-badge--purple .ui-status-badge__label {
   color: #B899EB;
 }
 
 /* Blue */
-.snowui-status-badge--blue .snowui-status-badge__label {
+.ui-status-badge--blue .ui-status-badge__label {
   color: #7DBBFF;
 }
 
 /* Yellow */
-.snowui-status-badge--yellow .snowui-status-badge__label {
+.ui-status-badge--yellow .ui-status-badge__label {
   color: #FFCC00;
 }
 
 /* Grey */
-.snowui-status-badge--grey .snowui-status-badge__label {
+.ui-status-badge--grey .ui-status-badge__label {
   color: rgba(0, 0, 0, 0.4);
 }
 
 /* Green */
-.snowui-status-badge--green .snowui-status-badge__label {
+.ui-status-badge--green .ui-status-badge__label {
   color: #71DD8C;
 }

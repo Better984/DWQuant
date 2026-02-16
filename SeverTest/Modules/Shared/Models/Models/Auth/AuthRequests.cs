@@ -23,6 +23,11 @@ namespace ServerTest.Models.Auth
 
         [Required]
         public string Password { get; set; } = "";
+
+        /// <summary>
+        /// 登录终端类型（如 web / pc / game），用于同类型会话互斥。
+        /// </summary>
+        public string? System { get; set; }
     }
 
     public class ChangePasswordRequest

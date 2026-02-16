@@ -105,9 +105,9 @@ const Slider: React.FC<SliderProps> = ({
   };
 
   const sliderClasses = [
-    'snowui-slider',
-    disabled && 'snowui-slider--disabled',
-    isActive && 'snowui-slider--active',
+    'ui-slider',
+    disabled && 'ui-slider--disabled',
+    isActive && 'ui-slider--active',
     className,
   ]
     .filter(Boolean)
@@ -117,25 +117,25 @@ const Slider: React.FC<SliderProps> = ({
     <div className={sliderClasses}>
       <div
         ref={sliderRef}
-        className="snowui-slider__track"
+        className="ui-slider__track"
         onClick={handleClick}
         onMouseDown={handleMouseDown}
       >
         <div
-          className="snowui-slider__fill"
+          className="ui-slider__fill"
           style={{ width: `${percentage}%` }}
         >
           {label && (
-            <span className="snowui-slider__label">{label}</span>
+            <span className="ui-slider__label">{label}</span>
           )}
           {isActive && (
-            <div className="snowui-slider__active-line" />
+            <div className="ui-slider__active-line" />
           )}
         </div>
       </div>
       {showValue && (
         <div 
-          className={`snowui-slider__value ${percentage >= 100 ? 'snowui-slider__value--full' : ''}`}
+          className={`ui-slider__value ${percentage >= 100 ? 'ui-slider__value--full' : ''}`}
         >
           {formatValue(currentValue)}
         </div>

@@ -286,6 +286,7 @@ static void RegisterCommonServices(
 
     services.AddScoped<AccountRepository>();
     services.AddScoped<AccountService>();
+    services.AddScoped<AccountSessionKickService>();
     services.AddSingleton<OSSService>();
 
     services.AddSingleton<IConnectionMultiplexer>(_ =>
@@ -535,6 +536,7 @@ static void ConfigurePipeline(WebApplication app, bool enableHttpApi, bool enabl
         app.UseMiddleware<SystemReadinessMiddleware>();
         app.UseAuthentication();
         app.UseAuthorization();
+        app.UseMiddleware<HttpTokenValidationMiddleware>();
         app.UseMiddleware<HttpRateLimitMiddleware>();
     }
 

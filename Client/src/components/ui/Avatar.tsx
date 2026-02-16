@@ -21,9 +21,9 @@ const Avatar: React.FC<AvatarProps> = ({
   onClick,
 }) => {
   const avatarClasses = [
-    'snowui-avatar',
-    `snowui-avatar--${size}`,
-    onClick ? 'snowui-avatar--clickable' : '',
+    'ui-avatar',
+    `ui-avatar--${size}`,
+    onClick ? 'ui-avatar--clickable' : '',
     className,
   ]
     .filter(Boolean)
@@ -54,10 +54,10 @@ const Avatar: React.FC<AvatarProps> = ({
   };
 
   const content = src ? (
-    <img src={src} alt={alt || name} className="snowui-avatar__image" />
+    <img src={src} alt={alt || name} className="ui-avatar__image" />
   ) : (
     <div
-      className="snowui-avatar__placeholder"
+      className="ui-avatar__placeholder"
       style={{ backgroundColor: getBackgroundColor(name) }}
     >
       {getInitials(name)}

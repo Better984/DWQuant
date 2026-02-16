@@ -106,6 +106,7 @@
 - Body 必须是统一请求结构（`type/reqId/ts/data`）
 - 响应统一为协议 Envelope（`type/reqId/ts/code/msg/data/traceId`）
 - 需要登录的接口仍使用 `Authorization: Bearer <token>`
+- 服务端会在 HTTP 中间件统一校验 Bearer Token；当 token 已失效或被同类型新登录替换时，统一返回 `401 + code=2001(TokenInvalid)`。
 - 为保证中间件阶段也能回传 `reqId`，所有 HTTP 请求必须在 Header 传 `X-Req-Id`
 
 ---

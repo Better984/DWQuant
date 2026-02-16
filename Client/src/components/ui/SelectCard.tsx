@@ -28,8 +28,8 @@ const SelectCard: React.FC<SelectCardProps> = ({
     state || (selected ? 'selected' : isHovered ? 'hover' : 'default');
 
   const cardClasses = [
-    'snowui-select-card',
-    `snowui-select-card--${actualState}`,
+    'ui-select-card',
+    `ui-select-card--${actualState}`,
     className,
   ]
     .filter(Boolean)
@@ -76,11 +76,11 @@ const SelectCard: React.FC<SelectCardProps> = ({
       aria-pressed={selected}
       aria-disabled={disabled}
     >
-      <div className="snowui-select-card__content">
+      <div className="ui-select-card__content">
         {children}
       </div>
       {actualState === 'selected' && (
-        <div className="snowui-select-card__icon">
+        <div className="ui-select-card__icon">
           {SelectedIcon}
         </div>
       )}

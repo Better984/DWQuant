@@ -85,9 +85,9 @@ const SearchInput: React.FC<SearchInputProps> = ({
   const state: SearchInputState = disabled ? 'static' : isFocused ? 'focus' : isHovered ? 'hover' : 'default';
 
   const inputClasses = [
-    'snowui-search-input',
-    `snowui-search-input--${displayType}`,
-    `snowui-search-input--${state}`,
+    'ui-search-input',
+    `ui-search-input--${displayType}`,
+    `ui-search-input--${state}`,
     className,
   ]
     .filter(Boolean)
@@ -144,12 +144,12 @@ const SearchInput: React.FC<SearchInputProps> = ({
       onMouseEnter={() => !disabled && setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="snowui-search-input__content">
-        <div className="snowui-search-input__icon">{SearchIcon}</div>
+      <div className="ui-search-input__content">
+        <div className="ui-search-input__icon">{SearchIcon}</div>
         <input
           ref={inputRef}
           type="text"
-          className="snowui-search-input__field"
+          className="ui-search-input__field"
           value={currentValue}
           defaultValue={defaultValue}
           onChange={handleChange}
@@ -162,7 +162,7 @@ const SearchInput: React.FC<SearchInputProps> = ({
         />
         {hasValue && (
           <button
-            className="snowui-search-input__clear"
+            className="ui-search-input__clear"
             onClick={handleClear}
             type="button"
             aria-label="清除"
@@ -173,7 +173,7 @@ const SearchInput: React.FC<SearchInputProps> = ({
         )}
       </div>
       {showShortcut && !hasValue && (
-        <div className="snowui-search-input__shortcut">
+        <div className="ui-search-input__shortcut">
           <span>{shortcutKey}</span>
         </div>
       )}

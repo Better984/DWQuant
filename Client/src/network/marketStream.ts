@@ -13,6 +13,8 @@ const listeners = new Set<MarketListener>();
 const symbolRefCounts = new Map<string, number>();
 let handlerAttached = false;
 let statusListenerAttached = false;
+const pendingTickMap = new Map<string, MarketTick>();
+let dispatchFrameId: number | null = null;
 
 export function subscribeMarket(symbols: string[], listener: MarketListener): () => void {
   const uniqueSymbols = Array.from(
@@ -58,6 +60,13 @@ export function subscribeMarket(symbols: string[], listener: MarketListener): ()
 
   return () => {
     listeners.delete(listener);
+    if (listeners.size === 0) {
+      pendingTickMap.clear();
+      if (dispatchFrameId !== null) {
+        window.cancelAnimationFrame(dispatchFrameId);
+        dispatchFrameId = null;
+      }
+    }
 
     const removed: string[] = [];
     for (const symbol of uniqueSymbols) {
@@ -88,9 +97,33 @@ function handleTick(message: WsEnvelope<unknown>): void {
     return;
   }
 
-  for (const listener of listeners) {
-    listener(ticks);
+  // 将同一帧内的重复 symbol 合并，减少高频推送导致的渲染抖动。
+  for (const tick of ticks) {
+    pendingTickMap.set(tick.symbol, tick);
   }
+
+  scheduleDispatch();
+}
+
+function scheduleDispatch(): void {
+  if (dispatchFrameId !== null) {
+    return;
+  }
+
+  dispatchFrameId = window.requestAnimationFrame(() => {
+    dispatchFrameId = null;
+    if (pendingTickMap.size === 0 || listeners.size === 0) {
+      pendingTickMap.clear();
+      return;
+    }
+
+    const mergedTicks = Array.from(pendingTickMap.values());
+    pendingTickMap.clear();
+
+    for (const listener of listeners) {
+      listener(mergedTicks);
+    }
+  });
 }
 
 function parseTicks(payload: unknown): MarketTick[] {

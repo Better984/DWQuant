@@ -337,12 +337,13 @@ export class WsClient {
   }
 }
 
-type WsPopupDetail =
+export type WsPopupDetail =
   | { kind: "reconnect_attempt"; attempt: number; maxAttempts: number }
   | { kind: "reconnect_success" }
-  | { kind: "reconnect_exhausted"; attempt: number; maxAttempts: number };
+  | { kind: "reconnect_exhausted"; attempt: number; maxAttempts: number }
+  | { kind: "connect_failed"; reason: string };
 
-function dispatchWsPopup(detail: WsPopupDetail): void {
+export function dispatchWsPopup(detail: WsPopupDetail): void {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
     return;
   }

@@ -1,14 +1,13 @@
 import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import TestPage from './components/TestPage';
-import Dashboard from './components/Dashboard';
-import SnowUITest from './components/SnowUITest';
+import Dashboard from './components/layout/Dashboard';
 import UIComponentsTest from './components/UIComponentsTest';
-import AuthPage from './components/AuthPage';
+import AuthPage from './components/auth/AuthPage';
 import KlineChartsDemo from './components/KlineChartsDemo';
-import { clearToken, disconnectWs, getToken, onAuthExpired } from './network';
-import { clearAuthProfile, getAuthProfile } from './auth/profileStore';
-import { NotificationProvider } from './components/ui';
+import { clearToken, disconnectWs, getToken, onAuthExpired } from './network/index.ts';
+import { clearAuthProfile, getAuthProfile } from './auth/profileStore.ts';
+import { NotificationProvider } from './components/ui/index.ts';
 import WsNotificationBridge from './components/WsNotificationBridge';
 import './App.css';
 
@@ -67,8 +66,7 @@ function App() {
           <Route path="/" element={<TestPage />} />
           <Route path="/test" element={<TestPage />} />
           <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-          <Route path="/snowui-test" element={<SnowUITest />} />
-          <Route path="/ui-components-test" element={<UIComponentsTest />} />
+          <Route path="/ui-test" element={<UIComponentsTest />} />
           <Route path="/klinecharts-demo" element={<KlineChartsDemo />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -78,3 +76,4 @@ function App() {
 }
 
 export default App;
+

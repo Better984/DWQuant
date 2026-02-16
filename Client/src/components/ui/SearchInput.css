@@ -1,6 +1,6 @@
 /* SnowUI SearchInput Component - 基于 Figma 设计稿 */
 
-.snowui-search-input {
+.ui-search-input {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -14,7 +14,7 @@
   transition: all 0.2s ease;
 }
 
-.snowui-search-input__content {
+.ui-search-input__content {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -22,7 +22,7 @@
   min-width: 0;
 }
 
-.snowui-search-input__icon {
+.ui-search-input__icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -32,7 +32,7 @@
   color: rgba(0, 0, 0, 0.2);
 }
 
-.snowui-search-input__field {
+.ui-search-input__field {
   flex: 1;
   border: none;
   background: transparent;
@@ -46,12 +46,12 @@
   padding: 0;
 }
 
-.snowui-search-input__field::placeholder {
+.ui-search-input__field::placeholder {
   color: rgba(0, 0, 0, 0.2);
   opacity: 1;
 }
 
-.snowui-search-input__clear {
+.ui-search-input__clear {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -66,11 +66,11 @@
   transition: color 0.2s ease;
 }
 
-.snowui-search-input__clear:hover {
+.ui-search-input__clear:hover {
   color: rgba(0, 0, 0, 0.4);
 }
 
-.snowui-search-input__shortcut {
+.ui-search-input__shortcut {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -88,137 +88,137 @@
 /* ========== Type Variants ========== */
 
 /* Gray Type */
-.snowui-search-input--gray {
+.ui-search-input--gray {
   background: rgba(0, 0, 0, 0.04);
   border: none;
 }
 
-.snowui-search-input--gray .snowui-search-input__field {
+.ui-search-input--gray .ui-search-input__field {
   color: rgba(0, 0, 0, 0.2);
 }
 
-.snowui-search-input--gray .snowui-search-input__field::placeholder {
+.ui-search-input--gray .ui-search-input__field::placeholder {
   color: rgba(0, 0, 0, 0.2);
 }
 
 /* Glass Type */
-.snowui-search-input--glass {
+.ui-search-input--glass {
   background: rgba(255, 255, 255, 0.2);
   border: none;
   box-shadow: 0px 4px 16px 0px rgba(0, 0, 0, 0.04);
   backdrop-filter: blur(10px);
 }
 
-.snowui-search-input--glass .snowui-search-input__field {
+.ui-search-input--glass .ui-search-input__field {
   color: rgba(0, 0, 0, 0.2);
 }
 
-.snowui-search-input--glass .snowui-search-input__field::placeholder {
+.ui-search-input--glass .ui-search-input__field::placeholder {
   color: rgba(0, 0, 0, 0.2);
 }
 
 /* Outline Type */
-.snowui-search-input--outline {
+.ui-search-input--outline {
   background: rgba(255, 255, 255, 0.8);
   border: 0.5px solid rgba(0, 0, 0, 0.1);
 }
 
-.snowui-search-input--outline .snowui-search-input__field {
+.ui-search-input--outline .ui-search-input__field {
   color: rgba(0, 0, 0, 0.2);
 }
 
-.snowui-search-input--outline .snowui-search-input__field::placeholder {
+.ui-search-input--outline .ui-search-input__field::placeholder {
   color: rgba(0, 0, 0, 0.2);
 }
 
 /* Typing Type */
-.snowui-search-input--typing {
+.ui-search-input--typing {
   background: rgba(255, 255, 255, 0.8);
   border: 0.5px solid rgba(0, 0, 0, 0.1);
 }
 
-.snowui-search-input--typing .snowui-search-input__field {
+.ui-search-input--typing .ui-search-input__field {
   color: #000000;
 }
 
-.snowui-search-input--typing .snowui-search-input__icon {
+.ui-search-input--typing .ui-search-input__icon {
   color: rgba(0, 0, 0, 0.2);
 }
 
-.snowui-search-input--typing .snowui-search-input__clear {
+.ui-search-input--typing .ui-search-input__clear {
   color: rgba(0, 0, 0, 0.2);
 }
 
 /* ========== State Variants ========== */
 
 /* Default State */
-.snowui-search-input--default {
+.ui-search-input--default {
   /* Default styles are defined in type variants */
 }
 
 /* Static State (Disabled) */
-.snowui-search-input--static {
+.ui-search-input--static {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.snowui-search-input--static .snowui-search-input__field {
+.ui-search-input--static .ui-search-input__field {
   cursor: not-allowed;
 }
 
 /* Hover State */
-.snowui-search-input--hover.snowui-search-input--gray {
+.ui-search-input--hover.ui-search-input--gray {
   background: rgba(0, 0, 0, 0.1);
 }
 
-.snowui-search-input--hover.snowui-search-input--glass {
+.ui-search-input--hover.ui-search-input--glass {
   background: rgba(255, 255, 255, 0.4);
 }
 
-.snowui-search-input--hover.snowui-search-input--outline {
+.ui-search-input--hover.ui-search-input--outline {
   border-color: rgba(0, 0, 0, 0.4);
 }
 
-.snowui-search-input--hover.snowui-search-input--typing {
+.ui-search-input--hover.ui-search-input--typing {
   border-color: rgba(0, 0, 0, 0.4);
 }
 
 /* Focus State */
-.snowui-search-input--focus {
+.ui-search-input--focus {
   box-shadow: 0px 0px 0px 4px rgba(0, 0, 0, 0.04);
 }
 
-.snowui-search-input--focus.snowui-search-input--gray {
+.ui-search-input--focus.ui-search-input--gray {
   background: rgba(255, 255, 255, 0.8);
   border: 0.5px solid rgba(0, 0, 0, 0.4);
 }
 
-.snowui-search-input--focus.snowui-search-input--glass {
+.ui-search-input--focus.ui-search-input--glass {
   background: rgba(255, 255, 255, 0.8);
   border: 0.5px solid rgba(0, 0, 0, 0.4);
 }
 
-.snowui-search-input--focus.snowui-search-input--outline {
+.ui-search-input--focus.ui-search-input--outline {
   border-color: rgba(0, 0, 0, 0.4);
 }
 
-.snowui-search-input--focus.snowui-search-input--typing {
+.ui-search-input--focus.ui-search-input--typing {
   border-color: rgba(0, 0, 0, 0.4);
 }
 
-.snowui-search-input--focus .snowui-search-input__field {
+.ui-search-input--focus .ui-search-input__field {
   color: #000000;
 }
 
-.snowui-search-input--focus .snowui-search-input__icon {
+.ui-search-input--focus .ui-search-input__icon {
   color: rgba(0, 0, 0, 0.2);
 }
 
 /* 当有值时，自动切换到 typing 样式 */
-.snowui-search-input--typing .snowui-search-input__field {
+.ui-search-input--typing .ui-search-input__field {
   color: #000000 !important;
 }
 
-.snowui-search-input--typing .snowui-search-input__field::placeholder {
+.ui-search-input--typing .ui-search-input__field::placeholder {
   color: rgba(0, 0, 0, 0.2);
 }

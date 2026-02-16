@@ -3,6 +3,7 @@ import { Button, Input } from "antd";
 import "./SignIn4.css";
 import { useNotification } from "./ui";
 import { HttpClient } from "../network/httpClient";
+import { getNetworkConfig } from "../network/config";
 import { setToken, getToken, ensureWsConnected } from "../network";
 import { setAuthProfile, type AuthProfile } from "../auth/profileStore";
 
@@ -13,6 +14,8 @@ type SignIn4Props = {
 type LoginResponse = {
   token?: string;
   role?: number;
+  system?: string;
+  kickedOtherSession?: boolean;
 };
 
 const ADMIN_ROLE = 255; // 超级管理员角色
@@ -21,6 +24,7 @@ const SignIn4: React.FC<SignIn4Props> = ({ onAuthenticated }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const networkConfig = useMemo(() => getNetworkConfig(), []);
   const client = useMemo(() => {
     const httpClient = new HttpClient();
     httpClient.setTokenProvider(getToken);
@@ -41,6 +45,7 @@ const SignIn4: React.FC<SignIn4Props> = ({ onAuthenticated }) => {
       const loginResponse = await client.postProtocol<LoginResponse>("/api/auth/login", "auth.login", {
         email: email.trim(),
         password,
+        system: networkConfig.system,
       });
 
       if (!loginResponse?.token) {
@@ -64,7 +69,7 @@ const SignIn4: React.FC<SignIn4Props> = ({ onAuthenticated }) => {
         role: role,
       };
       setAuthProfile(profile);
-      success("登录成功");
+      success(loginResponse.kickedOtherSession ? "登录成功，另一台同类型设备已下线" : "登录成功");
       
       // 登录成功后自动连接WebSocket
       ensureWsConnected().catch(() => {

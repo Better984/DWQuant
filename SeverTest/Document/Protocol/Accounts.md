@@ -16,7 +16,8 @@
 - data：
   - `email` string
   - `password` string
-- 响应 data：`{ token, role }`
+  - `system` string?（终端类型，默认 `web`；同一用户在同一 `system` 下仅保留一个有效会话）
+- 响应 data：`{ token, role, system, kickedOtherSession }`
 
 ### auth.password.change
 - 路径：`POST /api/auth/change-password`

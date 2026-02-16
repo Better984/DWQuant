@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
-import { useNotification } from './ui';
+import { useNotification } from './ui/index.ts';
 
 type WsPopupDetail =
   | { kind: 'reconnect_attempt'; attempt: number; maxAttempts: number }
   | { kind: 'reconnect_success' }
-  | { kind: 'reconnect_exhausted'; attempt: number; maxAttempts: number };
+  | { kind: 'reconnect_exhausted'; attempt: number; maxAttempts: number }
+  | { kind: 'connect_failed'; reason: string };
 
 const WsNotificationBridge: React.FC = () => {
   const { success, error } = useNotification();
@@ -28,6 +29,10 @@ const WsNotificationBridge: React.FC = () => {
         case 'reconnect_exhausted': {
           const { maxAttempts } = detail;
           error(`WebSocket 重连失败（已重试 ${maxAttempts} 次），请刷新页面后重试`, { durationMs: 5000 });
+          break;
+        }
+        case 'connect_failed': {
+          error(`WebSocket 连接失败：${detail.reason}`, { durationMs: 5000 });
           break;
         }
         default:

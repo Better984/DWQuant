@@ -85,7 +85,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         ? createPortal(
             <div
               key={current.id}
-              className="snowui-notification-toast"
+              className="ui-notification-toast"
               style={{ animationDuration: `${current.durationMs}ms` }}
               role={current.state === 'failure' ? 'alert' : 'status'}
               aria-live={current.state === 'failure' ? 'assertive' : 'polite'}

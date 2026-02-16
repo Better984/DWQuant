@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './UIComponentsTest.css';
-import { Button, Slider, Notification, StatusBadge, SearchInput, TextInput, SelectCard, Dialog, Avatar, AvatarGroup, PeopleList, Select, SelectItem, useNotification } from './ui';
+import { Button, Slider, Notification, StatusBadge, SearchInput, TextInput, SelectCard, Dialog, Avatar, AvatarGroup, PeopleList, Select, SelectItem, useNotification } from './ui/index.ts';
 
 const UIComponentsTest: React.FC = () => {
   const navigate = useNavigate();
@@ -1606,3 +1606,4 @@ const UIComponentsTest: React.FC = () => {
 };
 
 export default UIComponentsTest;
+

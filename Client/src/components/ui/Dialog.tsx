@@ -92,21 +92,21 @@ const Dialog: React.FC<DialogProps> = ({
   );
 
   // 分隔线
-  const Divider = <div className="snowui-dialog__divider-line" />;
+  const Divider = <div className="ui-dialog__divider-line" />;
 
   return createPortal(
-    <div className="snowui-dialog-overlay" onClick={handleBackdropClick}>
-      <div className={`snowui-dialog ${className}`} onClick={(e) => e.stopPropagation()}>
+    <div className="ui-dialog-overlay" onClick={handleBackdropClick}>
+      <div className={`ui-dialog ${className}`} onClick={(e) => e.stopPropagation()}>
         {/* 标题区域 */}
         {(title || showCloseButton) && (
           <>
-            <div className="snowui-dialog__header">
+            <div className="ui-dialog__header">
               {title && (
-                <h2 className="snowui-dialog__title">{title}</h2>
+                <h2 className="ui-dialog__title">{title}</h2>
               )}
               {showCloseButton && (
                 <button
-                  className="snowui-dialog__close"
+                  className="ui-dialog__close"
                   onClick={onClose}
                   aria-label="关闭"
                 >
@@ -114,13 +114,13 @@ const Dialog: React.FC<DialogProps> = ({
                 </button>
               )}
             </div>
-            <div className="snowui-dialog__divider">{Divider}</div>
+            <div className="ui-dialog__divider">{Divider}</div>
           </>
         )}
 
         {/* 内容区域 */}
         {children && (
-          <div className="snowui-dialog__content">
+          <div className="ui-dialog__content">
             {children}
           </div>
         )}
@@ -128,13 +128,13 @@ const Dialog: React.FC<DialogProps> = ({
         {/* 按钮区域 */}
         {(footer || cancelText || confirmText) && (
           <>
-            <div className="snowui-dialog__divider">{Divider}</div>
-            <div className="snowui-dialog__footer">
+            <div className="ui-dialog__divider">{Divider}</div>
+            <div className="ui-dialog__footer">
               {footer || (
                 <>
                   {cancelText && (
                     <button
-                      className="snowui-dialog__button snowui-dialog__button--cancel"
+                      className="ui-dialog__button ui-dialog__button--cancel"
                       onClick={handleCancel}
                     >
                       {cancelText}
@@ -142,7 +142,7 @@ const Dialog: React.FC<DialogProps> = ({
                   )}
                   {confirmText && (
                     <button
-                      className="snowui-dialog__button snowui-dialog__button--confirm"
+                      className="ui-dialog__button ui-dialog__button--confirm"
                       onClick={handleConfirm}
                     >
                       {confirmText}

@@ -1,6 +1,6 @@
 /* SnowUI SelectCard Component - 基于 Figma 设计稿 */
 
-.snowui-select-card {
+.ui-select-card {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -19,14 +19,14 @@
   cursor: pointer;
 }
 
-.snowui-select-card__content {
+.ui-select-card__content {
   display: flex;
   flex-direction: column;
   gap: 4px;
   width: 100%;
 }
 
-.snowui-select-card__icon {
+.ui-select-card__icon {
   position: absolute;
   top: 10px;
   right: 10px;
@@ -41,28 +41,28 @@
 /* ========== State Variants ========== */
 
 /* Default State */
-.snowui-select-card--default {
+.ui-select-card--default {
   border: none;
 }
 
 /* Static State (Disabled) */
-.snowui-select-card--static {
+.ui-select-card--static {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 /* Hover State */
-.snowui-select-card--hover {
+.ui-select-card--hover {
   border: 0.5px solid rgba(0, 0, 0, 0.4);
 }
 
 /* Selected State */
-.snowui-select-card--selected {
+.ui-select-card--selected {
   border: 1px solid #000000;
 }
 
 /* 文本项样式 */
-.snowui-select-card__content > * {
+.ui-select-card__content > * {
   font-size: 14px;
   line-height: 1.4285714285714286em;
   color: #000000;

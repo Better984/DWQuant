@@ -1,6 +1,6 @@
 /* SnowUI Button Component - 基于 Figma 设计稿 */
 
-.snowui-button {
+.ui-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -15,60 +15,60 @@
   outline: none;
 }
 
-.snowui-button:focus-visible {
+.ui-button:focus-visible {
   outline: 2px solid rgba(0, 0, 0, 0.1);
   outline-offset: 2px;
 }
 
-.snowui-button__text {
+.ui-button__text {
   display: inline-block;
 }
 
-.snowui-button__icon {
+.ui-button__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.snowui-button__icon--left {
+.ui-button__icon--left {
   margin-right: -4px;
 }
 
-.snowui-button__icon--right {
+.ui-button__icon--right {
   margin-left: -4px;
 }
 
 /* ========== Size Variants ========== */
 
 /* Large Size */
-.snowui-button--large {
+.ui-button--large {
   padding: 12px 24px;
   border-radius: 20px;
   font-size: 18px;
   line-height: 1.5555555555555556em;
 }
 
-.snowui-button--large .snowui-button__icon {
+.ui-button--large .ui-button__icon {
   width: 18px;
   height: 18px;
 }
 
 /* Medium Size */
-.snowui-button--medium {
+.ui-button--medium {
   padding: 8px 16px;
   border-radius: 16px;
   font-size: 16px;
   line-height: 1.5em;
 }
 
-.snowui-button--medium .snowui-button__icon {
+.ui-button--medium .ui-button__icon {
   width: 16px;
   height: 16px;
 }
 
 /* Small Size */
-.snowui-button--small {
+.ui-button--small {
   padding: 4px 12px;
   border-radius: 16px;
   font-size: 14px;
@@ -76,7 +76,7 @@
   gap: 4px;
 }
 
-.snowui-button--small .snowui-button__icon {
+.ui-button--small .ui-button__icon {
   width: 14px;
   height: 14px;
 }
@@ -84,63 +84,63 @@
 /* ========== Style Variants ========== */
 
 /* Borderless Style */
-.snowui-button--borderless {
+.ui-button--borderless {
   background: transparent;
   color: #000000;
 }
 
-.snowui-button--borderless:not(:disabled):hover {
+.ui-button--borderless:not(:disabled):hover {
   background: rgba(0, 0, 0, 0.04);
 }
 
-.snowui-button--borderless.snowui-button--disabled {
+.ui-button--borderless.ui-button--disabled {
   opacity: 0.1;
   cursor: not-allowed;
 }
 
 /* Gray Style */
-.snowui-button--gray {
+.ui-button--gray {
   background: transparent;
   color: #000000;
 }
 
-.snowui-button--gray:not(:disabled):hover {
+.ui-button--gray:not(:disabled):hover {
   background: rgba(0, 0, 0, 0.1);
 }
 
-.snowui-button--gray.snowui-button--disabled {
+.ui-button--gray.ui-button--disabled {
   opacity: 0.1;
   cursor: not-allowed;
 }
 
 /* Outline Style */
-.snowui-button--outline {
+.ui-button--outline {
   background: transparent;
   color: #000000;
   border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
-.snowui-button--outline:not(:disabled):hover {
+.ui-button--outline:not(:disabled):hover {
   background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.1);
 }
 
-.snowui-button--outline.snowui-button--disabled {
+.ui-button--outline.ui-button--disabled {
   opacity: 0.1;
   cursor: not-allowed;
 }
 
 /* Filled Style */
-.snowui-button--filled {
+.ui-button--filled {
   background: #000000;
   color: #FFFFFF;
 }
 
-.snowui-button--filled:not(:disabled):hover {
+.ui-button--filled:not(:disabled):hover {
   background: linear-gradient(0deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.2)), #000000;
 }
 
-.snowui-button--filled.snowui-button--disabled {
+.ui-button--filled.ui-button--disabled {
   background: rgba(0, 0, 0, 0.04);
   color: #000000;
   opacity: 0.1;
@@ -149,7 +149,7 @@
 
 /* ========== State Variants ========== */
 
-.snowui-button--disabled {
+.ui-button--disabled {
   pointer-events: none;
   cursor: not-allowed;
 }
@@ -158,6 +158,6 @@
 /* Hover styles are defined in each style variant above */
 
 /* ========== Active State ========== */
-.snowui-button:not(:disabled):active {
+.ui-button:not(:disabled):active {
   transform: scale(0.98);
 }

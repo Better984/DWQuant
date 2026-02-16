@@ -23,7 +23,7 @@ const PeopleList: React.FC<PeopleListProps> = ({
   className = '',
 }) => {
   const listClasses = [
-    'snowui-people-list',
+    'ui-people-list',
     className,
   ]
     .filter(Boolean)
@@ -34,7 +34,7 @@ const PeopleList: React.FC<PeopleListProps> = ({
       {items.map((item, index) => (
         <div
           key={item.id || index}
-          className="snowui-people-list__item"
+          className="ui-people-list__item"
           onClick={item.onClick}
           role={item.onClick ? 'button' : undefined}
           tabIndex={item.onClick ? 0 : undefined}
@@ -45,10 +45,10 @@ const PeopleList: React.FC<PeopleListProps> = ({
             name={item.name}
             size={avatarSize}
           />
-          <div className="snowui-people-list__content">
-            <div className="snowui-people-list__name">{item.name}</div>
+          <div className="ui-people-list__content">
+            <div className="ui-people-list__name">{item.name}</div>
             {item.description && (
-              <div className="snowui-people-list__description">{item.description}</div>
+              <div className="ui-people-list__description">{item.description}</div>
             )}
           </div>
         </div>

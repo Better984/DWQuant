@@ -1,6 +1,6 @@
 /* SnowUI Avatar Component - 基于 Figma 设计稿 */
 
-.snowui-avatar {
+.ui-avatar {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -11,38 +11,38 @@
   flex-shrink: 0;
 }
 
-.snowui-avatar--clickable {
+.ui-avatar--clickable {
   cursor: pointer;
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
-.snowui-avatar--clickable:hover {
+.ui-avatar--clickable:hover {
   opacity: 0.9;
   transform: scale(1.05);
 }
 
-.snowui-avatar--clickable:active {
+.ui-avatar--clickable:active {
   transform: scale(0.95);
 }
 
 /* Size Variants */
-.snowui-avatar--small {
+.ui-avatar--small {
   width: 24px;
   height: 24px;
 }
 
-.snowui-avatar--medium {
+.ui-avatar--medium {
   width: 64px;
   height: 64px;
 }
 
-.snowui-avatar--large {
+.ui-avatar--large {
   width: 96px;
   height: 96px;
 }
 
 /* Image */
-.snowui-avatar__image {
+.ui-avatar__image {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -50,7 +50,7 @@
 }
 
 /* Placeholder */
-.snowui-avatar__placeholder {
+.ui-avatar__placeholder {
   width: 100%;
   height: 100%;
   display: flex;
@@ -62,17 +62,17 @@
   border-radius: 80px;
 }
 
-.snowui-avatar--small .snowui-avatar__placeholder {
+.ui-avatar--small .ui-avatar__placeholder {
   font-size: 10px;
   line-height: 1.2;
 }
 
-.snowui-avatar--medium .snowui-avatar__placeholder {
+.ui-avatar--medium .ui-avatar__placeholder {
   font-size: 20px;
   line-height: 1.2;
 }
 
-.snowui-avatar--large .snowui-avatar__placeholder {
+.ui-avatar--large .ui-avatar__placeholder {
   font-size: 32px;
   line-height: 1.2;
 }

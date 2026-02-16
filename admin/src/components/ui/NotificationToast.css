@@ -1,5 +1,5 @@
 /* SnowUI Notification Toast */
-.snowui-notification-toast {
+.ui-notification-toast {
   position: fixed;
   left: 50%;
   bottom: 24px;
@@ -7,12 +7,12 @@
   opacity: 0;
   z-index: 9999;
   pointer-events: none;
-  animation-name: snowui-notification-toast-float;
+  animation-name: ui-notification-toast-float;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   animation-fill-mode: forwards;
 }
 
-@keyframes snowui-notification-toast-float {
+@keyframes ui-notification-toast-float {
   0% {
     opacity: 0;
     transform: translate(-50%, 40px);
@@ -32,7 +32,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .snowui-notification-toast {
+  .ui-notification-toast {
     animation: none;
     opacity: 1;
     transform: translate(-50%, -8px);

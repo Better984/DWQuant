@@ -1,5 +1,7 @@
 import { getNetworkConfig } from "./config";
 import { generateReqId } from "./requestId";
+import { notifyAuthExpired } from "./authEvents";
+import { clearToken } from "./tokenStore";
 import type { ProtocolEnvelope, ProtocolRequest } from "./types";
 
 export type HttpClientOptions = {
@@ -148,6 +150,7 @@ export class HttpClient {
       });
 
       const payload = await parseResponse(response);
+      handleAuthExpired(options.path, response.status, payload);
       return { response, payload };
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -164,6 +167,58 @@ export class HttpClient {
       window.clearTimeout(timeoutId);
     }
   }
+}
+
+const AUTH_ERROR_CODES = new Set([2000, 2001, 2002]);
+const AUTH_BYPASS_PATHS = new Set(["/api/auth/login", "/api/auth/register"]);
+
+function handleAuthExpired(path: string, status: number, payload: unknown): void {
+  if (!shouldNotifyAuthExpired(path, status, payload)) {
+    return;
+  }
+
+  clearToken();
+  notifyAuthExpired();
+}
+
+function shouldNotifyAuthExpired(path: string, status: number, payload: unknown): boolean {
+  const normalizedPath = normalizePath(path);
+  if (AUTH_BYPASS_PATHS.has(normalizedPath)) {
+    return false;
+  }
+
+  const protocolCode = resolveProtocolCode(payload);
+  if (typeof protocolCode === "number") {
+    return AUTH_ERROR_CODES.has(protocolCode);
+  }
+
+  return status === 401;
+}
+
+function resolveProtocolCode(payload: unknown): number | undefined {
+  if (isProtocolEnvelope(payload) && typeof payload.code === "number") {
+    return payload.code;
+  }
+
+  if (payload && typeof payload === "object") {
+    const code = (payload as { code?: unknown }).code;
+    return typeof code === "number" ? code : undefined;
+  }
+
+  return undefined;
+}
+
+function normalizePath(path: string): string {
+  if (!path) {
+    return "/";
+  }
+
+  const withoutQuery = path.split("?")[0]?.trim() ?? "/";
+  if (withoutQuery.length <= 1) {
+    return "/";
+  }
+
+  return withoutQuery.endsWith("/") ? withoutQuery.slice(0, -1) : withoutQuery;
 }
 
 function buildUrl(baseUrl: string, path: string, query?: RequestOptions["query"]): string {

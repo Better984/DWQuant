@@ -1,15 +1,45 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { NotificationProvider } from './components/ui';
 import AuthPage from './components/AuthPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
-import LogConsole from './components/LogConsole';
-import HistoricalData from './pages/HistoricalData';
-import NetworkStatus from './pages/NetworkStatus';
-import UniversalSearch from './pages/UniversalSearch';
+import { clearToken, disconnectWs, getToken, onAuthExpired } from './network';
+import { clearAuthProfile, getAuthProfile } from './auth/profileStore';
 import './App.css';
+
+const SessionWatcher: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const checkSession = () => {
+      const token = getToken();
+      const profile = getAuthProfile();
+      if (token && profile) {
+        return;
+      }
+
+      clearToken();
+      clearAuthProfile();
+      disconnectWs();
+      if (location.pathname !== '/login') {
+        const from = `${location.pathname}${location.search}${location.hash}`;
+        navigate('/login', { replace: true, state: { from } });
+      }
+    };
+
+    checkSession();
+    const unsubscribe = onAuthExpired(checkSession);
+    return () => {
+      unsubscribe();
+    };
+  }, [location.hash, location.pathname, location.search, navigate]);
+
+  return null;
+};
 
 function App() {
   return (
@@ -92,6 +122,7 @@ function App() {
     >
       <NotificationProvider>
         <BrowserRouter>
+          <SessionWatcher />
           <Routes>
             <Route path="/login" element={<AuthPage />} />
             <Route

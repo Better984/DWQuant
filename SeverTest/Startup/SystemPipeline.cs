@@ -29,6 +29,7 @@ namespace ServerTest.Startup
 
             app.UseAuthentication();
             app.UseAuthorization();
+            app.UseMiddleware<HttpTokenValidationMiddleware>();
             app.UseMiddleware<HttpRateLimitMiddleware>();
 
             // WebSocket 配置

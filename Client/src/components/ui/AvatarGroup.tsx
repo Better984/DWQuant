@@ -34,8 +34,8 @@ const AvatarGroup: React.FC<AvatarGroupProps> = ({
   const shouldShowMore = showMore && remainingCount > 0;
 
   const groupClasses = [
-    'snowui-avatar-group',
-    `snowui-avatar-group--${size}`,
+    'ui-avatar-group',
+    `ui-avatar-group--${size}`,
     className,
   ]
     .filter(Boolean)
@@ -52,7 +52,7 @@ const AvatarGroup: React.FC<AvatarGroupProps> = ({
       {displayAvatars.map((avatar, index) => (
         <div
           key={index}
-          className="snowui-avatar-group__item"
+          className="ui-avatar-group__item"
           style={{ zIndex: displayAvatars.length - index }}
         >
           <Avatar
@@ -66,13 +66,13 @@ const AvatarGroup: React.FC<AvatarGroupProps> = ({
       ))}
       {shouldShowMore && (
         <div
-          className="snowui-avatar-group__more"
+          className="ui-avatar-group__more"
           style={{ zIndex: 0 }}
           onClick={onMoreClick}
           role={onMoreClick ? 'button' : undefined}
           tabIndex={onMoreClick ? 0 : undefined}
         >
-          <div className="snowui-avatar-group__more-content">
+          <div className="ui-avatar-group__more-content">
             {moreText || `+${remainingCount}`}
           </div>
         </div>

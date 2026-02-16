@@ -26,10 +26,10 @@ const Button: React.FC<ButtonProps> = ({
   const state: ButtonState = disabled ? 'disabled' : 'default';
   
   const buttonClasses = [
-    'snowui-button',
-    `snowui-button--${size}`,
-    `snowui-button--${style}`,
-    `snowui-button--${state}`,
+    'ui-button',
+    `ui-button--${size}`,
+    `ui-button--${style}`,
+    `ui-button--${state}`,
     className,
   ]
     .filter(Boolean)
@@ -41,9 +41,9 @@ const Button: React.FC<ButtonProps> = ({
       disabled={disabled}
       {...props}
     >
-      {leftIcon && <span className="snowui-button__icon snowui-button__icon--left">{leftIcon}</span>}
-      <span className="snowui-button__text">{children}</span>
-      {rightIcon && <span className="snowui-button__icon snowui-button__icon--right">{rightIcon}</span>}
+      {leftIcon && <span className="ui-button__icon ui-button__icon--left">{leftIcon}</span>}
+      <span className="ui-button__text">{children}</span>
+      {rightIcon && <span className="ui-button__icon ui-button__icon--right">{rightIcon}</span>}
     </button>
   );
 };

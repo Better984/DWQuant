@@ -1,6 +1,6 @@
 /* SnowUI TextInput Component - 基于 Figma 设计稿 */
 
-.snowui-text-input {
+.ui-text-input {
   display: flex;
   flex-direction: column;
   position: relative;
@@ -12,7 +12,7 @@
   transition: all 0.2s ease;
 }
 
-.snowui-text-input__field {
+.ui-text-input__field {
   width: 100%;
   border: none;
   background: transparent;
@@ -26,12 +26,12 @@
   resize: none;
 }
 
-.snowui-text-input__field::placeholder {
+.ui-text-input__field::placeholder {
   color: rgba(0, 0, 0, 0.2);
   opacity: 1;
 }
 
-.snowui-text-input__label-text {
+.ui-text-input__label-text {
   font-size: 12px;
   line-height: 1.3333333333333333em;
   color: rgba(0, 0, 0, 0.4);
@@ -42,30 +42,30 @@
 /* ========== Type Variants ========== */
 
 /* Single Row Type */
-.snowui-text-input--single {
+.ui-text-input--single {
   padding: 12px 16px;
   width: 120px;
   min-height: 44px;
   justify-content: center;
 }
 
-.snowui-text-input--single .snowui-text-input__field {
+.ui-text-input--single .ui-text-input__field {
   min-height: 20px;
 }
 
 /* Textarea Type */
-.snowui-text-input--textarea {
+.ui-text-input--textarea {
   padding: 12px 16px 24px;
   width: 120px;
   min-height: 80px;
 }
 
-.snowui-text-input--textarea .snowui-text-input__field {
+.ui-text-input--textarea .ui-text-input__field {
   min-height: 44px;
   line-height: 1.4285714285714286em;
 }
 
-.snowui-text-input__counter {
+.ui-text-input__counter {
   position: absolute;
   bottom: 8px;
   right: 16px;
@@ -77,13 +77,13 @@
   justify-content: flex-end;
 }
 
-.snowui-text-input__counter-text {
+.ui-text-input__counter-text {
   font-size: 12px;
   line-height: 1.3333333333333333em;
   color: rgba(0, 0, 0, 0.2);
 }
 
-.snowui-text-input__counter-icon {
+.ui-text-input__counter-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -93,31 +93,31 @@
 }
 
 /* With Label Horizontal Type (2 row horizontal) */
-.snowui-text-input--with-label-horizontal {
+.ui-text-input--with-label-horizontal {
   padding: 12px 16px;
   width: 120px;
   gap: 8px;
 }
 
-.snowui-text-input__label-horizontal {
+.ui-text-input__label-horizontal {
   display: flex;
   flex-direction: column;
   gap: 8px;
   width: 100%;
 }
 
-.snowui-text-input--with-label-horizontal .snowui-text-input__field {
+.ui-text-input--with-label-horizontal .ui-text-input__field {
   min-height: 20px;
 }
 
 /* With Label Vertical Type (2 row vertical) */
-.snowui-text-input--with-label-vertical {
+.ui-text-input--with-label-vertical {
   padding: 12px 16px;
   width: 120px;
   gap: 4px;
 }
 
-.snowui-text-input__label-vertical {
+.ui-text-input__label-vertical {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -125,11 +125,11 @@
   width: 100%;
 }
 
-.snowui-text-input__label-vertical .snowui-text-input__label-text {
+.ui-text-input__label-vertical .ui-text-input__label-text {
   flex-shrink: 0;
 }
 
-.snowui-text-input__label-vertical .snowui-text-input__field {
+.ui-text-input__label-vertical .ui-text-input__field {
   flex: 1;
   min-height: 20px;
 }
@@ -137,27 +137,27 @@
 /* ========== State Variants ========== */
 
 /* Default State */
-.snowui-text-input--default {
+.ui-text-input--default {
   border-color: rgba(0, 0, 0, 0.2);
 }
 
 /* Static State (Disabled) */
-.snowui-text-input--static {
+.ui-text-input--static {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.snowui-text-input--static .snowui-text-input__field {
+.ui-text-input--static .ui-text-input__field {
   cursor: not-allowed;
 }
 
 /* Hover State */
-.snowui-text-input--hover {
+.ui-text-input--hover {
   border-color: rgba(0, 0, 0, 0.4);
 }
 
 /* Focus State */
-.snowui-text-input--focus {
+.ui-text-input--focus {
   border-color: rgba(0, 0, 0, 0.4);
   box-shadow: 0px 0px 0px 4px rgba(0, 0, 0, 0.04);
 }

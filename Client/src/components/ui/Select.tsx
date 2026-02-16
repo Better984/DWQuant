@@ -24,7 +24,7 @@ const ArrowIcon: React.FC<{ isOpen: boolean }> = ({ isOpen }) => (
     viewBox="0 0 16 16"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
-    className={`snowui-select__arrow ${isOpen ? 'snowui-select__arrow--open' : ''}`}
+    className={`ui-select__arrow ${isOpen ? 'ui-select__arrow--open' : ''}`}
   >
     <path
       d="M3.5 5.5L8 10L12.5 5.5"
@@ -105,9 +105,9 @@ const Select: React.FC<SelectProps> = ({
   };
 
   const selectClasses = [
-    'snowui-select',
-    isOpen ? 'snowui-select--open' : '',
-    disabled ? 'snowui-select--disabled' : '',
+    'ui-select',
+    isOpen ? 'ui-select--open' : '',
+    disabled ? 'ui-select--disabled' : '',
     className,
   ]
     .filter(Boolean)
@@ -133,8 +133,8 @@ const Select: React.FC<SelectProps> = ({
           }
         }}
       >
-        <div className="snowui-select__content">
-          <span className="snowui-select__text">
+        <div className="ui-select__content">
+          <span className="ui-select__text">
             {selectedOption ? selectedOption.label : placeholder}
           </span>
         </div>
@@ -144,20 +144,20 @@ const Select: React.FC<SelectProps> = ({
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="snowui-select__dropdown"
+          className="ui-select__dropdown"
           role="listbox"
         >
           {options.map((option) => (
             <div
               key={option.value}
-              className={`snowui-select__option ${
-                option.value === currentValue ? 'snowui-select__option--selected' : ''
-              } ${option.disabled ? 'snowui-select__option--disabled' : ''}`}
+              className={`ui-select__option ${
+                option.value === currentValue ? 'ui-select__option--selected' : ''
+              } ${option.disabled ? 'ui-select__option--disabled' : ''}`}
               onClick={() => !option.disabled && handleSelect(option.value)}
               role="option"
               aria-selected={option.value === currentValue}
             >
-              <span className="snowui-select__option-text">{option.label}</span>
+              <span className="ui-select__option-text">{option.label}</span>
               {option.value === currentValue && (
                 <svg
                   width="24"
@@ -165,7 +165,7 @@ const Select: React.FC<SelectProps> = ({
                   viewBox="0 0 24 24"
                   fill="none"
                   xmlns="http://www.w3.org/2000/svg"
-                  className="snowui-select__option-icon"
+                  className="ui-select__option-icon"
                 >
                   <circle
                     cx="12"

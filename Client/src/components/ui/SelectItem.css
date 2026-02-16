@@ -1,6 +1,6 @@
 /* SnowUI SelectItem Component - 基于 Figma 设计稿 */
 
-.snowui-select-item {
+.ui-select-item {
   position: relative;
   display: flex;
   flex-direction: row;
@@ -16,21 +16,21 @@
   user-select: none;
 }
 
-.snowui-select-item:hover:not(.snowui-select-item--disabled) {
+.ui-select-item:hover:not(.ui-select-item--disabled) {
   background-color: rgba(0, 0, 0, 0.02);
 }
 
-.snowui-select-item--selected {
+.ui-select-item--selected {
   border: 1px solid #000000;
   background: rgba(255, 255, 255, 0.8);
 }
 
-.snowui-select-item--disabled {
+.ui-select-item--disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.snowui-select-item__text {
+.ui-select-item__text {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-weight: 400;
   font-size: 14px;
@@ -43,7 +43,7 @@
   white-space: nowrap;
 }
 
-.snowui-select-item__icon {
+.ui-select-item__icon {
   width: 24px;
   height: 24px;
   flex-shrink: 0;

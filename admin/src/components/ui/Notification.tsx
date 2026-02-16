@@ -23,10 +23,10 @@ const Notification: React.FC<NotificationProps> = ({
   onClose,
 }) => {
   const notificationClasses = [
-    'snowui-notification',
-    `snowui-notification--${state}`,
-    `snowui-notification--${size}`,
-    `snowui-notification--${variant}`,
+    'ui-notification',
+    `ui-notification--${state}`,
+    `ui-notification--${size}`,
+    `ui-notification--${variant}`,
     className,
   ]
     .filter(Boolean)
@@ -67,11 +67,11 @@ const Notification: React.FC<NotificationProps> = ({
 
   return (
     <div className={notificationClasses}>
-      <div className="snowui-notification__icon">{icon}</div>
-      <span className="snowui-notification__message">{message}</span>
+      <div className="ui-notification__icon">{icon}</div>
+      <span className="ui-notification__message">{message}</span>
       {onClose && (
         <button
-          className="snowui-notification__close"
+          className="ui-notification__close"
           onClick={onClose}
           aria-label="关闭"
         >

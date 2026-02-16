@@ -1,6 +1,6 @@
 /* SnowUI Slider Component - 基于 Figma 设计稿 */
 
-.snowui-slider {
+.ui-slider {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -8,7 +8,7 @@
   position: relative;
 }
 
-.snowui-slider__track {
+.ui-slider__track {
   position: relative;
   flex: 1;
   height: 32px;
@@ -19,7 +19,7 @@
   overflow: hidden;
 }
 
-.snowui-slider__fill {
+.ui-slider__fill {
   position: relative;
   height: 100%;
   background: #000000;
@@ -31,7 +31,7 @@
   transition: width 0.1s ease;
 }
 
-.snowui-slider__label {
+.ui-slider__label {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 12px;
   font-weight: 400;
@@ -41,7 +41,7 @@
   pointer-events: none;
 }
 
-.snowui-slider__active-line {
+.ui-slider__active-line {
   position: absolute;
   right: 4px;
   top: 50%;
@@ -54,11 +54,11 @@
   transition: opacity 0.2s ease;
 }
 
-.snowui-slider--active .snowui-slider__active-line {
+.ui-slider--active .ui-slider__active-line {
   opacity: 1;
 }
 
-.snowui-slider__value {
+.ui-slider__value {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 12px;
   font-weight: 400;
@@ -70,24 +70,24 @@
   transition: color 0.2s ease;
 }
 
-.snowui-slider--active .snowui-slider__value {
+.ui-slider--active .ui-slider__value {
   color: rgba(0, 0, 0, 0.4);
 }
 
 /* 当进度为 100% 时，值的颜色变为白色 */
-.snowui-slider__value--full {
+.ui-slider__value--full {
   color: rgba(255, 255, 255, 0.2);
 }
 
-.snowui-slider--active .snowui-slider__value--full {
+.ui-slider--active .ui-slider__value--full {
   color: rgba(255, 255, 255, 0.4);
 }
 
-.snowui-slider--disabled {
+.ui-slider--disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.snowui-slider--disabled .snowui-slider__track {
+.ui-slider--disabled .ui-slider__track {
   cursor: not-allowed;
 }

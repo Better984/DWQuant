@@ -1,13 +1,13 @@
 /* SnowUI AvatarGroup Component - 基于 Figma 设计稿 */
 
-.snowui-avatar-group {
+.ui-avatar-group {
   display: flex;
   flex-direction: row;
   align-items: center;
   position: relative;
 }
 
-.snowui-avatar-group__item {
+.ui-avatar-group__item {
   position: relative;
   margin-left: -8px;
   border: 1px solid #FFFFFF;
@@ -15,29 +15,29 @@
   background: #FFFFFF;
 }
 
-.snowui-avatar-group__item:first-child {
+.ui-avatar-group__item:first-child {
   margin-left: 0;
 }
 
 /* Size Variants */
-.snowui-avatar-group--small .snowui-avatar-group__item {
+.ui-avatar-group--small .ui-avatar-group__item {
   margin-left: -4px;
 }
 
-.snowui-avatar-group--small .snowui-avatar-group__item:first-child {
+.ui-avatar-group--small .ui-avatar-group__item:first-child {
   margin-left: 0;
 }
 
-.snowui-avatar-group--large .snowui-avatar-group__item {
+.ui-avatar-group--large .ui-avatar-group__item {
   margin-left: -12px;
 }
 
-.snowui-avatar-group--large .snowui-avatar-group__item:first-child {
+.ui-avatar-group--large .ui-avatar-group__item:first-child {
   margin-left: 0;
 }
 
 /* More Avatar */
-.snowui-avatar-group__more {
+.ui-avatar-group__more {
   position: relative;
   margin-left: -8px;
   border: 1px solid #FFFFFF;
@@ -50,16 +50,16 @@
   justify-content: center;
 }
 
-.snowui-avatar-group__more:hover {
+.ui-avatar-group__more:hover {
   opacity: 0.9;
   transform: scale(1.05);
 }
 
-.snowui-avatar-group__more:active {
+.ui-avatar-group__more:active {
   transform: scale(0.95);
 }
 
-.snowui-avatar-group__more-content {
+.ui-avatar-group__more-content {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-weight: 400;
   font-size: 12px;
@@ -70,35 +70,35 @@
 }
 
 /* Size Variants for More */
-.snowui-avatar-group--small .snowui-avatar-group__more {
+.ui-avatar-group--small .ui-avatar-group__more {
   width: 24px;
   height: 24px;
   margin-left: -4px;
 }
 
-.snowui-avatar-group--small .snowui-avatar-group__more-content {
+.ui-avatar-group--small .ui-avatar-group__more-content {
   font-size: 10px;
   padding: 0 4px;
 }
 
-.snowui-avatar-group--medium .snowui-avatar-group__more {
+.ui-avatar-group--medium .ui-avatar-group__more {
   width: 24px;
   height: 24px;
   margin-left: -8px;
 }
 
-.snowui-avatar-group--medium .snowui-avatar-group__more-content {
+.ui-avatar-group--medium .ui-avatar-group__more-content {
   font-size: 12px;
   padding: 0 4px;
 }
 
-.snowui-avatar-group--large .snowui-avatar-group__more {
+.ui-avatar-group--large .ui-avatar-group__more {
   width: 36px;
   height: 36px;
   margin-left: -12px;
 }
 
-.snowui-avatar-group--large .snowui-avatar-group__more-content {
+.ui-avatar-group--large .ui-avatar-group__more-content {
   font-size: 14px;
   padding: 0 6px;
 }

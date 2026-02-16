@@ -63,9 +63,9 @@ const TextInput: React.FC<TextInputProps> = ({
   const state: TextInputState = disabled ? 'static' : isFocused ? 'focus' : isHovered ? 'hover' : 'default';
 
   const inputClasses = [
-    'snowui-text-input',
-    `snowui-text-input--${type}`,
-    `snowui-text-input--${state}`,
+    'ui-text-input',
+    `ui-text-input--${type}`,
+    `ui-text-input--${state}`,
     className,
   ]
     .filter(Boolean)
@@ -87,7 +87,7 @@ const TextInput: React.FC<TextInputProps> = ({
   const inputElement = isTextarea ? (
     <textarea
       ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-      className="snowui-text-input__field"
+      className="ui-text-input__field"
       value={currentValue}
       defaultValue={defaultValue}
       onChange={handleChange}
@@ -102,7 +102,7 @@ const TextInput: React.FC<TextInputProps> = ({
     <input
       ref={inputRef as React.RefObject<HTMLInputElement>}
       type="text"
-      className="snowui-text-input__field"
+      className="ui-text-input__field"
       value={currentValue}
       defaultValue={defaultValue}
       onChange={handleChange}
@@ -121,14 +121,14 @@ const TextInput: React.FC<TextInputProps> = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       {type === 'with-label-horizontal' && label && (
-        <div className="snowui-text-input__label-horizontal">
-          <label className="snowui-text-input__label-text">{label}</label>
+        <div className="ui-text-input__label-horizontal">
+          <label className="ui-text-input__label-text">{label}</label>
           {inputElement}
         </div>
       )}
       {type === 'with-label-vertical' && label && (
-        <div className="snowui-text-input__label-vertical">
-          <label className="snowui-text-input__label-text">{label}</label>
+        <div className="ui-text-input__label-vertical">
+          <label className="ui-text-input__label-text">{label}</label>
           {inputElement}
         </div>
       )}
@@ -136,11 +136,11 @@ const TextInput: React.FC<TextInputProps> = ({
         <>
           {inputElement}
           {type === 'textarea' && shouldShowCounter && (
-            <div className="snowui-text-input__counter">
-              <span className="snowui-text-input__counter-text">
+            <div className="ui-text-input__counter">
+              <span className="ui-text-input__counter-text">
                 {currentLength}/{maxLength || 200}
               </span>
-              <div className="snowui-text-input__counter-icon">{RoundedCornerIcon}</div>
+              <div className="ui-text-input__counter-icon">{RoundedCornerIcon}</div>
             </div>
           )}
         </>
