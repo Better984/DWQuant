@@ -27,6 +27,8 @@ using ServerTest.Modules.Monitoring.Infrastructure;
 using ServerTest.Modules.Notifications.Application;
 using ServerTest.Modules.Notifications.Infrastructure;
 using ServerTest.Modules.Notifications.Infrastructure.Delivery;
+using ServerTest.Modules.Planet.Application;
+using ServerTest.Modules.Planet.Infrastructure;
 using ServerTest.Modules.Positions.Application;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Modules.StrategyEngine.Application;
@@ -397,6 +399,8 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
 
     services.AddScoped<StrategyRepository>();
     services.AddScoped<StrategyService>();
+    services.AddScoped<PlanetRepository>();
+    services.AddScoped<PlanetService>();
 
     services.AddHostedService<StrategyRuntimeBootstrapHostedService>();
     services.AddHostedService<StrategyRuntimeLeaseHostedService>();

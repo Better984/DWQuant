@@ -9,6 +9,7 @@ import ChartLineUpIcon from '../../assets/icons/icon/ChartLineUp.svg';
 import TargetIcon from '../../assets/icons/icon/Target.svg';
 import GaugeIcon from '../../assets/icons/icon/Gauge.svg';
 import CompassIcon from '../../assets/icons/icon/Compass.svg';
+import PlanetIcon from '../../assets/icons/icon/Planet.svg';
 import ChatDotsIcon from '../../assets/icons/icon/ChatDots.svg';
 import UserCircleIcon from '../../assets/icons/icon/UserCircle.svg';
 import AvatarByewind from '../../assets/icons/head/AvatarByewind.svg';
@@ -24,6 +25,7 @@ const MarketModule = lazy(() => import('../market/MarketModule'));
 const StrategyModule = lazy(() => import('../strategy/StrategyModule'));
 const IndicatorModule = lazy(() => import('../indicator/IndicatorModule'));
 const DiscoverModule = lazy(() => import('../discover/DiscoverModule'));
+const PlanetModule = lazy(() => import('../planet/PlanetModule'));
 const ChatModule = lazy(() => import('../chat/ChatModule'));
 const StrategyList = lazy(() => import('../strategy/StrategyList'));
 const UserSettings = lazy(() => import('../user/UserSettings'));
@@ -36,8 +38,9 @@ const menuBreadcrumbMap: { [key: number]: { first: string; second: string } } = 
   2: { first: '策略', second: '策略管理' },
   3: { first: '指标', second: '技术指标' },
   4: { first: '发现', second: '探索' },
-  5: { first: '聊天', second: '消息' },
-  6: { first: '我的', second: '个人中心' },
+  5: { first: '星球', second: '策略社区' },
+  6: { first: '聊天', second: '消息' },
+  7: { first: '我的', second: '个人中心' },
 };
 
 const Dashboard: React.FC = () => {
@@ -250,12 +253,12 @@ const Dashboard: React.FC = () => {
               setBreadcrumbText(menuBreadcrumbMap[2]);
             }}
             onOpenStrategyList={() => {
-              setActiveMenuIndex(6);
-              setBreadcrumbText(menuBreadcrumbMap[6]);
+              setActiveMenuIndex(7);
+              setBreadcrumbText(menuBreadcrumbMap[7]);
             }}
             onImportShareCode={() => {
-              setActiveMenuIndex(6);
-              setBreadcrumbText(menuBreadcrumbMap[6]);
+              setActiveMenuIndex(7);
+              setBreadcrumbText(menuBreadcrumbMap[7]);
               setAutoOpenStrategyImport(true);
             }}
             onOpenMarket={() => {
@@ -293,8 +296,10 @@ const Dashboard: React.FC = () => {
           />
         );
       case 5:
-        return <ChatModule />;
+        return <PlanetModule />;
       case 6:
+        return <ChatModule />;
+      case 7:
         return (
           <StrategyList
             autoOpenImport={autoOpenStrategyImport}
@@ -427,9 +432,9 @@ const Dashboard: React.FC = () => {
             }}
           >
             <div className="sidebar-menu-icon">
-              <img src={ChatDotsIcon} alt="聊天" className="sidebar-menu-icon-img" />
+              <img src={PlanetIcon} alt="星球" className="sidebar-menu-icon-img" />
             </div>
-            <span className="sidebar-menu-text">聊天</span>
+            <span className="sidebar-menu-text">星球</span>
           </div>
 
           <div
@@ -440,6 +445,22 @@ const Dashboard: React.FC = () => {
             onClick={() => {
               setActiveMenuIndex(6);
               setBreadcrumbText(menuBreadcrumbMap[6]);
+            }}
+          >
+            <div className="sidebar-menu-icon">
+              <img src={ChatDotsIcon} alt="聊天" className="sidebar-menu-icon-img" />
+            </div>
+            <span className="sidebar-menu-text">聊天</span>
+          </div>
+
+          <div
+            ref={(el) => {
+              menuItemRefs.current[7] = el;
+            }}
+            className={`sidebar-menu-item ${activeMenuIndex === 7 ? 'active' : ''}`}
+            onClick={() => {
+              setActiveMenuIndex(7);
+              setBreadcrumbText(menuBreadcrumbMap[7]);
             }}
           >
             <div className="sidebar-menu-icon">

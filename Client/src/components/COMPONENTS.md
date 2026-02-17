@@ -8,7 +8,7 @@
 - `src` 目录仅保留 TS/TSX 源文件，不保留同名 `.js` 副本，避免解析歧义。
 
 ## 目录分组与导入约定（迁移后）
-- 业务组件按功能拆分到子目录：`auth/`、`user/`、`dialogs/`、`market/`、`indicator/`、`discover/`、`home/`、`chat/`、`strategy/`、`layout/`。
+- 业务组件按功能拆分到子目录：`auth/`、`user/`、`dialogs/`、`market/`、`indicator/`、`discover/`、`planet/`、`home/`、`chat/`、`strategy/`、`layout/`。
 - 同目录组件互相引用使用 `./`（例如 `strategy` 目录内组件互引）。
 - 跨组件分组引用使用 `../<group>/...`（例如 `strategy` 引用 `dialogs`/`market`/`indicator`）。
 - 组件子目录访问应用层目录统一使用 `../../` 前缀；聚合入口使用显式 TS 后缀：`../../network/index.ts`、`../../auth/profileStore.ts`、`../../assets/...`、`../../lib/...`。
@@ -29,6 +29,7 @@
 - **IndicatorModule**：指标模块入口页容器。
 - **MarketChart**：行情图表视图封装；绘图工具栏图标使用 `assets/KLineCharts` 本地 SVG。
 - **MarketModule**：行情模块入口容器。
+- **PlanetModule**：星球社区模块入口，支持发帖、图片上传、策略绑定、点赞/踩/收藏、评论与作者互动统计。
 - **SignIn4**：登录表单页面。
 - **StrategyConfigDialog**：策略配置预览弹窗，支持概览/JSON 切换。
 - **StrategyDetailDialog**：策略详情弹窗。
