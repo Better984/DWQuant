@@ -1,0 +1,78 @@
+.strategy-curve-sparkline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(249, 250, 251, 0.88), rgba(255, 255, 255, 0.9));
+}
+
+.strategy-curve-sparkline__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.strategy-curve-sparkline__window {
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.strategy-curve-sparkline__source {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.strategy-curve-sparkline__source.is-live {
+  background: rgba(34, 197, 94, 0.12);
+  color: #166534;
+}
+
+.strategy-curve-sparkline__source.is-backtest {
+  background: rgba(245, 158, 11, 0.18);
+  color: #92400e;
+}
+
+.strategy-curve-sparkline__chart {
+  width: 100%;
+  height: 46px;
+  display: block;
+}
+
+.strategy-curve-sparkline__line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.strategy-curve-sparkline__area {
+  stroke: none;
+}
+
+.strategy-curve-sparkline.is-up .strategy-curve-sparkline__line {
+  stroke: #16a34a;
+}
+
+.strategy-curve-sparkline.is-up .strategy-curve-sparkline__area {
+  fill: rgba(34, 197, 94, 0.16);
+}
+
+.strategy-curve-sparkline.is-down .strategy-curve-sparkline__line {
+  stroke: #dc2626;
+}
+
+.strategy-curve-sparkline.is-down .strategy-curve-sparkline__area {
+  fill: rgba(239, 68, 68, 0.14);
+}
+
+.strategy-curve-sparkline.is-flat .strategy-curve-sparkline__line {
+  stroke: #6b7280;
+}
+
+.strategy-curve-sparkline.is-flat .strategy-curve-sparkline__area {
+  fill: rgba(107, 114, 128, 0.14);
+}

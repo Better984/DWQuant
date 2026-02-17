@@ -28,9 +28,9 @@ namespace ServerTest.Modules.Planet.Application
             return _repository.DeletePostAsync(uid, request, ct);
         }
 
-        public Task<IActionResult> SetVisibilityAsync(long uid, PlanetPostVisibilityRequest request, CancellationToken ct)
+        public Task<IActionResult> SetPostStatusAsync(long uid, PlanetPostStatusUpdateRequest request, CancellationToken ct)
         {
-            return _repository.SetVisibilityAsync(uid, request, ct);
+            return _repository.SetPostStatusAsync(uid, request, ct);
         }
 
         public Task<IActionResult> ListPostsAsync(long uid, PlanetPostListRequest request, CancellationToken ct)
@@ -56,6 +56,16 @@ namespace ServerTest.Modules.Planet.Application
         public Task<IActionResult> AddCommentAsync(long uid, PlanetPostCommentCreateRequest request, CancellationToken ct)
         {
             return _repository.AddCommentAsync(uid, request, ct);
+        }
+
+        public Task<IActionResult> ListCommentsAsync(long uid, PlanetPostCommentListRequest request, CancellationToken ct)
+        {
+            return _repository.ListCommentsAsync(uid, request, ct);
+        }
+
+        public Task<IActionResult> DeleteCommentAsync(long uid, PlanetPostCommentDeleteRequest request, CancellationToken ct)
+        {
+            return _repository.DeleteCommentAsync(uid, request, ct);
         }
 
         public Task<IActionResult> GetOwnerStatsAsync(long uid, PlanetOwnerStatsRequest request, CancellationToken ct)

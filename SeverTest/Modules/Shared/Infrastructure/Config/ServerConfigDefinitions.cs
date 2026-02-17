@@ -51,6 +51,7 @@ namespace ServerTest.Infrastructure.Config
 
             new ServerConfigDefinition("Trading:EnableSandboxMode", "交易", "bool", "是否启用沙盒模式（需重启）", false),
             new ServerConfigDefinition("MarketStreaming:UseRedisSubscriptionStore", "行情推送", "bool", "是否使用 Redis 作为订阅存储（需重启）", false),
+            new ServerConfigDefinition("Planet:PostOwnerCanDeleteOthersComments", "星球", "bool", "贴主是否可以删除自己帖子下其他用户评论（实时生效）", true),
 
             new ServerConfigDefinition("BacktestWorker:DispatchPollingIntervalMs", "回测分布式", "int", "核心节点任务分发轮询间隔（毫秒，需重启）", false),
             new ServerConfigDefinition("BacktestWorker:HeartbeatSeconds", "回测分布式", "int", "算力节点心跳上报间隔（秒，需重启）", false),

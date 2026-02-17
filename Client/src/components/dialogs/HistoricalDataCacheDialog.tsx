@@ -225,7 +225,7 @@ const HistoricalDataCacheDialog: React.FC<HistoricalDataCacheDialogProps> = ({ o
       cancelText="关闭"
       className="historical-cache-dialog"
     >
-      <div className="historical-cache-content">
+      <div className="historical-cache-content ui-scrollable">
         {loading ? (
           <div className="historical-cache-loading">加载中...</div>
         ) : (
@@ -289,7 +289,7 @@ const HistoricalDataCacheDialog: React.FC<HistoricalDataCacheDialogProps> = ({ o
                             </button>
                           )}
                         </div>
-                        <div className="historical-cache-filter-menu-items">
+                        <div className="historical-cache-filter-menu-items ui-scrollable">
                           {allExchanges.map((exchange) => (
                             <label
                               key={exchange}
@@ -364,7 +364,7 @@ const HistoricalDataCacheDialog: React.FC<HistoricalDataCacheDialogProps> = ({ o
                             </button>
                           )}
                         </div>
-                        <div className="historical-cache-filter-menu-items">
+                        <div className="historical-cache-filter-menu-items ui-scrollable">
                           {allSymbols.map((symbol) => (
                             <label
                               key={symbol}
@@ -448,7 +448,7 @@ const HistoricalDataCacheDialog: React.FC<HistoricalDataCacheDialogProps> = ({ o
                         <span className="historical-cache-exchange-name">{exchange}</span>
                         <span className="historical-cache-exchange-count">{items.length} 项</span>
                       </div>
-                      <div className="historical-cache-table-wrapper">
+                      <div className="historical-cache-table-wrapper ui-scrollable">
                         <table className="historical-cache-table">
                           <thead>
                             <tr>

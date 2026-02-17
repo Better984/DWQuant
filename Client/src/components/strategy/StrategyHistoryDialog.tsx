@@ -377,7 +377,7 @@ const StrategyHistoryDialog: React.FC<StrategyHistoryDialogProps> = ({
         </button>
       </div>
 
-      <div className="strategy-history-body">
+      <div className="strategy-history-body ui-scrollable">
         {isLoading ? (
           <div className="strategy-history-empty">加载中...</div>
         ) : !selectedVersion ? (

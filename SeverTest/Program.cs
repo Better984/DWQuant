@@ -399,6 +399,7 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
 
     services.AddScoped<StrategyRepository>();
     services.AddScoped<StrategyService>();
+    services.AddScoped<StrategyPerformanceCacheService>();
     services.AddScoped<PlanetRepository>();
     services.AddScoped<PlanetService>();
 

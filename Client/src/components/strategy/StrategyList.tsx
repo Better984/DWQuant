@@ -37,6 +37,33 @@ type StrategyListRecord = {
   marketVersionNo?: number | null;
 };
 
+type StrategyStateUpdateResponse = {
+  usId?: number;
+  state?: string;
+  exchangeApiKeyId?: number | null;
+};
+
+type StrategyCatalogResponse = {
+  usId?: number;
+  defId?: number;
+  versionId?: number;
+};
+
+type StrategyMarketResponse = {
+  usId?: number;
+  marketId?: number;
+};
+
+type StrategyUpdateResponse = {
+  usId?: number;
+  newVersionId?: number;
+  newVersionNo?: number;
+};
+
+type StrategyImportResponse = {
+  newUsId?: number;
+};
+
 type PositionListResponse = {
   items?: StrategyPositionRecord[];
 };
@@ -161,7 +188,13 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
 
   useEffect(() => {
     fetchStrategies();
-    const handler = () => fetchStrategies();
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<{ skipReload?: boolean }>;
+      if (customEvent.detail?.skipReload) {
+        return;
+      }
+      fetchStrategies();
+    };
     window.addEventListener('strategy:changed', handler);
     return () => {
       window.removeEventListener('strategy:changed', handler);
@@ -183,6 +216,52 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
       window.clearTimeout(timerId);
     };
   }, [autoOpenImport, onAutoOpenHandled]);
+
+  // 统一做单条策略局部更新，避免每次操作后全量重拉列表
+  const patchRecordByUsId = useCallback(
+    (usId: number, updater: (record: StrategyListRecord) => StrategyListRecord | null) => {
+      setRecords((prev) => {
+        const next: StrategyListRecord[] = [];
+        prev.forEach((record) => {
+          if (record.usId !== usId) {
+            next.push(record);
+            return;
+          }
+          const updated = updater(record);
+          if (updated) {
+            next.push(updated);
+          }
+        });
+        return next;
+      });
+      const patchStandaloneState = (record: StrategyListRecord | null) => {
+        if (!record || record.usId !== usId) {
+          return record;
+        }
+        return updater(record);
+      };
+      setActiveStrategy(patchStandaloneState);
+      setHistoryStrategy(patchStandaloneState);
+      setShareTarget(patchStandaloneState);
+      setDeleteTarget(patchStandaloneState);
+      setDetailTarget(patchStandaloneState);
+    },
+    [],
+  );
+
+  const mergeRecordByUsId = useCallback(
+    (usId: number, patch: Partial<StrategyListRecord>) => {
+      patchRecordByUsId(usId, (record) => ({ ...record, ...patch }));
+    },
+    [patchRecordByUsId],
+  );
+
+  const removeRecordByUsId = useCallback(
+    (usId: number) => {
+      patchRecordByUsId(usId, () => null);
+    },
+    [patchRecordByUsId],
+  );
 
   const handleCreateVersion = (usId: number) => {
     const target = records.find((item) => item.usId === usId) ?? null;
@@ -223,12 +302,10 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
 
   const closeStrategyPositions = async (usId: number) => {
     await client.postProtocol('/api/positions/close-by-strategy', 'position.close.by_strategy', { usId });
-    await fetchStrategies();
   };
 
   const closeStrategyPosition = async (positionId: number) => {
     await client.postProtocol('/api/positions/close-by-id', 'position.close.by_id', { positionId });
-    await fetchStrategies();
   };
 
   const runBacktest = async (payload: BacktestRunPayload, reqId?: string) => {
@@ -237,39 +314,6 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
       reqId,
     });
     return data;
-  };
-
-  const handleViewHistory = async (usId: number) => {
-    const target = records.find((item) => item.usId === usId) ?? null;
-    if (!target) {
-      return;
-    }
-    setHistoryStrategy(target);
-    setIsHistoryOpen(true);
-    setIsHistoryLoading(true);
-
-    try {
-      const data = await client.postProtocol<StrategyHistoryVersion[]>('/api/strategy/versions', 'strategy.versions', { usId });
-      const versions = Array.isArray(data) ? data : [];
-      setHistoryVersions(versions);
-      const pinnedVersion = versions.find((item) => item.isPinned);
-      const fallbackVersion = pinnedVersion ?? versions[versions.length - 1];
-      setSelectedHistoryVersionId(fallbackVersion ? fallbackVersion.versionId : null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '获取历史版本失败';
-      showError(message);
-    } finally {
-      setIsHistoryLoading(false);
-    }
-  };
-
-  const handleOpenShare = (usId: number) => {
-    const target = records.find((item) => item.usId === usId) ?? null;
-    if (!target) {
-      return;
-    }
-    setShareTarget(target);
-    setIsShareDialogOpen(true);
   };
 
   const closeShareDialog = () => {
@@ -289,61 +333,93 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
     usId: number,
     status: 'running' | 'paused' | 'paused_open_position' | 'completed',
   ) => {
-    await client.postProtocol('/api/strategy/instances/state', 'strategy.instance.state.update', {
+    const data = await client.postProtocol<StrategyStateUpdateResponse>('/api/strategy/instances/state', 'strategy.instance.state.update', {
       id: usId,
       state: status,
     });
-    await fetchStrategies();
+    const patch: Partial<StrategyListRecord> = {
+      state: data?.state || status,
+    };
+    if (data && Object.prototype.hasOwnProperty.call(data, 'exchangeApiKeyId')) {
+      patch.exchangeApiKeyId = data.exchangeApiKeyId ?? null;
+    }
+    mergeRecordByUsId(usId, patch);
   };
 
   const handlePublishOfficial = async (usId: number) => {
-    await client.postProtocol('/api/strategy/publish/official', 'strategy.official.publish', { usId });
-    await fetchStrategies();
+    const data = await client.postProtocol<StrategyCatalogResponse>('/api/strategy/publish/official', 'strategy.official.publish', { usId });
+    patchRecordByUsId(usId, (record) => ({
+      ...record,
+      officialDefId: data?.defId ?? record.officialDefId ?? -1,
+    }));
   };
 
   const handlePublishTemplate = async (usId: number) => {
-    await client.postProtocol('/api/strategy/publish/template', 'strategy.template.publish', { usId });
-    await fetchStrategies();
+    const data = await client.postProtocol<StrategyCatalogResponse>('/api/strategy/publish/template', 'strategy.template.publish', { usId });
+    patchRecordByUsId(usId, (record) => ({
+      ...record,
+      templateDefId: data?.defId ?? record.templateDefId ?? -1,
+    }));
   };
 
   const handlePublishMarket = async (usId: number) => {
-    await client.postProtocol('/api/strategy/market/publish', 'strategy.market.publish', { usId });
-    await fetchStrategies();
+    const data = await client.postProtocol<StrategyMarketResponse>('/api/strategy/market/publish', 'strategy.market.publish', { usId });
+    patchRecordByUsId(usId, (record) => ({
+      ...record,
+      marketId: data?.marketId ?? record.marketId ?? -1,
+    }));
   };
 
   const handleSyncOfficial = async (usId: number) => {
-    await client.postProtocol('/api/strategy/official/sync', 'strategy.official.sync', { usId });
-    await fetchStrategies();
+    const data = await client.postProtocol<StrategyCatalogResponse>('/api/strategy/official/sync', 'strategy.official.sync', { usId });
+    if (typeof data?.defId === 'number') {
+      mergeRecordByUsId(usId, { officialDefId: data.defId });
+    }
   };
 
   const handleSyncTemplate = async (usId: number) => {
-    await client.postProtocol('/api/strategy/template/sync', 'strategy.template.sync', { usId });
-    await fetchStrategies();
+    const data = await client.postProtocol<StrategyCatalogResponse>('/api/strategy/template/sync', 'strategy.template.sync', { usId });
+    if (typeof data?.defId === 'number') {
+      mergeRecordByUsId(usId, { templateDefId: data.defId });
+    }
   };
 
   const handleSyncMarket = async (usId: number) => {
-    await client.postProtocol('/api/strategy/market/sync', 'strategy.market.sync', { usId });
-    await fetchStrategies();
+    const data = await client.postProtocol<StrategyMarketResponse>('/api/strategy/market/sync', 'strategy.market.sync', { usId });
+    if (typeof data?.marketId === 'number') {
+      mergeRecordByUsId(usId, { marketId: data.marketId });
+      return;
+    }
+    patchRecordByUsId(usId, (record) => ({
+      ...record,
+      marketId: record.marketId ?? -1,
+    }));
   };
 
   const handleRemoveOfficial = async (usId: number) => {
     await client.postProtocol('/api/strategy/official/remove', 'strategy.official.remove', { usId });
-    await fetchStrategies();
+    mergeRecordByUsId(usId, {
+      officialDefId: null,
+      officialVersionNo: null,
+    });
   };
 
   const handleRemoveTemplate = async (usId: number) => {
     await client.postProtocol('/api/strategy/template/remove', 'strategy.template.remove', { usId });
-    await fetchStrategies();
+    mergeRecordByUsId(usId, {
+      templateDefId: null,
+      templateVersionNo: null,
+    });
   };
 
-  const handleViewDetail = (usId: number) => {
+  const handleViewDetail = useCallback((usId: number) => {
     const target = records.find((item) => item.usId === usId) ?? null;
     if (!target) {
       return;
     }
     setDetailTarget(target);
     setIsDetailDialogOpen(true);
-  };
+  }, [records]);
 
   const closeDetailDialog = () => {
     setIsDetailDialogOpen(false);
@@ -359,7 +435,7 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
   };
 
   const handleImportShare = async (payload: { shareCode: string; aliasName?: string }) => {
-    await client.postProtocol('/api/strategy/import/share-code', 'strategy.share.import', payload);
+    await client.postProtocol<StrategyImportResponse>('/api/strategy/import/share-code', 'strategy.share.import', payload);
     await fetchStrategies();
   };
 
@@ -396,8 +472,11 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
       if (historyStrategy?.usId === deleteTarget.usId) {
         closeHistory();
       }
+      if (detailTarget?.usId === deleteTarget.usId) {
+        closeDetailDialog();
+      }
       closeDeleteDialog();
-      await fetchStrategies();
+      removeRecordByUsId(deleteTarget.usId);
     } catch (err) {
       const message = err instanceof Error ? err.message : '删除策略失败';
       showError(message);
@@ -415,12 +494,22 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
     if (!activeStrategy) {
       throw new Error('未选择策略');
     }
-    await client.postProtocol('/api/strategy/update', 'strategy.update', {
+    const data = await client.postProtocol<StrategyUpdateResponse>('/api/strategy/update', 'strategy.update', {
       usId: activeStrategy.usId,
       configJson: payload.configJson,
       changelog: '',
       exchangeApiKeyId: payload.exchangeApiKeyId,
     });
+    const patch: Partial<StrategyListRecord> = {
+      configJson: payload.configJson,
+    };
+    if (typeof data?.newVersionNo === 'number' && data.newVersionNo > 0) {
+      patch.versionNo = data.newVersionNo;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'exchangeApiKeyId')) {
+      patch.exchangeApiKeyId = payload.exchangeApiKeyId ?? null;
+    }
+    mergeRecordByUsId(activeStrategy.usId, patch);
   };
 
   const strategyItems = useMemo(
@@ -487,7 +576,7 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
           <StrategyShareDialog
             key={shareTarget.usId}
             strategyName={shareTarget.aliasName || shareTarget.defName}
-            onCreateShare={handleCreateShare}
+            onCreateShare={(payload) => handleCreateShare(shareTarget.usId, payload)}
             onClose={closeShareDialog}
           />
         )}

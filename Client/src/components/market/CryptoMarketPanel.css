@@ -123,12 +123,7 @@
   padding: 6px 4px 10px;
   box-sizing: border-box;
   overflow-y: auto;
-  scrollbar-width: none;
   min-height: 0;
-}
-
-.crypto-list::-webkit-scrollbar {
-  display: none;
 }
 
 .crypto-row {
@@ -238,25 +233,6 @@
 
 .crypto-change.negative {
   color: #FF6B6B;
-}
-
-.crypto-scrollbar {
-  position: absolute;
-  top: 8px;
-  right: 2px;
-  bottom: 12px;
-  width: 4px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.crypto-scrollbar-thumb {
-  width: 100%;
-  border-radius: 999px;
-  background: var(--text-tertiary);
-  transition: background-color 0.3s ease;
 }
 
 .crypto-panel.is-narrow .crypto-table-header {

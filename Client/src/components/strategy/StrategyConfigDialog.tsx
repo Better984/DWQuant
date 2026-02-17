@@ -26,13 +26,9 @@ interface StrategyConfigDialogProps {
   disableMetaFields?: boolean;
   usedIndicatorOutputs: string[];
   conditionSummarySections: ConditionSummarySection[];
-  summaryListRef: React.RefObject<HTMLDivElement>;
-  summaryTrackRef: React.RefObject<HTMLDivElement>;
-  summaryThumbRef: React.RefObject<HTMLDivElement>;
-  codeListRef: React.RefObject<HTMLPreElement>;
-  codeTrackRef: React.RefObject<HTMLDivElement>;
-  codeThumbRef: React.RefObject<HTMLDivElement>;
-  tradeConfigRef: React.RefObject<HTMLDivElement>;
+  summaryListRef: React.RefObject<HTMLDivElement | null>;
+  codeListRef: React.RefObject<HTMLPreElement | null>;
+  tradeConfigRef: React.RefObject<HTMLDivElement | null>;
   tradeConfig: StrategyTradeConfig;
   runtimeConfig: StrategyRuntimeConfig;
   runtimeTemplateOptions: StrategyRuntimeTemplateConfig[];
@@ -81,11 +77,7 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
   usedIndicatorOutputs,
   conditionSummarySections,
   summaryListRef,
-  summaryTrackRef,
-  summaryThumbRef,
   codeListRef,
-  codeTrackRef,
-  codeThumbRef,
   tradeConfigRef,
   tradeConfig,
   runtimeConfig,
@@ -162,7 +154,7 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
         </div>
       }
     >
-      <div className={`strategy-config-dialog-body strategy-config-step-${configStep}`}>
+      <div className={`strategy-config-dialog-body strategy-config-step-${configStep} ui-scrollable`}>
         <div className="strategy-config-progress">
           <div className="strategy-config-progress-item">
             <div className={`strategy-config-progress-dot ${configStep >= 0 ? 'active' : ''}`} />
@@ -183,12 +175,9 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
           </div>
           {isLogicPreviewVisible ? (
             <div className="strategy-config-code-wrapper">
-              <pre className="strategy-config-code" ref={codeListRef}>
+              <pre className="strategy-config-code ui-scrollable" ref={codeListRef}>
                 {logicPreview}
               </pre>
-              <div className="strategy-config-scrollbar" ref={codeTrackRef}>
-                <div className="strategy-config-scrollbar-thumb" ref={codeThumbRef} />
-              </div>
             </div>
           ) : (
             <>
@@ -208,7 +197,7 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
                 )}
               </div>
               <div className="strategy-config-summary-wrapper">
-                <div className="strategy-config-summary" ref={summaryListRef}>
+                <div className="strategy-config-summary ui-scrollable" ref={summaryListRef}>
                   {conditionSummarySections.map((section) => (
                     <div key={section.title} className="strategy-config-summary-section">
                       <div className="strategy-config-summary-title">{section.title}</div>
@@ -234,9 +223,6 @@ const StrategyConfigDialog: React.FC<StrategyConfigDialogProps> = ({
                       ))}
                     </div>
                   ))}
-                </div>
-                <div className="strategy-config-scrollbar" ref={summaryTrackRef}>
-                  <div className="strategy-config-scrollbar-thumb" ref={summaryThumbRef} />
                 </div>
               </div>
             </>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import StrategyMarketItem from './StrategyMarketItem';
 import type { StrategyConfig, StrategyTradeConfig } from './StrategyModule.types';
 import { HttpClient, getToken } from '../../network/index.ts';
@@ -15,6 +15,9 @@ type StrategyMarketRecord = {
   configJson?: StrategyConfig;
   authorName?: string | null;
   updatedAt?: string;
+  pnlSeries30d?: number[];
+  curveSource?: string;
+  isBacktestCurve?: boolean;
 };
 
 const formatUpdatedAt = (value?: string) => {
@@ -61,6 +64,9 @@ const StrategyMarketList: React.FC = () => {
             symbol={trade?.symbol ?? '-'}
             leverage={trade?.sizing?.leverage ?? 0}
             updatedAt={formatUpdatedAt(record.updatedAt)}
+            pnlSeries30d={record.pnlSeries30d}
+            curveSource={record.curveSource}
+            isBacktestCurve={record.isBacktestCurve}
           />
         );
       }),
@@ -89,5 +95,3 @@ const StrategyMarketList: React.FC = () => {
 };
 
 export default StrategyMarketList;
-
-

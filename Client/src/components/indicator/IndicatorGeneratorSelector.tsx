@@ -548,7 +548,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
           )}
 
           {!loadError && (
-            <div className="indicator-generator__list">
+            <div className="indicator-generator__list ui-scrollable">
               {isLoading && (
                 <div className="indicator-generator__empty">正在加载指标配置...</div>
               )}

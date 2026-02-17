@@ -67,8 +67,6 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [hiddenElements, setHiddenElements] = useState<Record<number, { name: boolean; change: boolean }>>({});
   const listRef = useRef<HTMLDivElement>(null);
-  const scrollTrackRef = useRef<HTMLDivElement>(null);
-  const scrollThumbRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const nameRefs = useRef<(HTMLSpanElement | null)[]>([]);
@@ -98,49 +96,6 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
       onResize?.(panelSize);
     }
   }, [allowResize, allowWidthResize, onResize, panelSize]);
-
-  useEffect(() => {
-    const list = listRef.current;
-    const track = scrollTrackRef.current;
-    const thumb = scrollThumbRef.current;
-    if (!list || !track || !thumb) {
-      return;
-    }
-
-    const updateScroll = () => {
-      const { scrollHeight, clientHeight, scrollTop } = list;
-      const trackHeight = track.clientHeight;
-      const isScrollable = scrollHeight > clientHeight + 1;
-      track.style.opacity = isScrollable ? '1' : '0';
-
-      if (!isScrollable) {
-        thumb.style.height = `${trackHeight}px`;
-        thumb.style.transform = 'translateY(0px)';
-        return;
-      }
-
-      const thumbHeight = Math.max(24, (clientHeight / scrollHeight) * trackHeight);
-      const maxThumbTop = trackHeight - thumbHeight;
-      const thumbTop =
-        scrollHeight === clientHeight
-          ? 0
-          : (scrollTop / (scrollHeight - clientHeight)) * maxThumbTop;
-
-      thumb.style.height = `${thumbHeight}px`;
-      thumb.style.transform = `translateY(${thumbTop}px)`;
-    };
-
-    updateScroll();
-    list.addEventListener('scroll', updateScroll);
-
-    const resizeObserver = new ResizeObserver(updateScroll);
-    resizeObserver.observe(list);
-
-    return () => {
-      list.removeEventListener('scroll', updateScroll);
-      resizeObserver.disconnect();
-    };
-  }, [panelSize.height, panelSize.width, items.length]);
 
   // 监听 WebSocket 连接状态，驱动右上角 Live 指示灯
   useEffect(() => {
@@ -440,7 +395,7 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
       </div>
 
       <div className="crypto-list-wrapper">
-        <div className="crypto-list" ref={listRef}>
+        <div className="crypto-list ui-scrollable" ref={listRef}>
           {items.map((item, index) => (
             <div
               key={item.symbol}
@@ -485,9 +440,6 @@ const CryptoMarketPanel: React.FC<CryptoMarketPanelProps> = ({
               </div>
             </div>
           ))}
-        </div>
-        <div className="crypto-scrollbar" ref={scrollTrackRef}>
-          <div className="crypto-scrollbar-thumb" ref={scrollThumbRef}></div>
         </div>
       </div>
 

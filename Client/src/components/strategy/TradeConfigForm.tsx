@@ -41,7 +41,7 @@ interface TradeConfigFormProps {
     key: keyof StrategyTradeConfig['risk']['trailing'],
     value: number | boolean,
   ) => void;
-  tradeConfigRef: React.RefObject<HTMLDivElement>;
+  tradeConfigRef: React.RefObject<HTMLDivElement | null>;
   disableMetaFields?: boolean;
 }
 

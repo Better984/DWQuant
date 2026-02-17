@@ -39,15 +39,6 @@
   padding-right: 6px;
 }
 
-.indicator-generator__list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.indicator-generator__list::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 3px;
-}
-
 .indicator-generator__group {
   display: flex;
   flex-direction: column;

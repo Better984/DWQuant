@@ -1,11 +1,11 @@
-.planet-module {
+﻿.planet-module {
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 16px;
   height: 100%;
   overflow: auto;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background: linear-gradient(180deg, #f5f7fb 0%, #edf2f7 100%);
 }
 
 .planet-header {
@@ -24,8 +24,7 @@
 .planet-title {
   margin: 0;
   font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
+  color: #0f172a;
 }
 
 .planet-subtitle {
@@ -35,9 +34,9 @@
 }
 
 .planet-primary-btn {
-  height: 38px;
   border: none;
   border-radius: 12px;
+  height: 38px;
   padding: 0 16px;
   background: #0f766e;
   color: #ffffff;
@@ -54,10 +53,10 @@
 
 .planet-tab {
   border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #334155;
   border-radius: 999px;
   padding: 6px 12px;
+  background: #ffffff;
+  color: #334155;
   cursor: pointer;
 }
 
@@ -72,6 +71,12 @@
   font-size: 13px;
 }
 
+.planet-empty {
+  text-align: center;
+  color: #64748b;
+  padding: 40px 0;
+}
+
 .planet-post-list,
 .planet-owner-list {
   display: flex;
@@ -82,42 +87,120 @@
 .planet-post-card,
 .planet-owner-card {
   background: #ffffff;
-  border-radius: 14px;
   border: 1px solid #e2e8f0;
+  border-radius: 14px;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.planet-post-top,
-.planet-owner-top {
+.planet-post-head {
   display: flex;
+  gap: 12px;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
 }
 
-.planet-post-title,
-.planet-owner-title,
-.planet-detail-title {
-  font-size: 17px;
-  font-weight: 700;
-  color: #1e293b;
+.planet-avatar,
+.planet-comment-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid #cbd5e1;
+  flex-shrink: 0;
 }
 
-.planet-post-meta {
+.planet-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e2e8f0;
+  color: #334155;
+  font-weight: 600;
+}
+
+.planet-post-head-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.planet-post-author {
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.planet-post-title-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   flex-wrap: wrap;
-  font-size: 12px;
+}
+
+.planet-post-title {
+  margin: 0;
+  font-size: 16px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.planet-post-time {
   color: #64748b;
+  font-size: 12px;
+}
+
+.planet-status-tag {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+}
+
+.planet-status-tag.is-normal {
+  color: #065f46;
+  background: #d1fae5;
+  border-color: #6ee7b7;
+}
+
+.planet-status-tag.is-hidden {
+  color: #9f1239;
+  background: #ffe4e6;
+  border-color: #fda4af;
+}
+
+.planet-status-tag.is-deleted {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
 }
 
 .planet-post-content {
-  color: #334155;
   white-space: pre-wrap;
   line-height: 1.55;
+  color: #334155;
+}
+
+.planet-post-content.is-collapsed {
+  max-height: 108px;
+  overflow: hidden;
+  mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+}
+
+.planet-post-content.is-expanded {
+  max-height: none;
+}
+
+.planet-link-btn {
+  border: none;
+  background: transparent;
+  color: #0f766e;
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
 }
 
 .planet-image-grid {
@@ -128,26 +211,64 @@
 
 .planet-post-image {
   width: 100%;
-  height: 110px;
+  height: 120px;
   object-fit: cover;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
-  background: #f1f5f9;
 }
 
-.planet-strategy-tags {
+.planet-strategy-board {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
 
-.planet-strategy-tag {
-  font-size: 12px;
+.planet-strategy-row {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.planet-strategy-left {
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.planet-strategy-name {
+  font-size: 13px;
+  color: #0f172a;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planet-strategy-right {
+  flex: 1;
+  min-width: 0;
+}
+
+.planet-curve-source {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.planet-curve-source.is-live {
   color: #0f766e;
-  background: #ecfeff;
-  border: 1px solid #99f6e4;
-  border-radius: 999px;
-  padding: 4px 8px;
+}
+
+.planet-curve-source.is-backtest {
+  color: #b45309;
+}
+
+.planet-strategy-chart {
+  width: 100%;
+  height: 72px;
 }
 
 .planet-actions {
@@ -163,8 +284,8 @@
   border-radius: 8px;
   height: 30px;
   padding: 0 10px;
-  cursor: pointer;
   color: #334155;
+  cursor: pointer;
 }
 
 .planet-actions button.is-active {
@@ -172,39 +293,124 @@
   color: #0f766e;
 }
 
-.planet-comments-count {
-  color: #64748b;
+.planet-comment-panel {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planet-comment-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planet-comment-editor textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px;
+  font: inherit;
+}
+
+.planet-comment-editor button,
+.planet-more-btn {
+  width: 120px;
+  border: none;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #ffffff;
+  height: 32px;
+  cursor: pointer;
+}
+
+.planet-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planet-comment-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.planet-comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.planet-comment-author-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.planet-comment-author {
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.planet-comment-time {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.planet-comment-content {
+  white-space: pre-wrap;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.planet-owner-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.planet-owner-title {
+  font-size: 16px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.planet-owner-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #475569;
   font-size: 13px;
 }
 
-.planet-visibility {
+.planet-liker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.planet-liker-item {
   font-size: 12px;
+  color: #0f766e;
+  background: #ecfeff;
+  border: 1px solid #99f6e4;
   border-radius: 999px;
   padding: 2px 8px;
 }
 
-.planet-visibility.is-public {
-  color: #065f46;
-  background: #d1fae5;
-}
-
-.planet-visibility.is-hidden {
-  color: #9f1239;
-  background: #ffe4e6;
-}
-
-.planet-link-btn {
-  border: none;
-  background: transparent;
-  color: #0f766e;
-  cursor: pointer;
-  padding: 0;
-}
-
-.planet-empty {
-  padding: 40px 0;
-  text-align: center;
-  color: #64748b;
+.planet-liker-empty,
+.planet-hint {
+  color: #94a3b8;
+  font-size: 13px;
 }
 
 .planet-composer {
@@ -228,12 +434,10 @@
 .planet-field input,
 .planet-field textarea,
 .planet-field select {
-  width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 8px 10px;
   font: inherit;
-  color: #1f2937;
 }
 
 .planet-upload-row {
@@ -244,9 +448,9 @@
 
 .planet-upload-row button {
   border: 1px solid #0f766e;
-  color: #0f766e;
-  background: #ffffff;
   border-radius: 8px;
+  background: #ffffff;
+  color: #0f766e;
   height: 32px;
   padding: 0 12px;
   cursor: pointer;
@@ -283,7 +487,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 160px;
+  max-height: 180px;
   overflow: auto;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -298,20 +502,10 @@
   font-size: 13px;
 }
 
-.planet-hint {
-  color: #64748b;
-  font-size: 13px;
-}
-
 .planet-detail {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.planet-section-title {
-  font-weight: 700;
-  color: #1f2937;
 }
 
 .planet-strategy-detail-card {
@@ -324,13 +518,13 @@
 }
 
 .planet-strategy-detail-title {
-  font-weight: 600;
   color: #334155;
+  font-weight: 700;
 }
 
 .planet-strategy-detail-card details summary {
-  cursor: pointer;
   color: #0f766e;
+  cursor: pointer;
 }
 
 .planet-strategy-detail-card pre {
@@ -357,82 +551,6 @@
   color: #475569;
 }
 
-.planet-comment-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.planet-comment-editor textarea {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 8px;
-  font: inherit;
-}
-
-.planet-comment-editor button {
-  width: 110px;
-  border: none;
-  border-radius: 8px;
-  background: #0f766e;
-  color: #ffffff;
-  height: 32px;
-  cursor: pointer;
-}
-
-.planet-comment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.planet-comment-item {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.planet-comment-author {
-  font-weight: 600;
-  color: #334155;
-}
-
-.planet-comment-time {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.planet-owner-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 13px;
-  color: #475569;
-}
-
-.planet-liker-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.planet-liker-item {
-  font-size: 12px;
-  color: #0f766e;
-  background: #f0fdfa;
-  border: 1px solid #99f6e4;
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-
-.planet-liker-empty {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
 @media (max-width: 768px) {
   .planet-module {
     padding: 12px;
@@ -450,5 +568,14 @@
   .planet-total {
     width: 100%;
     margin-left: 0;
+  }
+
+  .planet-strategy-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .planet-strategy-left {
+    width: 100%;
   }
 }

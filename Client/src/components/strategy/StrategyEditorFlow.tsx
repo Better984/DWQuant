@@ -620,13 +620,8 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { error, success } = useNotification();
 
-  // 滚动条 refs
   const summaryListRef = useRef<HTMLDivElement>(null);
-  const summaryTrackRef = useRef<HTMLDivElement>(null);
-  const summaryThumbRef = useRef<HTMLDivElement>(null);
   const codeListRef = useRef<HTMLPreElement>(null);
-  const codeTrackRef = useRef<HTMLDivElement>(null);
-  const codeThumbRef = useRef<HTMLDivElement>(null);
   const tradeConfigRef = useRef<HTMLDivElement>(null);
   const [conditionContainers, setConditionContainers] = useState<ConditionContainer[]>(loadedContainers);
   const filterContainers = useMemo(
@@ -748,7 +743,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         }
         setRuntimeTemplateOptions(Array.isArray(data?.templates) ? data.templates : RUNTIME_TEMPLATE_OPTIONS);
         setRuntimeTimezoneOptions(Array.isArray(data?.timezones) ? data.timezones : RUNTIME_TIMEZONE_OPTIONS);
-      } catch (err) {
+      } catch {
         if (isActive) {
           setRuntimeTemplateOptions(RUNTIME_TEMPLATE_OPTIONS);
           setRuntimeTimezoneOptions(RUNTIME_TIMEZONE_OPTIONS);
@@ -771,7 +766,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           return;
         }
         setExchangeApiKeys(Array.isArray(data) ? data : []);
-      } catch (err) {
+      } catch {
         if (isActive) {
           error('获取交易所API失败');
         }
@@ -882,94 +877,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       openConfigReview();
     }
   }, [openConfigDirectly]);
-
-  // 更新条件组滚动条
-  useEffect(() => {
-    const list = summaryListRef.current;
-    const track = summaryTrackRef.current;
-    const thumb = summaryThumbRef.current;
-    if (!list || !track || !thumb) {
-      return;
-    }
-
-    const updateScroll = () => {
-      const { scrollHeight, clientHeight, scrollTop } = list;
-      const trackHeight = track.clientHeight;
-      const isScrollable = scrollHeight > clientHeight + 1;
-      track.style.opacity = isScrollable ? '1' : '0';
-
-      if (!isScrollable) {
-        thumb.style.height = `${trackHeight}px`;
-        thumb.style.transform = 'translateY(0px)';
-        return;
-      }
-
-      const thumbHeight = Math.max(24, (clientHeight / scrollHeight) * trackHeight);
-      const maxThumbTop = trackHeight - thumbHeight;
-      const thumbTop =
-        scrollHeight === clientHeight
-          ? 0
-          : (scrollTop / (scrollHeight - clientHeight)) * maxThumbTop;
-
-      thumb.style.height = `${thumbHeight}px`;
-      thumb.style.transform = `translateY(${thumbTop}px)`;
-    };
-
-    updateScroll();
-    list.addEventListener('scroll', updateScroll);
-
-    const resizeObserver = new ResizeObserver(updateScroll);
-    resizeObserver.observe(list);
-
-    return () => {
-      list.removeEventListener('scroll', updateScroll);
-      resizeObserver.disconnect();
-    };
-  }, [isConfigReviewOpen, isLogicPreviewVisible]);
-
-  // 更新代码区域滚动条
-  useEffect(() => {
-    const list = codeListRef.current;
-    const track = codeTrackRef.current;
-    const thumb = codeThumbRef.current;
-    if (!list || !track || !thumb) {
-      return;
-    }
-
-    const updateScroll = () => {
-      const { scrollHeight, clientHeight, scrollTop } = list;
-      const trackHeight = track.clientHeight;
-      const isScrollable = scrollHeight > clientHeight + 1;
-      track.style.opacity = isScrollable ? '1' : '0';
-
-      if (!isScrollable) {
-        thumb.style.height = `${trackHeight}px`;
-        thumb.style.transform = 'translateY(0px)';
-        return;
-      }
-
-      const thumbHeight = Math.max(24, (clientHeight / scrollHeight) * trackHeight);
-      const maxThumbTop = trackHeight - thumbHeight;
-      const thumbTop =
-        scrollHeight === clientHeight
-          ? 0
-          : (scrollTop / (scrollHeight - clientHeight)) * maxThumbTop;
-
-      thumb.style.height = `${thumbHeight}px`;
-      thumb.style.transform = `translateY(${thumbTop}px)`;
-    };
-
-    updateScroll();
-    list.addEventListener('scroll', updateScroll);
-
-    const resizeObserver = new ResizeObserver(updateScroll);
-    resizeObserver.observe(list);
-
-    return () => {
-      list.removeEventListener('scroll', updateScroll);
-      resizeObserver.disconnect();
-    };
-  }, [isConfigReviewOpen, isLogicPreviewVisible]);
 
   // 切换步骤时重置交易规则区滚动位置，避免显示错位
   useEffect(() => {
@@ -2096,7 +2003,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         exchangeApiKeyId: selectedExchangeApiKeyId ?? undefined,
       });
       success(successMessage);
-      window.dispatchEvent(new CustomEvent('strategy:changed'));
+      window.dispatchEvent(new CustomEvent('strategy:changed', { detail: { skipReload: true } }));
       closeConfigReview();
       onClose?.();
     } catch (err) {
@@ -2450,11 +2357,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         usedIndicatorOutputs={usedIndicatorOutputs}
         conditionSummarySections={conditionSummarySections}
         summaryListRef={summaryListRef}
-        summaryTrackRef={summaryTrackRef}
-        summaryThumbRef={summaryThumbRef}
         codeListRef={codeListRef}
-        codeTrackRef={codeTrackRef}
-        codeThumbRef={codeThumbRef}
         tradeConfigRef={tradeConfigRef}
         tradeConfig={tradeConfig}
         runtimeConfig={runtimeConfig}

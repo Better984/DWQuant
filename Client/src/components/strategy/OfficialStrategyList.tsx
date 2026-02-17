@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import OfficialStrategyItem from './OfficialStrategyItem';
 import OfficialStrategyDetailDialog, { type OfficialStrategyDetailRecord } from './OfficialStrategyDetailDialog';
 import type { StrategyHistoryVersion } from './StrategyHistoryDialog';
@@ -14,6 +14,9 @@ type StrategyCatalogRecord = {
   versionNo: number;
   configJson?: StrategyConfig;
   updatedAt?: string;
+  pnlSeries30d?: number[];
+  curveSource?: string;
+  isBacktestCurve?: boolean;
 };
 
 const resolveSymbol = (symbol?: string) => {
@@ -112,6 +115,9 @@ const OfficialStrategyList: React.FC = () => {
             singlePosition={formatQuantity(trade?.sizing?.orderQty, currency)}
             totalPosition={formatQuantity(trade?.sizing?.maxPositionQty, currency)}
             profitLossRatio={profitLossRatio}
+            pnlSeries30d={record.pnlSeries30d}
+            curveSource={record.curveSource}
+            isBacktestCurve={record.isBacktestCurve}
             version={record.versionNo}
             onUse={() => handleViewDetail(record)}
           />
@@ -158,5 +164,3 @@ const OfficialStrategyList: React.FC = () => {
 };
 
 export default OfficialStrategyList;
-
-

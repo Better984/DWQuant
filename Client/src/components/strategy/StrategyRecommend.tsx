@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import OfficialStrategyItem from './OfficialStrategyItem';
 import StrategyMarketItem from './StrategyMarketItem';
 import type { StrategyConfig, StrategyTradeConfig } from './StrategyModule.types';
@@ -12,6 +12,9 @@ type OfficialRecord = {
   description: string;
   versionNo: number;
   configJson?: StrategyConfig;
+  pnlSeries30d?: number[];
+  curveSource?: string;
+  isBacktestCurve?: boolean;
 };
 
 type MarketRecord = {
@@ -21,6 +24,9 @@ type MarketRecord = {
   configJson?: StrategyConfig;
   authorName?: string | null;
   updatedAt?: string;
+  pnlSeries30d?: number[];
+  curveSource?: string;
+  isBacktestCurve?: boolean;
 };
 
 const resolveSymbol = (symbol?: string) => {
@@ -114,6 +120,9 @@ const StrategyRecommend: React.FC = () => {
           singlePosition={formatQuantity(trade?.sizing?.orderQty, currency)}
           totalPosition={formatQuantity(trade?.sizing?.maxPositionQty, currency)}
           profitLossRatio={profitLossRatio}
+          pnlSeries30d={record.pnlSeries30d}
+          curveSource={record.curveSource}
+          isBacktestCurve={record.isBacktestCurve}
           version={record.versionNo}
         />
       );
@@ -133,6 +142,9 @@ const StrategyRecommend: React.FC = () => {
           symbol={trade?.symbol ?? '-'}
           leverage={trade?.sizing?.leverage ?? 0}
           updatedAt={formatUpdatedAt(record.updatedAt)}
+          pnlSeries30d={record.pnlSeries30d}
+          curveSource={record.curveSource}
+          isBacktestCurve={record.isBacktestCurve}
         />
       );
     });
@@ -176,5 +188,3 @@ const StrategyRecommend: React.FC = () => {
 };
 
 export default StrategyRecommend;
-
-

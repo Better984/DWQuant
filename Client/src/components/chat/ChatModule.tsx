@@ -61,7 +61,7 @@ const ChatModule: React.FC = () => {
         <h1 className="title-text">AI 助手</h1>
       </div>
       <div className="chat-module-panel">
-        <div className="chat-messages">
+        <div className="chat-messages ui-scrollable">
           {messages.map((m, index) => (
             <div
               key={index}

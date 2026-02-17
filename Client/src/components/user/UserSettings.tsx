@@ -524,9 +524,9 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
 
   return (
     <div className="user-settings-overlay" onClick={onClose}>
-      <div className="user-settings-popup" onClick={(e) => e.stopPropagation()}>
+      <div className="user-settings-popup ui-scrollable" onClick={(e) => e.stopPropagation()}>
         {/* Left Navigation */}
-        <div className="user-settings-nav">
+        <div className="user-settings-nav ui-scrollable">
           {navItems.map((item, index) => (
             <div
               key={item.id}
@@ -542,7 +542,7 @@ const UserSettings: React.FC<UserSettingsProps> = ({ onClose }) => {
         </div>
 
         {/* Right Content */}
-        <div className="user-settings-content">
+        <div className="user-settings-content ui-scrollable">
           {activeNavIndex === 0 && (
             <>
               {/* 隐藏的文件输入 */}

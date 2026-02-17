@@ -1,4 +1,5 @@
 ﻿import React from 'react';
+import StrategyCurveSparkline from './StrategyCurveSparkline';
 import './StrategyMarketItem.css';
 
 export type StrategyMarketItemProps = {
@@ -9,6 +10,9 @@ export type StrategyMarketItemProps = {
   symbol: string;
   leverage: number;
   updatedAt?: string;
+  pnlSeries30d?: number[];
+  curveSource?: string;
+  isBacktestCurve?: boolean;
 };
 
 const StrategyMarketItem: React.FC<StrategyMarketItemProps> = ({
@@ -19,6 +23,9 @@ const StrategyMarketItem: React.FC<StrategyMarketItemProps> = ({
   symbol,
   leverage,
   updatedAt,
+  pnlSeries30d,
+  curveSource,
+  isBacktestCurve,
 }) => {
   return (
     <div className="strategy-market-item">
@@ -33,6 +40,15 @@ const StrategyMarketItem: React.FC<StrategyMarketItemProps> = ({
         </div>
       </div>
       {description ? <div className="strategy-market-desc">{description}</div> : null}
+
+      <div className="strategy-market-curve">
+        <StrategyCurveSparkline
+          series={pnlSeries30d}
+          curveSource={curveSource}
+          isBacktestCurve={isBacktestCurve}
+        />
+      </div>
+
       <div className="strategy-market-footer">
         <span className="strategy-market-author">{author || '匿名用户'}</span>
         {updatedAt ? <span className="strategy-market-time">更新于 {updatedAt}</span> : null}

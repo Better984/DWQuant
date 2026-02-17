@@ -144,7 +144,7 @@ const Select: React.FC<SelectProps> = ({
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="ui-select__dropdown"
+          className="ui-select__dropdown ui-scrollable"
           role="listbox"
         >
           {options.map((option) => (

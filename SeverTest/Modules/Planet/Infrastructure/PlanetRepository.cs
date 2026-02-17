@@ -1,9 +1,13 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ServerTest.Infrastructure.Config;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Models;
 using ServerTest.Modules.Planet.Domain;
+using ServerTest.Modules.StrategyManagement.Application;
+using ServerTest.Options;
 
 namespace ServerTest.Modules.Planet.Infrastructure
 {
@@ -17,8 +21,12 @@ namespace ServerTest.Modules.Planet.Infrastructure
         private const int MaxImageCount = 9;
         private const int MaxStrategyBindCount = 10;
         private const int StrategyPositionHistoryLimit = 30;
-        private const int CommentListLimit = 200;
+        private const int CommentInitialLimit = 5;
+        private const int CommentMoreLimit = 10;
+        private const int CommentMaxLimit = 50;
         private const int MaxLikersPerPost = 20;
+        private const int StrategyCurveDays = 30;
+        private const string OwnerDeleteCommentConfigKey = "Planet:PostOwnerCanDeleteOthersComments";
 
         private static readonly HashSet<string> AllowedScopes = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -27,10 +35,11 @@ namespace ServerTest.Modules.Planet.Infrastructure
             "favorite"
         };
 
-        private static readonly HashSet<string> AllowedVisibilities = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> AllowedPostStatuses = new(StringComparer.OrdinalIgnoreCase)
         {
-            "public",
-            "hidden"
+            "normal",
+            "hidden",
+            "deleted"
         };
 
         private static readonly HashSet<string> AllowedReactions = new(StringComparer.OrdinalIgnoreCase)
@@ -42,17 +51,28 @@ namespace ServerTest.Modules.Planet.Infrastructure
 
         private readonly IDbManager _db;
         private readonly ILogger<PlanetRepository> _logger;
+        private readonly ServerConfigStore _configStore;
+        private readonly int _superAdminRole;
+        private readonly StrategyPerformanceCacheService _strategyPerformanceCacheService;
 
-        public PlanetRepository(IDbManager db, ILogger<PlanetRepository> logger)
+        public PlanetRepository(
+            IDbManager db,
+            ServerConfigStore configStore,
+            IOptions<BusinessRulesOptions> businessRules,
+            StrategyPerformanceCacheService strategyPerformanceCacheService,
+            ILogger<PlanetRepository> logger)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
+            _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
+            _superAdminRole = businessRules?.Value?.SuperAdminRole ?? 255;
+            _strategyPerformanceCacheService = strategyPerformanceCacheService ?? throw new ArgumentNullException(nameof(strategyPerformanceCacheService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public async Task<IActionResult> CreatePostAsync(long uid, PlanetPostCreateRequest request, CancellationToken ct)
         {
             var payload = request ?? new PlanetPostCreateRequest();
-            var normalizeResult = NormalizePostInput(payload.Title, payload.Content, payload.Visibility, payload.ImageUrls, payload.StrategyUsIds);
+            var normalizeResult = NormalizePostInput(payload.Title, payload.Content, payload.Status, payload.Visibility, payload.ImageUrls, payload.StrategyUsIds);
             if (!normalizeResult.Ok || normalizeResult.Input == null)
             {
                 return new BadRequestObjectResult(ApiResponse<object>.Error(normalizeResult.Error ?? "参数错误"));
@@ -63,6 +83,8 @@ namespace ServerTest.Modules.Planet.Infrastructure
             {
                 return new BadRequestObjectResult(ApiResponse<object>.Error(ownership.Error ?? "策略归属校验失败"));
             }
+            var isAdmin = await IsAdminAsync(uid, null, ct).ConfigureAwait(false);
+            var isHidden = string.Equals(normalizeResult.Input.Status, "hidden", StringComparison.OrdinalIgnoreCase);
 
             await using var uow = await _db.BeginUnitOfWorkAsync(ct).ConfigureAwait(false);
             try
@@ -73,8 +95,11 @@ INSERT INTO planet_post
     uid,
     title,
     content,
-    visibility,
     status,
+    visibility,
+    hidden_by_uid,
+    hidden_by_admin,
+    hidden_at,
     created_at,
     updated_at
 )
@@ -83,8 +108,11 @@ VALUES
     @uid,
     @title,
     @content,
+    @status,
     @visibility,
-    'active',
+    @hiddenByUid,
+    @hiddenByAdmin,
+    @hiddenAt,
     UTC_TIMESTAMP(3),
     UTC_TIMESTAMP(3)
 );
@@ -97,7 +125,11 @@ SELECT LAST_INSERT_ID();";
                         uid,
                         title = normalizeResult.Input.Title,
                         content = normalizeResult.Input.Content,
-                        visibility = normalizeResult.Input.Visibility
+                        status = normalizeResult.Input.Status,
+                        visibility = ToLegacyVisibility(normalizeResult.Input.Status),
+                        hiddenByUid = isHidden ? (long?)uid : null,
+                        hiddenByAdmin = isHidden && isAdmin ? 1 : 0,
+                        hiddenAt = isHidden ? (DateTime?)DateTime.UtcNow : null
                     },
                     uow,
                     ct).ConfigureAwait(false);
@@ -133,26 +165,45 @@ SELECT LAST_INSERT_ID();";
                 return new BadRequestObjectResult(ApiResponse<object>.Error("无效的帖子ID"));
             }
 
-            var normalizeResult = NormalizePostInput(request.Title, request.Content, request.Visibility, request.ImageUrls, request.StrategyUsIds);
-            if (!normalizeResult.Ok || normalizeResult.Input == null)
-            {
-                return new BadRequestObjectResult(ApiResponse<object>.Error(normalizeResult.Error ?? "参数错误"));
-            }
-
             await using var uow = await _db.BeginUnitOfWorkAsync(ct).ConfigureAwait(false);
             try
             {
                 var ownerRow = await QueryPostOwnerAsync(request.PostId, uow, ct).ConfigureAwait(false);
-                if (ownerRow == null || !string.Equals(ownerRow.Status, "active", StringComparison.OrdinalIgnoreCase))
+                if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
                 }
 
-                if (ownerRow.Uid != uid)
+                var isAdmin = await IsAdminAsync(uid, uow, ct).ConfigureAwait(false);
+                if (!CanManagePost(ownerRow.Uid, uid, isAdmin))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new ObjectResult(ApiResponse<object>.Error("无权限修改该帖子")) { StatusCode = 403 };
+                }
+                var fallbackStatus = string.IsNullOrWhiteSpace(request.Status) && string.IsNullOrWhiteSpace(request.Visibility)
+                    ? NormalizeStoredStatus(ownerRow.Status)
+                    : request.Status;
+                var normalizeResult = NormalizePostInput(
+                    request.Title,
+                    request.Content,
+                    fallbackStatus,
+                    request.Visibility,
+                    request.ImageUrls,
+                    request.StrategyUsIds);
+                if (!normalizeResult.Ok || normalizeResult.Input == null)
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new BadRequestObjectResult(ApiResponse<object>.Error(normalizeResult.Error ?? "参数错误"));
+                }
+                var currentStatus = NormalizeStoredStatus(ownerRow.Status);
+                if (string.Equals(currentStatus, "hidden", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(normalizeResult.Input.Status, "normal", StringComparison.OrdinalIgnoreCase)
+                    && ownerRow.HiddenByAdmin > 0
+                    && !isAdmin)
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new ObjectResult(ApiResponse<object>.Error("该帖子由管理员隐藏，仅管理员可恢复")) { StatusCode = 403 };
                 }
 
                 var ownership = await EnsureStrategiesOwnedAsync(uid, normalizeResult.Input.StrategyUsIds, uow, ct).ConfigureAwait(false);
@@ -161,16 +212,45 @@ SELECT LAST_INSERT_ID();";
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new BadRequestObjectResult(ApiResponse<object>.Error(ownership.Error ?? "策略归属校验失败"));
                 }
+                var targetStatus = normalizeResult.Input.Status;
+                var isTargetHidden = string.Equals(targetStatus, "hidden", StringComparison.OrdinalIgnoreCase);
+                long? nextHiddenByUid;
+                int nextHiddenByAdmin;
+                DateTime? nextHiddenAt;
+                if (isTargetHidden)
+                {
+                    if (string.Equals(currentStatus, "hidden", StringComparison.OrdinalIgnoreCase))
+                    {
+                        nextHiddenByUid = ownerRow.HiddenByUid ?? uid;
+                        nextHiddenByAdmin = ownerRow.HiddenByAdmin > 0 ? 1 : (isAdmin ? 1 : 0);
+                        nextHiddenAt = ownerRow.HiddenAt ?? DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        nextHiddenByUid = uid;
+                        nextHiddenByAdmin = isAdmin ? 1 : 0;
+                        nextHiddenAt = DateTime.UtcNow;
+                    }
+                }
+                else
+                {
+                    nextHiddenByUid = null;
+                    nextHiddenByAdmin = 0;
+                    nextHiddenAt = null;
+                }
 
                 const string updateSql = @"
 UPDATE planet_post
 SET title = @title,
     content = @content,
+    status = @status,
     visibility = @visibility,
+    hidden_by_uid = @hiddenByUid,
+    hidden_by_admin = @hiddenByAdmin,
+    hidden_at = @hiddenAt,
     updated_at = UTC_TIMESTAMP(3)
 WHERE post_id = @postId
-  AND uid = @uid
-  AND status = 'active';";
+  AND status <> 'deleted';";
 
                 var affected = await _db.ExecuteAsync(
                     updateSql,
@@ -178,9 +258,12 @@ WHERE post_id = @postId
                     {
                         title = normalizeResult.Input.Title,
                         content = normalizeResult.Input.Content,
-                        visibility = normalizeResult.Input.Visibility,
-                        postId = request.PostId,
-                        uid
+                        status = targetStatus,
+                        visibility = ToLegacyVisibility(targetStatus),
+                        hiddenByUid = nextHiddenByUid,
+                        hiddenByAdmin = nextHiddenByAdmin,
+                        hiddenAt = nextHiddenAt,
+                        postId = request.PostId
                     },
                     uow,
                     ct).ConfigureAwait(false);
@@ -206,76 +289,33 @@ WHERE post_id = @postId
             }
         }
 
-        public async Task<IActionResult> DeletePostAsync(long uid, PlanetPostDeleteRequest request, CancellationToken ct)
+        public Task<IActionResult> DeletePostAsync(long uid, PlanetPostDeleteRequest request, CancellationToken ct)
         {
             if (request == null || request.PostId <= 0)
             {
-                return new BadRequestObjectResult(ApiResponse<object>.Error("无效的帖子ID"));
+                return Task.FromResult<IActionResult>(new BadRequestObjectResult(ApiResponse<object>.Error("无效的帖子ID")));
             }
 
-            await using var uow = await _db.BeginUnitOfWorkAsync(ct).ConfigureAwait(false);
-            try
-            {
-                var ownerRow = await QueryPostOwnerAsync(request.PostId, uow, ct).ConfigureAwait(false);
-                if (ownerRow == null || !string.Equals(ownerRow.Status, "active", StringComparison.OrdinalIgnoreCase))
-                {
-                    await uow.RollbackAsync(ct).ConfigureAwait(false);
-                    return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
-                }
-
-                if (ownerRow.Uid != uid)
-                {
-                    await uow.RollbackAsync(ct).ConfigureAwait(false);
-                    return new ObjectResult(ApiResponse<object>.Error("无权限删除该帖子")) { StatusCode = 403 };
-                }
-
-                const string deleteSql = @"
-UPDATE planet_post
-SET status = 'deleted',
-    updated_at = UTC_TIMESTAMP(3)
-WHERE post_id = @postId
-  AND uid = @uid
-  AND status = 'active';";
-
-                await _db.ExecuteAsync(deleteSql, new { postId = request.PostId, uid }, uow, ct).ConfigureAwait(false);
-                await uow.CommitAsync(ct).ConfigureAwait(false);
-                return new OkObjectResult(ApiResponse<object?>.Ok(null, "帖子已删除"));
-            }
-            catch (Exception ex)
-            {
-                await SafeRollbackAsync(uow, ct).ConfigureAwait(false);
-                _logger.LogError(ex, "删除星球帖子失败: uid={Uid}, postId={PostId}", uid, request.PostId);
-                return new ObjectResult(ApiResponse<object>.Error("删除帖子失败，请稍后重试")) { StatusCode = 500 };
-            }
+            return SetPostStatusInternalAsync(uid, request.PostId, "deleted", ct);
         }
 
-        public async Task<IActionResult> SetVisibilityAsync(long uid, PlanetPostVisibilityRequest request, CancellationToken ct)
+        public Task<IActionResult> SetPostStatusAsync(long uid, PlanetPostStatusUpdateRequest request, CancellationToken ct)
         {
             if (request == null || request.PostId <= 0)
             {
-                return new BadRequestObjectResult(ApiResponse<object>.Error("无效的帖子ID"));
+                return Task.FromResult<IActionResult>(new BadRequestObjectResult(ApiResponse<object>.Error("无效的帖子ID")));
             }
-
-            if (!TryNormalizeVisibility(request.Visibility, out var visibility))
+            if (string.IsNullOrWhiteSpace(request.Status) && string.IsNullOrWhiteSpace(request.Visibility))
             {
-                return new BadRequestObjectResult(ApiResponse<object>.Error("帖子可见性仅支持 public 或 hidden"));
+                return Task.FromResult<IActionResult>(new BadRequestObjectResult(ApiResponse<object>.Error("缺少状态参数")));
             }
 
-            const string sql = @"
-UPDATE planet_post
-SET visibility = @visibility,
-    updated_at = UTC_TIMESTAMP(3)
-WHERE post_id = @postId
-  AND uid = @uid
-  AND status = 'active';";
-
-            var affected = await _db.ExecuteAsync(sql, new { visibility, postId = request.PostId, uid }, null, ct).ConfigureAwait(false);
-            if (affected <= 0)
+            if (!TryResolvePostStatus(request.Status, request.Visibility, out var normalizedStatus))
             {
-                return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
+                return Task.FromResult<IActionResult>(new BadRequestObjectResult(ApiResponse<object>.Error("帖子状态仅支持 normal/hidden/deleted（兼容 public/hidden）")));
             }
 
-            return new OkObjectResult(ApiResponse<object?>.Ok(null, "帖子可见性已更新"));
+            return SetPostStatusInternalAsync(uid, request.PostId, normalizedStatus, ct);
         }
 
         public async Task<IActionResult> ListPostsAsync(long uid, PlanetPostListRequest request, CancellationToken ct)
@@ -301,6 +341,7 @@ WHERE post_id = @postId
             }
 
             var offset = (page - 1) * pageSize;
+            var isAdmin = await IsAdminAsync(uid, null, ct).ConfigureAwait(false);
             var whereSql = BuildListWhereSql(scope);
             var countSql = $"SELECT COUNT(1) FROM planet_post p {whereSql};";
 
@@ -318,13 +359,14 @@ SELECT
     a.avatar_url AS AuthorAvatarUrl,
     p.title AS Title,
     p.content AS Content,
-    p.visibility AS Visibility,
+    p.status AS Status,
     p.like_count AS LikeCount,
     p.dislike_count AS DislikeCount,
     p.favorite_count AS FavoriteCount,
     p.comment_count AS CommentCount,
     pr.reaction_type AS UserReaction,
     CASE WHEN pf.id IS NULL THEN 0 ELSE 1 END AS IsFavorited,
+    CASE WHEN (@isAdmin = 1 OR p.uid = @uid) THEN 1 ELSE 0 END AS CanManage,
     p.created_at AS CreatedAt,
     p.updated_at AS UpdatedAt
 FROM planet_post p
@@ -337,13 +379,14 @@ LIMIT @pageSize OFFSET @offset;";
 
             var rows = await _db.QueryAsync<PostCardRow>(
                 listSql,
-                new { uid, pageSize, offset },
+                new { uid, pageSize, offset, isAdmin = isAdmin ? 1 : 0 },
                 null,
                 ct).ConfigureAwait(false);
 
             var cards = rows.Select(ToCardDto).ToList();
             await FillCardImagesAsync(cards, ct).ConfigureAwait(false);
             await FillCardStrategiesAsync(cards, ct).ConfigureAwait(false);
+            await FillCardStrategyCurvesAsync(cards, ct).ConfigureAwait(false);
 
             return new OkObjectResult(ApiResponse<PlanetPostListResponse>.Ok(new PlanetPostListResponse
             {
@@ -369,7 +412,6 @@ SELECT
     a.avatar_url AS AuthorAvatarUrl,
     p.title AS Title,
     p.content AS Content,
-    p.visibility AS Visibility,
     p.status AS Status,
     p.like_count AS LikeCount,
     p.dislike_count AS DislikeCount,
@@ -377,6 +419,7 @@ SELECT
     p.comment_count AS CommentCount,
     pr.reaction_type AS UserReaction,
     CASE WHEN pf.id IS NULL THEN 0 ELSE 1 END AS IsFavorited,
+    CASE WHEN p.uid = @uid THEN 1 ELSE 0 END AS CanManage,
     p.created_at AS CreatedAt,
     p.updated_at AS UpdatedAt
 FROM planet_post p
@@ -386,18 +429,19 @@ LEFT JOIN planet_post_favorite pf ON pf.post_id = p.post_id AND pf.uid = @uid
 WHERE p.post_id = @postId
 LIMIT 1;";
 
-            var postRow = await _db.QuerySingleOrDefaultAsync<PostDetailRow>(
+            var postRow = await _db.QuerySingleOrDefaultAsync<PostCardRow>(
                 postSql,
                 new { uid, postId = request.PostId },
                 null,
                 ct).ConfigureAwait(false);
 
-            if (postRow == null || !string.Equals(postRow.Status, "active", StringComparison.OrdinalIgnoreCase))
+            if (postRow == null || string.Equals(NormalizeStoredStatus(postRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
             {
                 return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
             }
 
-            if (!CanViewPost(postRow.Uid, postRow.Visibility, uid))
+            var isAdmin = await IsAdminAsync(uid, null, ct).ConfigureAwait(false);
+            if (!CanViewPost(postRow.Uid, postRow.Status, uid, isAdmin))
             {
                 return new ObjectResult(ApiResponse<object>.Error("该帖子已隐藏")) { StatusCode = 403 };
             }
@@ -405,11 +449,13 @@ LIMIT 1;";
             var detail = new PlanetPostDetailDto
             {
                 Post = ToCardDto(postRow),
-                CanManage = postRow.Uid == uid
+                CanManage = CanManagePost(postRow.Uid, uid, isAdmin)
             };
+            detail.Post.CanManage = detail.CanManage;
 
             await FillCardImagesAsync(new List<PlanetPostCardDto> { detail.Post }, ct).ConfigureAwait(false);
             await FillCardStrategiesAsync(new List<PlanetPostCardDto> { detail.Post }, ct).ConfigureAwait(false);
+            await FillCardStrategyCurvesAsync(new List<PlanetPostCardDto> { detail.Post }, ct).ConfigureAwait(false);
 
             const string strategySql = @"
 SELECT
@@ -492,35 +538,31 @@ LIMIT @take;";
             const string commentSql = @"
 SELECT
     c.comment_id AS CommentId,
+    c.post_id AS PostId,
     c.uid AS Uid,
     COALESCE(NULLIF(a.nickname, ''), a.email) AS AuthorName,
     a.avatar_url AS AuthorAvatarUrl,
     c.content AS Content,
+    c.status AS Status,
     c.created_at AS CreatedAt,
     c.updated_at AS UpdatedAt
 FROM planet_post_comment c
 LEFT JOIN account a ON a.uid = c.uid
 WHERE c.post_id = @postId
   AND c.status = 'active'
-ORDER BY c.created_at ASC
+ORDER BY c.created_at DESC
 LIMIT @take;";
 
             var commentRows = await _db.QueryAsync<PostCommentRow>(
                 commentSql,
-                new { postId = request.PostId, take = CommentListLimit },
+                new { postId = request.PostId, take = CommentInitialLimit },
                 null,
                 ct).ConfigureAwait(false);
 
-            detail.Comments = commentRows.Select(item => new PlanetCommentDto
-            {
-                CommentId = item.CommentId,
-                Uid = item.Uid,
-                AuthorName = item.AuthorName ?? string.Empty,
-                AuthorAvatarUrl = item.AuthorAvatarUrl,
-                Content = item.Content ?? string.Empty,
-                CreatedAt = item.CreatedAt,
-                UpdatedAt = item.UpdatedAt
-            }).ToList();
+            var allowOwnerDelete = _configStore.GetBool(OwnerDeleteCommentConfigKey, false);
+            detail.Comments = commentRows
+                .Select(item => ToCommentDto(item, uid, isAdmin, postRow.Uid, allowOwnerDelete))
+                .ToList();
 
             return new OkObjectResult(ApiResponse<PlanetPostDetailDto>.Ok(detail));
         }
@@ -542,13 +584,14 @@ LIMIT @take;";
             try
             {
                 var ownerRow = await QueryPostOwnerAsync(request.PostId, uow, ct).ConfigureAwait(false);
-                if (ownerRow == null || !string.Equals(ownerRow.Status, "active", StringComparison.OrdinalIgnoreCase))
+                if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
                 }
 
-                if (!CanViewPost(ownerRow.Uid, ownerRow.Visibility, uid))
+                var isAdmin = await IsAdminAsync(uid, uow, ct).ConfigureAwait(false);
+                if (!CanViewPost(ownerRow.Uid, ownerRow.Status, uid, isAdmin))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new ObjectResult(ApiResponse<object>.Error("该帖子已隐藏")) { StatusCode = 403 };
@@ -622,13 +665,14 @@ ON DUPLICATE KEY UPDATE
             try
             {
                 var ownerRow = await QueryPostOwnerAsync(request.PostId, uow, ct).ConfigureAwait(false);
-                if (ownerRow == null || !string.Equals(ownerRow.Status, "active", StringComparison.OrdinalIgnoreCase))
+                if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
                 }
 
-                if (!CanViewPost(ownerRow.Uid, ownerRow.Visibility, uid))
+                var isAdmin = await IsAdminAsync(uid, uow, ct).ConfigureAwait(false);
+                if (!CanViewPost(ownerRow.Uid, ownerRow.Status, uid, isAdmin))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new ObjectResult(ApiResponse<object>.Error("该帖子已隐藏")) { StatusCode = 403 };
@@ -695,16 +739,36 @@ WHERE post_id = @postId
             try
             {
                 var ownerRow = await QueryPostOwnerAsync(request.PostId, uow, ct).ConfigureAwait(false);
-                if (ownerRow == null || !string.Equals(ownerRow.Status, "active", StringComparison.OrdinalIgnoreCase))
+                if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
                 }
 
-                if (!CanViewPost(ownerRow.Uid, ownerRow.Visibility, uid))
+                var isAdmin = await IsAdminAsync(uid, uow, ct).ConfigureAwait(false);
+                if (!CanViewPost(ownerRow.Uid, ownerRow.Status, uid, isAdmin))
                 {
                     await uow.RollbackAsync(ct).ConfigureAwait(false);
                     return new ObjectResult(ApiResponse<object>.Error("该帖子已隐藏")) { StatusCode = 403 };
+                }
+
+                const string existsSql = @"
+SELECT comment_id AS CommentId
+FROM planet_post_comment
+WHERE post_id = @postId
+  AND uid = @uid
+LIMIT 1;";
+
+                var existed = await _db.QuerySingleOrDefaultAsync<CommentIdentityRow>(
+                    existsSql,
+                    new { postId = request.PostId, uid },
+                    uow,
+                    ct).ConfigureAwait(false);
+
+                if (existed != null)
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new BadRequestObjectResult(ApiResponse<object>.Error("每个用户在同一帖子下仅允许评论一次"));
                 }
 
                 const string insertSql = @"
@@ -762,22 +826,164 @@ LIMIT 1;";
                     return new OkObjectResult(ApiResponse<object?>.Ok(null, "评论成功"));
                 }
 
-                return new OkObjectResult(ApiResponse<PlanetCommentDto>.Ok(new PlanetCommentDto
-                {
-                    CommentId = comment.CommentId,
-                    Uid = comment.Uid,
-                    AuthorName = comment.AuthorName ?? string.Empty,
-                    AuthorAvatarUrl = comment.AuthorAvatarUrl,
-                    Content = comment.Content ?? string.Empty,
-                    CreatedAt = comment.CreatedAt,
-                    UpdatedAt = comment.UpdatedAt
-                }, "评论成功"));
+                var allowOwnerDelete = _configStore.GetBool(OwnerDeleteCommentConfigKey, false);
+                var dto = ToCommentDto(comment, uid, isAdmin, ownerRow.Uid, allowOwnerDelete);
+                return new OkObjectResult(ApiResponse<PlanetCommentDto>.Ok(dto, "评论成功"));
             }
             catch (Exception ex)
             {
                 await SafeRollbackAsync(uow, ct).ConfigureAwait(false);
                 _logger.LogError(ex, "发表评论失败: uid={Uid}, postId={PostId}", uid, request.PostId);
                 return new ObjectResult(ApiResponse<object>.Error("评论失败，请稍后重试")) { StatusCode = 500 };
+            }
+        }
+
+        public async Task<IActionResult> ListCommentsAsync(long uid, PlanetPostCommentListRequest request, CancellationToken ct)
+        {
+            if (request == null || request.PostId <= 0)
+            {
+                return new BadRequestObjectResult(ApiResponse<object>.Error("无效的帖子ID"));
+            }
+
+            var offset = Math.Max(request.Offset.GetValueOrDefault(0), 0);
+            var limit = request.Limit.GetValueOrDefault(offset == 0 ? CommentInitialLimit : CommentMoreLimit);
+            if (limit <= 0)
+            {
+                limit = offset == 0 ? CommentInitialLimit : CommentMoreLimit;
+            }
+            limit = Math.Min(limit, CommentMaxLimit);
+
+            var ownerRow = await QueryPostOwnerAsync(request.PostId, null, ct).ConfigureAwait(false);
+            if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
+            {
+                return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
+            }
+
+            var isAdmin = await IsAdminAsync(uid, null, ct).ConfigureAwait(false);
+            if (!CanViewPost(ownerRow.Uid, ownerRow.Status, uid, isAdmin))
+            {
+                return new ObjectResult(ApiResponse<object>.Error("该帖子已隐藏")) { StatusCode = 403 };
+            }
+
+            const string totalSql = @"
+SELECT COUNT(1)
+FROM planet_post_comment
+WHERE post_id = @postId
+  AND status = 'active';";
+
+            var total = await _db.ExecuteScalarAsync<long>(totalSql, new { postId = request.PostId }, null, ct).ConfigureAwait(false);
+
+            const string listSql = @"
+SELECT
+    c.comment_id AS CommentId,
+    c.post_id AS PostId,
+    c.uid AS Uid,
+    COALESCE(NULLIF(a.nickname, ''), a.email) AS AuthorName,
+    a.avatar_url AS AuthorAvatarUrl,
+    c.content AS Content,
+    c.status AS Status,
+    c.created_at AS CreatedAt,
+    c.updated_at AS UpdatedAt
+FROM planet_post_comment c
+LEFT JOIN account a ON a.uid = c.uid
+WHERE c.post_id = @postId
+  AND c.status = 'active'
+ORDER BY c.created_at DESC
+LIMIT @limit OFFSET @offset;";
+
+            var rows = await _db.QueryAsync<PostCommentRow>(
+                listSql,
+                new { postId = request.PostId, limit, offset },
+                null,
+                ct).ConfigureAwait(false);
+
+            var allowOwnerDelete = _configStore.GetBool(OwnerDeleteCommentConfigKey, false);
+            var items = rows
+                .Select(item => ToCommentDto(item, uid, isAdmin, ownerRow.Uid, allowOwnerDelete))
+                .ToList();
+
+            return new OkObjectResult(ApiResponse<PlanetPostCommentListResponse>.Ok(new PlanetPostCommentListResponse
+            {
+                PostId = request.PostId,
+                Total = total,
+                Offset = offset,
+                Limit = limit,
+                HasMore = offset + items.Count < total,
+                Items = items
+            }));
+        }
+
+        public async Task<IActionResult> DeleteCommentAsync(long uid, PlanetPostCommentDeleteRequest request, CancellationToken ct)
+        {
+            if (request == null || request.CommentId <= 0)
+            {
+                return new BadRequestObjectResult(ApiResponse<object>.Error("无效的评论ID"));
+            }
+
+            await using var uow = await _db.BeginUnitOfWorkAsync(ct).ConfigureAwait(false);
+            try
+            {
+                const string commentSql = @"
+SELECT
+    comment_id AS CommentId,
+    post_id AS PostId,
+    uid AS Uid,
+    status AS Status
+FROM planet_post_comment
+WHERE comment_id = @commentId
+LIMIT 1
+FOR UPDATE;";
+
+                var commentRow = await _db.QuerySingleOrDefaultAsync<CommentIdentityRow>(
+                    commentSql,
+                    new { commentId = request.CommentId },
+                    uow,
+                    ct).ConfigureAwait(false);
+
+                if (commentRow == null || !string.Equals(commentRow.Status, "active", StringComparison.OrdinalIgnoreCase))
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new NotFoundObjectResult(ApiResponse<object>.Error("评论不存在或已删除"));
+                }
+
+                var ownerRow = await QueryPostOwnerAsync(commentRow.PostId, uow, ct).ConfigureAwait(false);
+                if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
+                }
+
+                var isAdmin = await IsAdminAsync(uid, uow, ct).ConfigureAwait(false);
+                var allowOwnerDelete = _configStore.GetBool(OwnerDeleteCommentConfigKey, false);
+                if (!CanDeleteComment(commentRow.Uid, ownerRow.Uid, uid, isAdmin, allowOwnerDelete))
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new ObjectResult(ApiResponse<object>.Error("无权限删除该评论")) { StatusCode = 403 };
+                }
+
+                const string deleteSql = @"
+UPDATE planet_post_comment
+SET status = 'deleted',
+    updated_at = UTC_TIMESTAMP(3)
+WHERE comment_id = @commentId
+  AND status = 'active';";
+
+                var affected = await _db.ExecuteAsync(deleteSql, new { commentId = request.CommentId }, uow, ct).ConfigureAwait(false);
+                if (affected <= 0)
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new NotFoundObjectResult(ApiResponse<object>.Error("评论不存在或已删除"));
+                }
+
+                await RefreshPostStatsAsync(commentRow.PostId, uow, ct).ConfigureAwait(false);
+                await uow.CommitAsync(ct).ConfigureAwait(false);
+                return new OkObjectResult(ApiResponse<object?>.Ok(null, "评论已删除"));
+            }
+            catch (Exception ex)
+            {
+                await SafeRollbackAsync(uow, ct).ConfigureAwait(false);
+                _logger.LogError(ex, "删除评论失败: uid={Uid}, commentId={CommentId}", uid, request.CommentId);
+                return new ObjectResult(ApiResponse<object>.Error("删除评论失败，请稍后重试")) { StatusCode = 500 };
             }
         }
 
@@ -802,7 +1008,7 @@ LIMIT 1;";
 SELECT COUNT(1)
 FROM planet_post
 WHERE uid = @uid
-  AND status = 'active';";
+  AND status IN ('normal', 'active', 'hidden');";
 
             var total = await _db.ExecuteScalarAsync<long>(countSql, new { uid }, null, ct).ConfigureAwait(false);
 
@@ -810,7 +1016,7 @@ WHERE uid = @uid
 SELECT
     post_id AS PostId,
     title AS Title,
-    visibility AS Visibility,
+    status AS Status,
     like_count AS LikeCount,
     dislike_count AS DislikeCount,
     favorite_count AS FavoriteCount,
@@ -818,7 +1024,7 @@ SELECT
     updated_at AS UpdatedAt
 FROM planet_post
 WHERE uid = @uid
-  AND status = 'active'
+  AND status IN ('normal', 'active', 'hidden')
 ORDER BY updated_at DESC
 LIMIT @pageSize OFFSET @offset;";
 
@@ -832,7 +1038,7 @@ LIMIT @pageSize OFFSET @offset;";
             {
                 PostId = item.PostId,
                 Title = item.Title ?? string.Empty,
-                Visibility = item.Visibility ?? "public",
+                Status = NormalizeStoredStatus(item.Status),
                 LikeCount = item.LikeCount,
                 DislikeCount = item.DislikeCount,
                 FavoriteCount = item.FavoriteCount,
@@ -966,6 +1172,47 @@ ORDER BY ps.post_id ASC, ps.id ASC;";
             }
         }
 
+        private async Task FillCardStrategyCurvesAsync(List<PlanetPostCardDto> cards, CancellationToken ct)
+        {
+            if (cards.Count == 0)
+            {
+                return;
+            }
+
+            var usIds = cards
+                .SelectMany(card => card.Strategies)
+                .Select(strategy => strategy.UsId)
+                .Distinct()
+                .ToList();
+
+            if (usIds.Count == 0)
+            {
+                return;
+            }
+            var snapshots = await _strategyPerformanceCacheService
+                .GetCurveSnapshotsAsync(usIds, StrategyCurveDays, ct)
+                .ConfigureAwait(false);
+
+            foreach (var card in cards)
+            {
+                foreach (var strategy in card.Strategies)
+                {
+                    if (snapshots.TryGetValue(strategy.UsId, out var snapshot))
+                    {
+                        strategy.PnlSeries30d = snapshot.Series;
+                        strategy.CurveSource = snapshot.CurveSource;
+                        strategy.IsBacktestCurve = snapshot.IsBacktest;
+                    }
+                    else
+                    {
+                        strategy.PnlSeries30d = Enumerable.Repeat(0m, StrategyCurveDays).ToList();
+                        strategy.CurveSource = "live";
+                        strategy.IsBacktestCurve = false;
+                    }
+                }
+            }
+        }
+
         private async Task ReplacePostImagesAsync(long postId, IReadOnlyList<string> imageUrls, IUnitOfWork uow, CancellationToken ct)
         {
             const string deleteSql = "DELETE FROM planet_post_image WHERE post_id = @postId;";
@@ -1076,8 +1323,10 @@ WHERE post_id = @postId;";
 SELECT
     post_id AS PostId,
     uid AS Uid,
-    visibility AS Visibility,
-    status AS Status
+    status AS Status,
+    hidden_by_uid AS HiddenByUid,
+    hidden_by_admin AS HiddenByAdmin,
+    hidden_at AS HiddenAt
 FROM planet_post
 WHERE post_id = @postId
 LIMIT 1;";
@@ -1109,6 +1358,127 @@ WHERE uid = @uid
             return (true, null);
         }
 
+        private async Task<bool> IsAdminAsync(long uid, IUnitOfWork? uow, CancellationToken ct)
+        {
+            const string sql = @"
+SELECT role
+FROM account
+WHERE uid = @uid
+  AND deleted_at IS NULL
+LIMIT 1;";
+
+            var role = await _db.QuerySingleOrDefaultAsync<int?>(sql, new { uid }, uow, ct).ConfigureAwait(false);
+            return role.HasValue && role.Value == _superAdminRole;
+        }
+
+        private async Task<IActionResult> SetPostStatusInternalAsync(long uid, long postId, string targetStatus, CancellationToken ct)
+        {
+            await using var uow = await _db.BeginUnitOfWorkAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var ownerRow = await QueryPostOwnerAsync(postId, uow, ct).ConfigureAwait(false);
+                if (ownerRow == null || string.Equals(NormalizeStoredStatus(ownerRow.Status), "deleted", StringComparison.OrdinalIgnoreCase))
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
+                }
+
+                var isAdmin = await IsAdminAsync(uid, uow, ct).ConfigureAwait(false);
+                if (!CanManagePost(ownerRow.Uid, uid, isAdmin))
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new ObjectResult(ApiResponse<object>.Error("无权限管理该帖子")) { StatusCode = 403 };
+                }
+
+                var currentStatus = NormalizeStoredStatus(ownerRow.Status);
+                if (string.Equals(currentStatus, targetStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new OkObjectResult(ApiResponse<object?>.Ok(null, "帖子状态未变化"));
+                }
+                if (string.Equals(currentStatus, "hidden", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(targetStatus, "normal", StringComparison.OrdinalIgnoreCase)
+                    && ownerRow.HiddenByAdmin > 0
+                    && !isAdmin)
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new ObjectResult(ApiResponse<object>.Error("该帖子由管理员隐藏，仅管理员可恢复")) { StatusCode = 403 };
+                }
+
+                long? nextHiddenByUid;
+                int nextHiddenByAdmin;
+                DateTime? nextHiddenAt;
+                if (string.Equals(targetStatus, "hidden", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(currentStatus, "hidden", StringComparison.OrdinalIgnoreCase))
+                    {
+                        nextHiddenByUid = ownerRow.HiddenByUid ?? uid;
+                        nextHiddenByAdmin = ownerRow.HiddenByAdmin > 0 ? 1 : (isAdmin ? 1 : 0);
+                        nextHiddenAt = ownerRow.HiddenAt ?? DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        nextHiddenByUid = uid;
+                        nextHiddenByAdmin = isAdmin ? 1 : 0;
+                        nextHiddenAt = DateTime.UtcNow;
+                    }
+                }
+                else
+                {
+                    nextHiddenByUid = null;
+                    nextHiddenByAdmin = 0;
+                    nextHiddenAt = null;
+                }
+
+                const string updateSql = @"
+UPDATE planet_post
+SET status = @status,
+    visibility = @visibility,
+    hidden_by_uid = @hiddenByUid,
+    hidden_by_admin = @hiddenByAdmin,
+    hidden_at = @hiddenAt,
+    updated_at = UTC_TIMESTAMP(3)
+WHERE post_id = @postId
+  AND status <> 'deleted';";
+
+                var affected = await _db.ExecuteAsync(
+                    updateSql,
+                    new
+                    {
+                        postId,
+                        status = targetStatus,
+                        visibility = ToLegacyVisibility(targetStatus),
+                        hiddenByUid = nextHiddenByUid,
+                        hiddenByAdmin = nextHiddenByAdmin,
+                        hiddenAt = nextHiddenAt
+                    },
+                    uow,
+                    ct).ConfigureAwait(false);
+
+                if (affected <= 0)
+                {
+                    await uow.RollbackAsync(ct).ConfigureAwait(false);
+                    return new NotFoundObjectResult(ApiResponse<object>.Error("帖子不存在或已删除"));
+                }
+
+                await uow.CommitAsync(ct).ConfigureAwait(false);
+                var message = targetStatus switch
+                {
+                    "normal" => "帖子已设为正常",
+                    "hidden" => "帖子已隐藏",
+                    "deleted" => "帖子已删除",
+                    _ => "帖子状态已更新"
+                };
+                return new OkObjectResult(ApiResponse<object?>.Ok(null, message));
+            }
+            catch (Exception ex)
+            {
+                await SafeRollbackAsync(uow, ct).ConfigureAwait(false);
+                _logger.LogError(ex, "设置帖子状态失败: uid={Uid}, postId={PostId}, status={Status}", uid, postId, targetStatus);
+                return new ObjectResult(ApiResponse<object>.Error("设置帖子状态失败，请稍后重试")) { StatusCode = 500 };
+            }
+        }
+
         private static PlanetPostCardDto ToCardDto(PostCardRow row)
         {
             return new PlanetPostCardDto
@@ -1119,43 +1489,84 @@ WHERE uid = @uid
                 AuthorAvatarUrl = row.AuthorAvatarUrl,
                 Title = row.Title ?? string.Empty,
                 Content = row.Content ?? string.Empty,
-                Visibility = row.Visibility ?? "public",
+                Status = NormalizeStoredStatus(row.Status),
                 LikeCount = row.LikeCount,
                 DislikeCount = row.DislikeCount,
                 FavoriteCount = row.FavoriteCount,
                 CommentCount = row.CommentCount,
                 UserReaction = row.UserReaction,
                 IsFavorited = row.IsFavorited > 0,
+                CanManage = row.CanManage > 0,
                 CreatedAt = row.CreatedAt,
                 UpdatedAt = row.UpdatedAt
             };
         }
 
-        private static bool CanViewPost(long ownerUid, string? visibility, long currentUid)
+        private static PlanetCommentDto ToCommentDto(PostCommentRow row, long currentUid, bool isAdmin, long postOwnerUid, bool allowOwnerDelete)
         {
-            if (ownerUid == currentUid)
+            return new PlanetCommentDto
+            {
+                CommentId = row.CommentId,
+                Uid = row.Uid,
+                AuthorName = row.AuthorName ?? string.Empty,
+                AuthorAvatarUrl = row.AuthorAvatarUrl,
+                Content = row.Content ?? string.Empty,
+                CanDelete = CanDeleteComment(row.Uid, postOwnerUid, currentUid, isAdmin, allowOwnerDelete),
+                CreatedAt = row.CreatedAt,
+                UpdatedAt = row.UpdatedAt
+            };
+        }
+
+        private static bool CanManagePost(long ownerUid, long currentUid, bool isAdmin)
+        {
+            return ownerUid == currentUid || isAdmin;
+        }
+
+        private static bool CanDeleteComment(long commentUid, long postOwnerUid, long currentUid, bool isAdmin, bool allowOwnerDelete)
+        {
+            if (commentUid == currentUid || isAdmin)
             {
                 return true;
             }
 
-            return string.Equals(visibility, "public", StringComparison.OrdinalIgnoreCase);
+            if (allowOwnerDelete && postOwnerUid == currentUid)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool CanViewPost(long ownerUid, string? status, long currentUid, bool isAdmin)
+        {
+            var normalizedStatus = NormalizeStoredStatus(status);
+            if (string.Equals(normalizedStatus, "deleted", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (string.Equals(normalizedStatus, "normal", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return ownerUid == currentUid || isAdmin;
         }
 
         private static string BuildListWhereSql(string scope)
         {
             return scope switch
             {
-                "mine" => "WHERE p.status = 'active' AND p.uid = @uid",
+                "mine" => "WHERE p.uid = @uid AND p.status IN ('normal', 'active', 'hidden')",
                 "favorite" => @"
-WHERE p.status = 'active'
+WHERE p.status IN ('normal', 'active')
   AND EXISTS (
       SELECT 1
       FROM planet_post_favorite pf_scope
       WHERE pf_scope.post_id = p.post_id
         AND pf_scope.uid = @uid
-  )
-  AND (p.visibility = 'public' OR p.uid = @uid)",
-                _ => "WHERE p.status = 'active' AND (p.visibility = 'public' OR p.uid = @uid)"
+  )",
+                _ => "WHERE p.status IN ('normal', 'active')"
             };
         }
 
@@ -1179,27 +1590,80 @@ WHERE p.status = 'active'
             return reactionType.Trim().ToLowerInvariant();
         }
 
-        private static bool TryNormalizeVisibility(string? visibility, out string normalizedVisibility)
+        private static string NormalizePostStatus(string? status)
         {
-            normalizedVisibility = "public";
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return "normal";
+            }
+
+            var normalized = status.Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "active" => "normal",
+                "public" => "normal",
+                _ => normalized
+            };
+        }
+
+        private static string NormalizeStoredStatus(string? status)
+        {
+            var normalized = NormalizePostStatus(status);
+            if (AllowedPostStatuses.Contains(normalized))
+            {
+                return normalized;
+            }
+
+            return "normal";
+        }
+
+        private static string ToLegacyVisibility(string status)
+        {
+            var normalized = NormalizePostStatus(status);
+            return string.Equals(normalized, "normal", StringComparison.OrdinalIgnoreCase) ? "public" : "hidden";
+        }
+
+        private static bool TryResolvePostStatus(string? status, string? visibility, out string normalizedStatus)
+        {
+            normalizedStatus = "normal";
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var normalized = NormalizePostStatus(status);
+                if (!AllowedPostStatuses.Contains(normalized))
+                {
+                    return false;
+                }
+
+                normalizedStatus = normalized;
+                return true;
+            }
+
             if (string.IsNullOrWhiteSpace(visibility))
             {
                 return true;
             }
 
-            var trimmed = visibility.Trim().ToLowerInvariant();
-            if (!AllowedVisibilities.Contains(trimmed))
+            var normalizedVisibility = visibility.Trim().ToLowerInvariant();
+            if (string.Equals(normalizedVisibility, "public", StringComparison.OrdinalIgnoreCase))
             {
-                return false;
+                normalizedStatus = "normal";
+                return true;
             }
 
-            normalizedVisibility = trimmed;
-            return true;
+            if (string.Equals(normalizedVisibility, "hidden", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedStatus = "hidden";
+                return true;
+            }
+
+            return false;
         }
 
         private static NormalizePostResult NormalizePostInput(
             string? title,
             string? content,
+            string? status,
             string? visibility,
             IReadOnlyList<string>? imageUrls,
             IReadOnlyList<long>? strategyUsIds)
@@ -1226,9 +1690,9 @@ WHERE p.status = 'active'
                 return NormalizePostResult.Fail($"帖子正文长度不能超过 {MaxContentLength} 字符");
             }
 
-            if (!TryNormalizeVisibility(visibility, out var normalizedVisibility))
+            if (!TryResolvePostStatus(status, visibility, out var normalizedStatus))
             {
-                return NormalizePostResult.Fail("帖子可见性仅支持 public 或 hidden");
+                return NormalizePostResult.Fail("帖子状态仅支持 normal/hidden/deleted（兼容 public/hidden）");
             }
 
             var normalizedImages = new List<string>();
@@ -1277,7 +1741,7 @@ WHERE p.status = 'active'
             {
                 Title = normalizedTitle,
                 Content = normalizedContent,
-                Visibility = normalizedVisibility,
+                Status = normalizedStatus,
                 ImageUrls = normalizedImages,
                 StrategyUsIds = normalizedStrategies
             });
@@ -1334,7 +1798,7 @@ WHERE p.status = 'active'
         {
             public string Title { get; set; } = string.Empty;
             public string Content { get; set; } = string.Empty;
-            public string Visibility { get; set; } = "public";
+            public string Status { get; set; } = "normal";
             public IReadOnlyList<string> ImageUrls { get; set; } = Array.Empty<string>();
             public IReadOnlyList<long> StrategyUsIds { get; set; } = Array.Empty<long>();
         }
@@ -1343,8 +1807,10 @@ WHERE p.status = 'active'
         {
             public long PostId { get; set; }
             public long Uid { get; set; }
-            public string Visibility { get; set; } = "public";
             public string Status { get; set; } = string.Empty;
+            public long? HiddenByUid { get; set; }
+            public int HiddenByAdmin { get; set; }
+            public DateTime? HiddenAt { get; set; }
         }
 
         private class PostCardRow
@@ -1355,20 +1821,16 @@ WHERE p.status = 'active'
             public string? AuthorAvatarUrl { get; set; }
             public string? Title { get; set; }
             public string? Content { get; set; }
-            public string? Visibility { get; set; }
+            public string? Status { get; set; }
             public int LikeCount { get; set; }
             public int DislikeCount { get; set; }
             public int FavoriteCount { get; set; }
             public int CommentCount { get; set; }
             public string? UserReaction { get; set; }
             public int IsFavorited { get; set; }
+            public int CanManage { get; set; }
             public DateTime CreatedAt { get; set; }
             public DateTime UpdatedAt { get; set; }
-        }
-
-        private sealed class PostDetailRow : PostCardRow
-        {
-            public string? Status { get; set; }
         }
 
         private sealed class PostImageRow
@@ -1418,12 +1880,22 @@ WHERE p.status = 'active'
         private sealed class PostCommentRow
         {
             public long CommentId { get; set; }
+            public long PostId { get; set; }
             public long Uid { get; set; }
             public string? AuthorName { get; set; }
             public string? AuthorAvatarUrl { get; set; }
             public string? Content { get; set; }
+            public string? Status { get; set; }
             public DateTime CreatedAt { get; set; }
             public DateTime UpdatedAt { get; set; }
+        }
+
+        private sealed class CommentIdentityRow
+        {
+            public long CommentId { get; set; }
+            public long PostId { get; set; }
+            public long Uid { get; set; }
+            public string? Status { get; set; }
         }
 
         private sealed class OwnedStrategyRow
@@ -1435,7 +1907,7 @@ WHERE p.status = 'active'
         {
             public long PostId { get; set; }
             public string? Title { get; set; }
-            public string? Visibility { get; set; }
+            public string? Status { get; set; }
             public int LikeCount { get; set; }
             public int DislikeCount { get; set; }
             public int FavoriteCount { get; set; }

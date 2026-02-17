@@ -1,4 +1,5 @@
 ﻿import React from 'react';
+import StrategyCurveSparkline from './StrategyCurveSparkline';
 import './OfficialStrategyItem.css';
 
 export type OfficialStrategyItemProps = {
@@ -10,6 +11,9 @@ export type OfficialStrategyItemProps = {
   singlePosition: string;
   totalPosition: string;
   profitLossRatio: string;
+  pnlSeries30d?: number[];
+  curveSource?: string;
+  isBacktestCurve?: boolean;
   version?: number;
   onUse?: () => void;
 };
@@ -23,6 +27,9 @@ const OfficialStrategyItem: React.FC<OfficialStrategyItemProps> = ({
   singlePosition,
   totalPosition,
   profitLossRatio,
+  pnlSeries30d,
+  curveSource,
+  isBacktestCurve,
   version,
   onUse,
 }) => {
@@ -68,6 +75,14 @@ const OfficialStrategyItem: React.FC<OfficialStrategyItemProps> = ({
           <div className="official-strategy-label">止盈止损比例</div>
           <div className="official-strategy-value">{profitLossRatio}</div>
         </div>
+      </div>
+
+      <div className="official-strategy-curve">
+        <StrategyCurveSparkline
+          series={pnlSeries30d}
+          curveSource={curveSource}
+          isBacktestCurve={isBacktestCurve}
+        />
       </div>
     </div>
   );

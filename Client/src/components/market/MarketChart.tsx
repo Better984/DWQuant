@@ -2193,7 +2193,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                 周期
               </button>
               {intervalMoreOpen && (
-                <div className="market-chart-popover-panel market-chart-period-selector">
+                <div className="market-chart-popover-panel market-chart-period-selector ui-scrollable">
                   <div className="market-chart-period-selector-title">选择周期</div>
                   {INTERVAL_CATEGORIES.map((cat) => (
                     <div key={cat.id} className="market-chart-period-category">
@@ -2244,7 +2244,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
                 更多
               </button>
               {rightMoreOpen && (
-                <div className="market-chart-popover-panel market-chart-popover-panel-sm market-chart-right-more">
+                <div className="market-chart-popover-panel market-chart-popover-panel-sm market-chart-right-more ui-scrollable">
                   <button
                     type="button"
                     className={`market-chart-btn ${indicatorDialogOpen ? "is-active" : ""}`}
@@ -2340,7 +2340,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
 
           <div className="market-chart-popover-wrap market-chart-panel-anchor">
             {activeToolbarPanel === "timezone" && (
-              <div className="market-chart-popover-panel market-chart-popover-panel-sm">
+              <div className="market-chart-popover-panel market-chart-popover-panel-sm ui-scrollable">
                 <div className="market-chart-panel-list">
                   {TIMEZONE_OPTIONS.map((option) => (
                     <button
@@ -2356,7 +2356,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
               </div>
             )}
             {activeToolbarPanel === "settings" && (
-              <div className="market-chart-popover-panel market-chart-popover-panel-settings">
+              <div className="market-chart-popover-panel market-chart-popover-panel-settings ui-scrollable">
                 <div className="market-chart-panel-section">
                   <div className="market-chart-panel-title">显示设置</div>
                   <div className="market-chart-toggle-list">
@@ -2643,7 +2643,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
             </button>
           </div>
 
-          <div className="market-chart-indicator-filter-row market-chart-indicator-filter-row-groups">
+          <div className="market-chart-indicator-filter-row market-chart-indicator-filter-row-groups ui-scrollable">
             <button
               type="button"
               className={`market-chart-btn ${indicatorGroupFilter === "ALL" ? "is-active" : ""}`}
@@ -2663,7 +2663,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
             ))}
           </div>
 
-          <div className="market-chart-indicator-list">
+          <div className="market-chart-indicator-list ui-scrollable">
             {!talibReady && <div className="market-chart-indicator-empty">指标初始化中...</div>}
             {talibReady && filteredIndicatorGroups.length === 0 && (
               <div className="market-chart-indicator-empty">未找到匹配指标</div>
@@ -2706,7 +2706,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
 
       {editingIndicator && (
         <div className="market-chart-modal-mask" onClick={() => setEditingIndicator(null)}>
-          <div className="market-chart-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="market-chart-modal ui-scrollable" onClick={(event) => event.stopPropagation()}>
             <div className="market-chart-modal-title">
               Indicator Settings - {editingIndicator.pane === "main" ? "Main" : "Sub"}{" "}
               {normalizeIndicatorName(editingIndicator.name)}

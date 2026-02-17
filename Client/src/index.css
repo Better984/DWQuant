@@ -23,3 +23,28 @@ html, body {
   overflow-x: hidden;
   overflow-y: auto;
 }
+
+/* 全局统一滚动条样式：可滚动容器添加 ui-scrollable 类 */
+.ui-scrollable::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.ui-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ui-scrollable::-webkit-scrollbar-thumb {
+  background: var(--border-color, rgba(0, 0, 0, 0.2));
+  border-radius: 2px;
+  transition: background-color 0.3s ease;
+}
+
+.ui-scrollable::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary, rgba(0, 0, 0, 0.35));
+}
+
+.ui-scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color, rgba(0, 0, 0, 0.2)) transparent;
+}

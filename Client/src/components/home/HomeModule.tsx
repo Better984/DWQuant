@@ -662,7 +662,7 @@ const HomeModule: React.FC<HomeModuleProps> = ({
           </div>
           <aside className="home-module-summary-right" style={summaryRightStyle} aria-label="最近操作日志">
             <div className="home-module-summary-right-title">最近操作日志</div>
-            <div className="home-module-summary-right-body">{renderRecentActivityContent()}</div>
+            <div className="home-module-summary-right-body ui-scrollable">{renderRecentActivityContent()}</div>
           </aside>
         </div>
       </section>

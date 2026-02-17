@@ -95,8 +95,6 @@ const WhatsOnRoadPanel: React.FC<WhatsOnRoadPanelProps> = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const dayListRef = useRef<HTMLDivElement>(null);
-  const scrollTrackRef = useRef<HTMLDivElement>(null);
-  const scrollThumbRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
 
@@ -161,49 +159,6 @@ const WhatsOnRoadPanel: React.FC<WhatsOnRoadPanelProps> = ({
       onResize?.(panelSize);
     }
   }, [allowResize, allowWidthResize, onResize, panelSize]);
-
-  useEffect(() => {
-    const list = listRef.current;
-    const track = scrollTrackRef.current;
-    const thumb = scrollThumbRef.current;
-    if (!list || !track || !thumb) {
-      return;
-    }
-
-    const updateScroll = () => {
-      const { scrollHeight, clientHeight, scrollTop } = list;
-      const trackHeight = track.clientHeight;
-      const isScrollable = scrollHeight > clientHeight + 1;
-      track.style.opacity = isScrollable ? '1' : '0';
-
-      if (!isScrollable) {
-        thumb.style.height = `${trackHeight}px`;
-        thumb.style.transform = 'translateY(0px)';
-        return;
-      }
-
-      const thumbHeight = Math.max(24, (clientHeight / scrollHeight) * trackHeight);
-      const maxThumbTop = trackHeight - thumbHeight;
-      const thumbTop =
-        scrollHeight === clientHeight
-          ? 0
-          : (scrollTop / (scrollHeight - clientHeight)) * maxThumbTop;
-
-      thumb.style.height = `${thumbHeight}px`;
-      thumb.style.transform = `translateY(${thumbTop}px)`;
-    };
-
-    updateScroll();
-    list.addEventListener('scroll', updateScroll);
-
-    const resizeObserver = new ResizeObserver(updateScroll);
-    resizeObserver.observe(list);
-
-    return () => {
-      list.removeEventListener('scroll', updateScroll);
-      resizeObserver.disconnect();
-    };
-  }, [panelSize.height, selectedKey]);
 
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -305,7 +260,7 @@ const WhatsOnRoadPanel: React.FC<WhatsOnRoadPanelProps> = ({
       </div>
 
       <div 
-        className="whats-on-road-day-list" 
+        className="whats-on-road-day-list ui-scrollable" 
         ref={dayListRef}
         style={{ '--visible-day-count': visibleDayCount } as React.CSSProperties}
       >
@@ -322,7 +277,7 @@ const WhatsOnRoadPanel: React.FC<WhatsOnRoadPanelProps> = ({
       </div>
 
       <div className="whats-on-road-list-wrapper">
-        <div className="whats-on-road-list" ref={listRef}>
+        <div className="whats-on-road-list ui-scrollable" ref={listRef}>
           {events.length === 0 ? (
             <div className="whats-on-road-empty">No key events</div>
           ) : (
@@ -338,9 +293,6 @@ const WhatsOnRoadPanel: React.FC<WhatsOnRoadPanelProps> = ({
               </div>
             ))
           )}
-        </div>
-        <div className="whats-on-road-scrollbar" ref={scrollTrackRef}>
-          <div className="whats-on-road-scrollbar-thumb" ref={scrollThumbRef}></div>
         </div>
       </div>
 

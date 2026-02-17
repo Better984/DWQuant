@@ -25,8 +25,8 @@ const MarketModule = lazy(() => import('../market/MarketModule'));
 const StrategyModule = lazy(() => import('../strategy/StrategyModule'));
 const IndicatorModule = lazy(() => import('../indicator/IndicatorModule'));
 const DiscoverModule = lazy(() => import('../discover/DiscoverModule'));
-const PlanetModule = lazy(() => import('../planet/PlanetModule'));
 const ChatModule = lazy(() => import('../chat/ChatModule'));
+const PlanetModule = lazy(() => import('../planet/PlanetModule'));
 const StrategyList = lazy(() => import('../strategy/StrategyList'));
 const UserSettings = lazy(() => import('../user/UserSettings'));
 const IndicatorGeneratorSelector = lazy(() => import('../indicator/IndicatorGeneratorSelector'));
@@ -312,7 +312,7 @@ const Dashboard: React.FC = () => {
   };
 
   const mainContentClassName = useMemo(
-    () => `dashboard-main-content ${activeMenuIndex === 1 ? 'is-market-module' : ''}`,
+    () => `dashboard-main-content ui-scrollable ${activeMenuIndex === 1 ? 'is-market-module' : ''}`,
     [activeMenuIndex],
   );
 
@@ -322,7 +322,7 @@ const Dashboard: React.FC = () => {
       style={{ ['--right-sidebar-width' as string]: `${isRightSidebarCollapsed ? 0 : rightSidebarWidth}px` }}
     >
       {/* Left Sidebar */}
-      <aside className={`dashboard-left-sidebar ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
+      <aside className={`dashboard-left-sidebar ui-scrollable ${isSidebarCollapsed ? 'is-collapsed' : ''}`}>
         {/* Top Section: Logo + Navigation */}
         <div className="sidebar-top-section">
           {/* Logo Section */}
@@ -577,7 +577,7 @@ const Dashboard: React.FC = () => {
 
       {/* Right Sidebar */}
       <aside 
-        className={`dashboard-right-sidebar ${isRightSidebarCollapsed ? 'is-collapsed' : ''}`}
+        className={`dashboard-right-sidebar ui-scrollable ${isRightSidebarCollapsed ? 'is-collapsed' : ''}`}
         onPointerDown={handleRightSidebarResizeStart}
       >
         <CryptoMarketPanel

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 
 import type { GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
 import type { ConditionContainer, ConditionItem } from './StrategyModule.types';
@@ -59,7 +59,7 @@ const StrategyEditorShell: React.FC<StrategyEditorShellProps> = ({
         <div className="strategy-editor-title">策略编辑器</div>
         <button className="strategy-editor-close" onClick={onClose}>返回</button>
       </div>
-      <div className="strategy-editor-body">
+      <div className="strategy-editor-body ui-scrollable">
         <StrategyIndicatorPanel
           selectedIndicators={selectedIndicators}
           onOpenIndicatorGenerator={onOpenIndicatorGenerator}

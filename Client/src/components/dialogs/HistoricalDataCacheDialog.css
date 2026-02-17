@@ -144,15 +144,6 @@
   padding: 4px;
 }
 
-.historical-cache-filter-menu-items::-webkit-scrollbar {
-  width: 6px;
-}
-
-.historical-cache-filter-menu-items::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 3px;
-}
-
 .historical-cache-filter-menu-item {
   display: flex;
   align-items: center;
@@ -318,29 +309,3 @@
   border-bottom: none;
 }
 
-/* 滚动条样式 */
-.historical-cache-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.historical-cache-content::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-}
-
-.historical-cache-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
-}
-
-.historical-cache-table-wrapper::-webkit-scrollbar {
-  height: 8px;
-}
-
-.historical-cache-table-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-}
-
-.historical-cache-table-wrapper::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
-}

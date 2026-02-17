@@ -45,6 +45,10 @@
   line-height: 1.4;
 }
 
+.strategy-market-curve {
+  padding-top: 4px;
+}
+
 .strategy-market-footer {
   display: flex;
   align-items: center;

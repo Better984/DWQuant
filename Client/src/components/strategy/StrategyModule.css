@@ -292,12 +292,6 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.strategy-editor-body::-webkit-scrollbar {
-  display: none;
 }
 
 .strategy-editor-footer {
@@ -1027,11 +1021,6 @@
   overflow-x: hidden;
   min-height: 0;
   max-height: 100%;
-  scrollbar-width: none;
-}
-
-.strategy-config-summary::-webkit-scrollbar {
-  display: none;
 }
 
 .strategy-config-indicator-title {
@@ -1114,36 +1103,6 @@
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 100%;
-  scrollbar-width: none;
-}
-
-.strategy-config-code::-webkit-scrollbar {
-  display: none;
-}
-
-.strategy-config-scrollbar {
-  position: absolute;
-  top: 8px;
-  right: 2px;
-  bottom: 12px;
-  width: 4px;
-  border-radius: 999px;
-  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-.strategy-config-summary-wrapper:hover .strategy-config-scrollbar,
-.strategy-config-code-wrapper:hover .strategy-config-scrollbar {
-  opacity: 1 !important;
-}
-
-.strategy-config-scrollbar-thumb {
-  width: 100%;
-  border-radius: 999px;
-  background: var(--text-tertiary, rgba(0, 0, 0, 0.3));
-  transition: background-color 0.3s ease;
 }
 
 .trade-form-section {

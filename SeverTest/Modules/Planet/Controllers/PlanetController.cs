@@ -87,9 +87,9 @@ namespace ServerTest.Controllers
             return WithUserAsync(request, uid => _planetService.DeletePostAsync(uid, payload, HttpContext.RequestAborted));
         }
 
-        [ProtocolType("planet.post.visibility")]
-        [HttpPost("posts/visibility")]
-        public Task<IActionResult> SetVisibility([FromBody] ProtocolRequest<PlanetPostVisibilityRequest> request)
+        [ProtocolType("planet.post.status.update")]
+        [HttpPost("posts/status")]
+        public Task<IActionResult> SetPostStatus([FromBody] ProtocolRequest<PlanetPostStatusUpdateRequest> request)
         {
             var payload = request.Data;
             if (payload == null)
@@ -97,7 +97,20 @@ namespace ServerTest.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
             }
 
-            return WithUserAsync(request, uid => _planetService.SetVisibilityAsync(uid, payload, HttpContext.RequestAborted));
+            return WithUserAsync(request, uid => _planetService.SetPostStatusAsync(uid, payload, HttpContext.RequestAborted));
+        }
+
+        [ProtocolType("planet.post.visibility")]
+        [HttpPost("posts/visibility")]
+        public Task<IActionResult> SetVisibilityCompat([FromBody] ProtocolRequest<PlanetPostStatusUpdateRequest> request)
+        {
+            var payload = request.Data;
+            if (payload == null)
+            {
+                return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
+            }
+
+            return WithUserAsync(request, uid => _planetService.SetPostStatusAsync(uid, payload, HttpContext.RequestAborted));
         }
 
         [ProtocolType("planet.post.list")]
@@ -158,6 +171,32 @@ namespace ServerTest.Controllers
             }
 
             return WithUserAsync(request, uid => _planetService.AddCommentAsync(uid, payload, HttpContext.RequestAborted));
+        }
+
+        [ProtocolType("planet.post.comment.list")]
+        [HttpPost("posts/comment/list")]
+        public Task<IActionResult> ListComments([FromBody] ProtocolRequest<PlanetPostCommentListRequest> request)
+        {
+            var payload = request.Data;
+            if (payload == null)
+            {
+                return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
+            }
+
+            return WithUserAsync(request, uid => _planetService.ListCommentsAsync(uid, payload, HttpContext.RequestAborted));
+        }
+
+        [ProtocolType("planet.post.comment.delete")]
+        [HttpPost("posts/comment/delete")]
+        public Task<IActionResult> DeleteComment([FromBody] ProtocolRequest<PlanetPostCommentDeleteRequest> request)
+        {
+            var payload = request.Data;
+            if (payload == null)
+            {
+                return Task.FromResult<IActionResult>(BadRequest(ApiResponse<object>.Error("缺少请求数据")));
+            }
+
+            return WithUserAsync(request, uid => _planetService.DeleteCommentAsync(uid, payload, HttpContext.RequestAborted));
         }
 
         [ProtocolType("planet.post.owner.stats")]

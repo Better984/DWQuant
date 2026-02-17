@@ -18,6 +18,7 @@ using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.StrategyEngine.Domain;
 using ServerTest.Modules.StrategyRuntime.Application;
 using ServerTest.Options;
+using ServerTest.Modules.StrategyManagement.Application;
 
 namespace ServerTest.Modules.StrategyManagement.Infrastructure
 {
@@ -45,6 +46,8 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
         private const string StrategyStateLogTag = "[StrategyState]";
+        private const int StrategyCurveDays = 30;
+        private const int PerformanceWarmupTimeoutSeconds = 10;
 
         private readonly DatabaseService _db;
         private readonly StrategyJsonLoader _strategyLoader;
@@ -55,6 +58,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
         private readonly StrategyRunCheckLogRepository _runCheckLogRepository;
         private readonly IStrategyRuntimeTemplateProvider _runtimeTemplateProvider;
         private readonly BusinessRulesOptions _businessRules;
+        private readonly StrategyPerformanceCacheService _strategyPerformanceCacheService;
 
         private sealed class StrategyListItem
         {
@@ -79,11 +83,15 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
         private sealed class StrategyCatalogItem
         {
             public long DefId { get; set; }
+            public long? SourceUsId { get; set; }
             public string Name { get; set; } = string.Empty;
             public string Description { get; set; } = string.Empty;
             public int VersionNo { get; set; }
             public JsonElement? ConfigJson { get; set; }
             public DateTime UpdatedAt { get; set; }
+            public List<decimal> PnlSeries30d { get; set; } = new();
+            public string CurveSource { get; set; } = "live";
+            public bool IsBacktestCurve { get; set; }
         }
 
         private sealed class StrategyMarketItem
@@ -97,6 +105,9 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             public JsonElement? ConfigJson { get; set; }
             public string? AuthorName { get; set; }
             public DateTime UpdatedAt { get; set; }
+            public List<decimal> PnlSeries30d { get; set; } = new();
+            public string CurveSource { get; set; } = "live";
+            public bool IsBacktestCurve { get; set; }
         }
 
         private sealed class StrategyVersionItem
@@ -124,6 +135,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             StrategyRunCheckService runCheckService,
             StrategyRunCheckLogRepository runCheckLogRepository,
             IStrategyRuntimeTemplateProvider runtimeTemplateProvider,
+            StrategyPerformanceCacheService strategyPerformanceCacheService,
             IOptions<BusinessRulesOptions> businessRules,
             ILogger<StrategyRepository> logger)
             : base(logger)
@@ -136,6 +148,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             _runCheckService = runCheckService ?? throw new ArgumentNullException(nameof(runCheckService));
             _runCheckLogRepository = runCheckLogRepository ?? throw new ArgumentNullException(nameof(runCheckLogRepository));
             _runtimeTemplateProvider = runtimeTemplateProvider ?? throw new ArgumentNullException(nameof(runtimeTemplateProvider));
+            _strategyPerformanceCacheService = strategyPerformanceCacheService ?? throw new ArgumentNullException(nameof(strategyPerformanceCacheService));
             _businessRules = businessRules?.Value ?? new BusinessRulesOptions();
         }
 
@@ -370,6 +383,7 @@ ORDER BY us.updated_at DESC
                 var cmd = new MySqlCommand(@"
 SELECT
   sd.def_id,
+  sd.source_us_id,
   sd.name,
   sd.description,
   sd.updated_at,
@@ -384,11 +398,13 @@ ORDER BY sd.updated_at DESC, sd.def_id DESC
                 var results = new List<StrategyCatalogItem>();
                 var versionNoOrdinal = reader.GetOrdinal("version_no");
                 var configOrdinal = reader.GetOrdinal("config_json");
+                var sourceUsIdOrdinal = reader.GetOrdinal("source_us_id");
                 while (await reader.ReadAsync())
                 {
                     results.Add(new StrategyCatalogItem
                     {
                         DefId = reader.GetInt64("def_id"),
+                        SourceUsId = reader.IsDBNull(sourceUsIdOrdinal) ? null : reader.GetInt64(sourceUsIdOrdinal),
                         Name = reader.GetString("name"),
                         Description = reader.GetString("description"),
                         VersionNo = reader.IsDBNull(versionNoOrdinal) ? 0 : reader.GetInt32(versionNoOrdinal),
@@ -397,6 +413,7 @@ ORDER BY sd.updated_at DESC, sd.def_id DESC
                     });
                 }
 
+                await FillOfficialPerformanceAsync(results).ConfigureAwait(false);
                 return Ok(ApiResponse<List<StrategyCatalogItem>>.Ok(results));
             }
             catch (Exception ex)
@@ -553,6 +570,7 @@ ORDER BY sm.updated_at DESC, sm.market_id DESC
                     });
                 }
 
+                await FillMarketPerformanceAsync(results).ConfigureAwait(false);
                 return Ok(ApiResponse<List<StrategyMarketItem>>.Ok(results));
             }
             catch (Exception ex)
@@ -644,6 +662,7 @@ WHERE us_id = @us_id AND uid = @uid
                 await updateVisibilityCmd.ExecuteNonQueryAsync();
 
                 await transaction.CommitAsync();
+                await WarmupPerformanceCacheAsync(request.UsId, "market.publish").ConfigureAwait(false);
                 return Ok(ApiResponse<object>.Ok(new { request.UsId }, "发布成功"));
             }
             catch (Exception ex)
@@ -1072,6 +1091,7 @@ LIMIT 1
                 if (currentVersionId == pinnedVersionId)
                 {
                     await transaction.CommitAsync();
+                    await WarmupPerformanceCacheAsync(request.UsId, "market.sync.noop").ConfigureAwait(false);
                     return Ok(ApiResponse<object>.Ok(new { request.UsId, MarketId = marketId }, "已是最新版本"));
                 }
 
@@ -1093,6 +1113,7 @@ WHERE market_id = @market_id
                 await updateCmd.ExecuteNonQueryAsync();
 
                 await transaction.CommitAsync();
+                await WarmupPerformanceCacheAsync(request.UsId, "market.sync").ConfigureAwait(false);
                 return Ok(ApiResponse<object>.Ok(new { request.UsId, MarketId = marketId }, "发布最新版本成功"));
             }
             catch (Exception ex)
@@ -1206,12 +1227,16 @@ VALUES
                 await insertEventCmd.ExecuteNonQueryAsync();
 
                 await transaction.CommitAsync();
+                var performance = await GetStrategyPerformanceSnapshotAsync(request.UsId).ConfigureAwait(false);
 
                 var response = new
                 {
                     UsId = request.UsId,
                     Visibility = "shared",
-                    ShareCode = shareCode
+                    ShareCode = shareCode,
+                    PnlSeries30d = performance.PnlSeries30d,
+                    CurveSource = performance.CurveSource,
+                    IsBacktestCurve = performance.IsBacktestCurve
                 };
                 return Ok(ApiResponse<object>.Ok(response, "分享码生成成功"));
             }
@@ -2328,6 +2353,10 @@ WHERE def_id = @def_id
                 await updateDefCmd.ExecuteNonQueryAsync();
 
                 await transaction.CommitAsync();
+                if (isOfficial)
+                {
+                    await WarmupPerformanceCacheAsync(request.UsId, "official.publish").ConfigureAwait(false);
+                }
 
                 var response = new
                 {
@@ -2458,6 +2487,10 @@ LIMIT 1
                 if (userVersionNo <= publishedVersionNo)
                 {
                     await transaction.CommitAsync();
+                    if (isOfficial)
+                    {
+                        await WarmupPerformanceCacheAsync(request.UsId, "official.sync.noop").ConfigureAwait(false);
+                    }
                     return Ok(ApiResponse<object>.Ok(new { request.UsId, DefId = defId }, "已是最新版本"));
                 }
 
@@ -2501,6 +2534,10 @@ WHERE def_id = @def_id
                 await updateDefCmd.ExecuteNonQueryAsync();
 
                 await transaction.CommitAsync();
+                if (isOfficial)
+                {
+                    await WarmupPerformanceCacheAsync(request.UsId, "official.sync").ConfigureAwait(false);
+                }
                 return Ok(ApiResponse<object>.Ok(new { request.UsId, DefId = defId, VersionId = newVersionId }, "发布最新版本成功"));
             }
             catch (Exception ex)
@@ -2576,6 +2613,177 @@ WHERE def_id = @def_id
                 Logger.LogError(ex, "移除{Target}策略失败: uid={Uid} usId={UsId}", target, uid, request.UsId);
                 await SafeRollbackAsync(transaction);
                 return StatusCode(500, ApiResponse<object>.Error("移除失败，请稍后重试"));
+            }
+        }
+
+        private async Task FillOfficialPerformanceAsync(List<StrategyCatalogItem> items)
+        {
+            if (items.Count == 0)
+            {
+                return;
+            }
+
+            var usIds = items
+                .Where(item => item.SourceUsId.HasValue && item.SourceUsId.Value > 0)
+                .Select(item => item.SourceUsId!.Value)
+                .Distinct()
+                .ToList();
+            if (usIds.Count == 0)
+            {
+                foreach (var item in items)
+                {
+                    var defaultCurve = BuildDefaultCurve();
+                    item.PnlSeries30d = defaultCurve;
+                    item.CurveSource = "live";
+                    item.IsBacktestCurve = false;
+                }
+
+                return;
+            }
+
+            var snapshots = await _strategyPerformanceCacheService
+                .GetCurveSnapshotsAsync(usIds, StrategyCurveDays, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            foreach (var item in items)
+            {
+                if (!item.SourceUsId.HasValue || item.SourceUsId.Value <= 0)
+                {
+                    var defaultCurve = BuildDefaultCurve();
+                    item.PnlSeries30d = defaultCurve;
+                    item.CurveSource = "live";
+                    item.IsBacktestCurve = false;
+                    continue;
+                }
+
+                if (snapshots.TryGetValue(item.SourceUsId.Value, out var snapshot))
+                {
+                    item.PnlSeries30d = snapshot.Series?.Count > 0
+                        ? snapshot.Series.ToList()
+                        : BuildDefaultCurve();
+                    item.CurveSource = NormalizeCurveSource(snapshot.CurveSource);
+                    item.IsBacktestCurve = snapshot.IsBacktest;
+                    continue;
+                }
+
+                var fallbackCurve = BuildDefaultCurve();
+                item.PnlSeries30d = fallbackCurve;
+                item.CurveSource = "live";
+                item.IsBacktestCurve = false;
+            }
+        }
+
+        private async Task FillMarketPerformanceAsync(List<StrategyMarketItem> items)
+        {
+            if (items.Count == 0)
+            {
+                return;
+            }
+
+            var usIds = items
+                .Select(item => item.UsId)
+                .Where(item => item > 0)
+                .Distinct()
+                .ToList();
+            if (usIds.Count == 0)
+            {
+                foreach (var item in items)
+                {
+                    var defaultCurve = BuildDefaultCurve();
+                    item.PnlSeries30d = defaultCurve;
+                    item.CurveSource = "live";
+                    item.IsBacktestCurve = false;
+                }
+
+                return;
+            }
+
+            var snapshots = await _strategyPerformanceCacheService
+                .GetCurveSnapshotsAsync(usIds, StrategyCurveDays, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            foreach (var item in items)
+            {
+                if (snapshots.TryGetValue(item.UsId, out var snapshot))
+                {
+                    item.PnlSeries30d = snapshot.Series?.Count > 0
+                        ? snapshot.Series.ToList()
+                        : BuildDefaultCurve();
+                    item.CurveSource = NormalizeCurveSource(snapshot.CurveSource);
+                    item.IsBacktestCurve = snapshot.IsBacktest;
+                    continue;
+                }
+
+                var defaultCurve = BuildDefaultCurve();
+                item.PnlSeries30d = defaultCurve;
+                item.CurveSource = "live";
+                item.IsBacktestCurve = false;
+            }
+        }
+
+        private async Task<StrategyPerformancePayload> GetStrategyPerformanceSnapshotAsync(long usId)
+        {
+            if (usId <= 0)
+            {
+                return StrategyPerformancePayload.Empty();
+            }
+
+            var snapshots = await _strategyPerformanceCacheService
+                .GetCurveSnapshotsAsync(new[] { usId }, StrategyCurveDays, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (snapshots.TryGetValue(usId, out var snapshot))
+            {
+                return new StrategyPerformancePayload(
+                    snapshot.Series?.Count > 0 ? snapshot.Series.ToList() : BuildDefaultCurve(),
+                    NormalizeCurveSource(snapshot.CurveSource),
+                    snapshot.IsBacktest);
+            }
+
+            return StrategyPerformancePayload.Empty();
+        }
+
+        private async Task WarmupPerformanceCacheAsync(long usId, string scene)
+        {
+            if (usId <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(PerformanceWarmupTimeoutSeconds));
+                await _strategyPerformanceCacheService
+                    .GetCurveSnapshotsAsync(new[] { usId }, StrategyCurveDays, timeoutCts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogWarning("策略绩效缓存预热超时: scene={Scene}, usId={UsId}", scene, usId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "策略绩效缓存预热失败: scene={Scene}, usId={UsId}", scene, usId);
+            }
+        }
+
+        private static List<decimal> BuildDefaultCurve()
+        {
+            return Enumerable.Repeat(0m, StrategyCurveDays).ToList();
+        }
+
+        private static string NormalizeCurveSource(string? source)
+        {
+            return string.Equals(source, "backtest", StringComparison.OrdinalIgnoreCase) ? "backtest" : "live";
+        }
+
+        private readonly record struct StrategyPerformancePayload(
+            List<decimal> PnlSeries30d,
+            string CurveSource,
+            bool IsBacktestCurve)
+        {
+            public static StrategyPerformancePayload Empty()
+            {
+                return new StrategyPerformancePayload(BuildDefaultCurve(), "live", false);
             }
         }
 

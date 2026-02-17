@@ -42,12 +42,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 2px;
-}
-
-.whats-on-road-day-list::-webkit-scrollbar {
-  display: none;
 }
 
 .whats-on-road-day {
@@ -106,11 +103,6 @@
   overflow-y: auto;
   min-height: 0;
   padding-right: 6px;
-  scrollbar-width: none;
-}
-
-.whats-on-road-list::-webkit-scrollbar {
-  display: none;
 }
 
 .whats-on-road-item {
@@ -184,25 +176,6 @@
   line-height: 16px;
   color: var(--text-secondary);
   padding: 8px 6px;
-}
-
-.whats-on-road-scrollbar {
-  position: absolute;
-  top: 8px;
-  right: 2px;
-  bottom: 12px;
-  width: 4px;
-  border-radius: 999px;
-  background: var(--bg-hover);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.whats-on-road-scrollbar-thumb {
-  width: 100%;
-  border-radius: 999px;
-  background: var(--text-tertiary);
-  transition: background-color 0.3s ease;
 }
 
 .whats-on-road-resize-handle {

@@ -403,7 +403,7 @@ const LazyTable = <T,>({
           解析范围：{startIndex}-{endIndex}
         </span>
       </div>
-      <div className="backtest-table-wrapper" ref={containerRef}>
+      <div className="backtest-table-wrapper ui-scrollable" ref={containerRef}>
         <table className="backtest-table">
           <thead>{columns}</thead>
           <tbody>
@@ -2049,7 +2049,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 
     if (isBacktestRunning) {
       return (
-        <div className="backtest-result">
+        <div className="backtest-result ui-scrollable">
           <div className="backtest-empty">回测运行中...</div>
           <div className="backtest-result-meta">
             <span>当前阶段：{backtestProgressStage || '-'}</span>
@@ -2066,7 +2066,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
           {backtestStreamingTrades.length > 0 && (
             <details className="backtest-details" open>
               <summary>最近仓位预览（{backtestStreamingTrades.length}）</summary>
-              <div className="backtest-table-wrapper">
+              <div className="backtest-table-wrapper ui-scrollable">
                 <table className="backtest-table">
                   <thead>
                     <tr>
@@ -2110,7 +2110,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     }
 
     return (
-      <div className="backtest-result">
+      <div className="backtest-result ui-scrollable">
         <div className="backtest-result-meta">
           <span>交易所：{backtestResult.exchange || '-'}</span>
           <span>周期：{backtestResult.timeframe || '-'}</span>
@@ -2301,7 +2301,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         </button>
       </div>
 
-      <div className="strategy-detail-tabs">
+      <div className="strategy-detail-tabs ui-scrollable">
         <button
           type="button"
           className={`strategy-detail-tab ${activeTab === 'info' ? 'is-active' : ''}`}
@@ -2339,7 +2339,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         </button>
       </div>
 
-      <div className="strategy-detail-content">
+      <div className="strategy-detail-content ui-scrollable">
         {activeTab === 'info' && (
           <div className="strategy-detail-info">
             <div className="strategy-detail-section">
@@ -2509,7 +2509,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         )}
 
         {activeTab === 'share' && (
-          <div className="strategy-detail-share">
+          <div className="strategy-detail-share ui-scrollable">
             <div className="strategy-detail-share-wrapper">
               <StrategyShareDialog
                 strategyName={strategy.aliasName || strategy.defName}
@@ -2521,7 +2521,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         )}
 
         {activeTab === 'history' && (
-          <div className="strategy-detail-history">
+          <div className="strategy-detail-history ui-scrollable">
             <StrategyHistoryDialog
               versions={historyVersions}
               selectedVersionId={selectedHistoryVersionId}
@@ -2533,7 +2533,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         )}
 
         {activeTab === 'positions' && (
-          <div className="strategy-detail-positions">
+          <div className="strategy-detail-positions ui-scrollable">
             <div className="strategy-detail-positions-card">
               <div className="strategy-detail-positions-header">
                 <div>
@@ -2566,7 +2566,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
               ) : positions.length === 0 ? (
                 <div className="strategy-detail-empty">暂无仓位记录</div>
               ) : (
-                <div className="strategy-detail-positions-table">
+                <div className="strategy-detail-positions-table ui-scrollable">
                   <div className="positions-table-header">
                     <div className="positions-table-cell">仓位ID</div>
                     <div className="positions-table-cell">交易所</div>
@@ -3014,7 +3014,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                   )}
                 </div>
                 {isBacktestRunning ? (
-                  <div className="backtest-result">
+                  <div className="backtest-result ui-scrollable">
                     <div className="backtest-empty">回测运行中...</div>
                     <div className="backtest-result-meta">
                       <span>当前阶段：{backtestProgressStage || '-'}</span>
@@ -3031,7 +3031,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                     {backtestStreamingTrades.length > 0 && (
                       <details className="backtest-details" open>
                         <summary>最近仓位预览（{backtestStreamingTrades.length}）</summary>
-                        <div className="backtest-table-wrapper">
+                        <div className="backtest-table-wrapper ui-scrollable">
                           <table className="backtest-table">
                             <thead>
                               <tr>
@@ -3068,7 +3068,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                     )}
                   </div>
                 ) : backtestResult ? (
-                  <div className="backtest-result">
+                  <div className="backtest-result ui-scrollable">
                     <div className="backtest-result-meta">
                       <span>交易所：{backtestResult.exchange || '-'}</span>
                       <span>周期：{backtestResult.timeframe || '-'}</span>

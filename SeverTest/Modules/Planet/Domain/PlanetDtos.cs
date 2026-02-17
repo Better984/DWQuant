@@ -6,7 +6,8 @@ namespace ServerTest.Modules.Planet.Domain
     {
         public string Title { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
-        public string Visibility { get; set; } = "public";
+        public string? Status { get; set; }
+        public string? Visibility { get; set; }
         public List<string>? ImageUrls { get; set; }
         public List<long>? StrategyUsIds { get; set; }
     }
@@ -16,7 +17,8 @@ namespace ServerTest.Modules.Planet.Domain
         public long PostId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
-        public string Visibility { get; set; } = "public";
+        public string? Status { get; set; }
+        public string? Visibility { get; set; }
         public List<string>? ImageUrls { get; set; }
         public List<long>? StrategyUsIds { get; set; }
     }
@@ -26,10 +28,11 @@ namespace ServerTest.Modules.Planet.Domain
         public long PostId { get; set; }
     }
 
-    public sealed class PlanetPostVisibilityRequest
+    public sealed class PlanetPostStatusUpdateRequest
     {
         public long PostId { get; set; }
-        public string Visibility { get; set; } = "public";
+        public string? Status { get; set; }
+        public string? Visibility { get; set; }
     }
 
     public sealed class PlanetPostListRequest
@@ -62,6 +65,18 @@ namespace ServerTest.Modules.Planet.Domain
         public string Content { get; set; } = string.Empty;
     }
 
+    public sealed class PlanetPostCommentListRequest
+    {
+        public long PostId { get; set; }
+        public int? Offset { get; set; }
+        public int? Limit { get; set; }
+    }
+
+    public sealed class PlanetPostCommentDeleteRequest
+    {
+        public long CommentId { get; set; }
+    }
+
     public sealed class PlanetOwnerStatsRequest
     {
         public int? Page { get; set; }
@@ -89,13 +104,14 @@ namespace ServerTest.Modules.Planet.Domain
         public string? AuthorAvatarUrl { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
-        public string Visibility { get; set; } = "public";
+        public string Status { get; set; } = "normal";
         public int LikeCount { get; set; }
         public int DislikeCount { get; set; }
         public int FavoriteCount { get; set; }
         public int CommentCount { get; set; }
         public string? UserReaction { get; set; }
         public bool IsFavorited { get; set; }
+        public bool CanManage { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public List<string> ImageUrls { get; set; } = new();
@@ -117,6 +133,9 @@ namespace ServerTest.Modules.Planet.Domain
         public string DefName { get; set; } = string.Empty;
         public string State { get; set; } = string.Empty;
         public int VersionNo { get; set; }
+        public List<decimal> PnlSeries30d { get; set; } = new();
+        public string CurveSource { get; set; } = "live";
+        public bool IsBacktestCurve { get; set; }
     }
 
     public sealed class PlanetStrategyDetailDto
@@ -153,8 +172,19 @@ namespace ServerTest.Modules.Planet.Domain
         public string AuthorName { get; set; } = string.Empty;
         public string? AuthorAvatarUrl { get; set; }
         public string Content { get; set; } = string.Empty;
+        public bool CanDelete { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
+    }
+
+    public sealed class PlanetPostCommentListResponse
+    {
+        public long PostId { get; set; }
+        public long Total { get; set; }
+        public int Offset { get; set; }
+        public int Limit { get; set; }
+        public bool HasMore { get; set; }
+        public List<PlanetCommentDto> Items { get; set; } = new();
     }
 
     public sealed class PlanetOwnerStatsResponse
@@ -169,7 +199,7 @@ namespace ServerTest.Modules.Planet.Domain
     {
         public long PostId { get; set; }
         public string Title { get; set; } = string.Empty;
-        public string Visibility { get; set; } = "public";
+        public string Status { get; set; } = "normal";
         public int LikeCount { get; set; }
         public int DislikeCount { get; set; }
         public int FavoriteCount { get; set; }

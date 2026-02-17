@@ -96,7 +96,7 @@ const Dialog: React.FC<DialogProps> = ({
 
   return createPortal(
     <div className="ui-dialog-overlay" onClick={handleBackdropClick}>
-      <div className={`ui-dialog ${className}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`ui-dialog ui-scrollable ${className}`} onClick={(e) => e.stopPropagation()}>
         {/* 标题区域 */}
         {(title || showCloseButton) && (
           <>

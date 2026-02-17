@@ -41,16 +41,6 @@
   animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Ensure content doesn't overflow */
-.user-settings-popup::-webkit-scrollbar {
-  display: none;
-}
-
-.user-settings-popup {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
 @keyframes slideUp {
   from {
     transform: translateY(20px);
@@ -160,23 +150,6 @@
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-}
-
-.user-settings-content::-webkit-scrollbar {
-  width: 8px;
-}
-
-.user-settings-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.user-settings-content::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-}
-
-.user-settings-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
 }
 
 /* User Header */
