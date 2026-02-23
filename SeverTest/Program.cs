@@ -18,6 +18,8 @@ using ServerTest.Modules.AdminBroadcast.Infrastructure;
 using ServerTest.Modules.Backtest.Application;
 using ServerTest.Modules.Backtest.Infrastructure;
 using ServerTest.Modules.ExchangeApiKeys.Infrastructure;
+using ServerTest.Modules.Indicators.Application;
+using ServerTest.Modules.Indicators.Infrastructure;
 using ServerTest.Modules.MarketData.Application;
 using ServerTest.Modules.MarketData.Infrastructure;
 using ServerTest.Modules.MarketStreaming.Application;
@@ -208,6 +210,8 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<BusinessRulesOptions>(configuration.GetSection("BusinessRules"));
     services.Configure<BacktestWorkerOptions>(configuration.GetSection("BacktestWorker"));
     services.Configure<TalibCoreOptions>(configuration.GetSection("TalibCore"));
+    services.Configure<IndicatorFrameworkOptions>(configuration.GetSection("Indicators"));
+    services.Configure<CoinGlassOptions>(configuration.GetSection("CoinGlass"));
 
     services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
     services.AddSingleton<IValidateOptions<ConditionCacheOptions>, ConditionCacheOptionsValidator>();
@@ -218,6 +222,8 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.AddSingleton<IValidateOptions<RuntimeQueueOptions>, RuntimeQueueOptionsValidator>();
     services.AddSingleton<IValidateOptions<StrategyOwnershipOptions>, StrategyOwnershipOptionsValidator>();
     services.AddSingleton<IValidateOptions<BacktestWorkerOptions>, BacktestWorkerOptionsValidator>();
+    services.AddSingleton<IValidateOptions<IndicatorFrameworkOptions>, IndicatorFrameworkOptionsValidator>();
+    services.AddSingleton<IValidateOptions<CoinGlassOptions>, CoinGlassOptionsValidator>();
 }
 
 static void RegisterCommonServices(
@@ -353,6 +359,24 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<MarketDataEngine>();
     services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
     services.AddSingleton<ExchangePriceService>();
+    services.AddHttpClient<CoinGlassClient>((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptions<CoinGlassOptions>>().Value;
+        var baseUrl = string.IsNullOrWhiteSpace(options.BaseUrl)
+            ? "https://open-api-v4.coinglass.com"
+            : options.BaseUrl.TrimEnd('/');
+
+        client.BaseAddress = new Uri($"{baseUrl}/");
+        client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
+    });
+
+    services.AddSingleton<IndicatorRepository>();
+    services.AddSingleton<IndicatorCacheStore>();
+    services.AddSingleton<IndicatorRegistry>();
+    services.AddSingleton<IndicatorQueryService>();
+    services.AddSingleton<IIndicatorCollector, CoinGlassFearGreedCollector>();
+    services.AddHostedService<IndicatorRefreshHostedService>();
+
     services.AddSingleton<TalibWasmNodeInvoker>();
     services.AddSingleton<IndicatorEngine>();
 

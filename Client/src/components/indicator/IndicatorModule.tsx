@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import type { ECharts, EChartsOption } from 'echarts';
 import './IndicatorModule.css';
+import { getIndicatorLatest, type IndicatorLatestItem } from '../../network/indicatorClient';
 
 interface ChartPalette {
   textPrimary: string;
@@ -26,6 +27,13 @@ interface IndicatorCardData {
   description: string;
   note: string;
   chartOption: EChartsOption;
+}
+
+interface FearGreedRuntime {
+  value: number;
+  classification: string;
+  stale: boolean;
+  sourceTs?: number;
 }
 
 const createPalette = (isDarkMode: boolean): ChartPalette => ({
@@ -53,7 +61,10 @@ const buildTooltip = (palette: ChartPalette): EChartsOption['tooltip'] => ({
   },
 });
 
-const buildIndicators = (palette: ChartPalette): IndicatorCardData[] => {
+const buildIndicators = (
+  palette: ChartPalette,
+  fearGreedRuntime?: FearGreedRuntime | null,
+): IndicatorCardData[] => {
   const categoryAxisStyle = {
     axisLabel: { color: palette.textSecondary, fontSize: 11 },
     axisLine: { lineStyle: { color: palette.axisLine } },
@@ -65,15 +76,27 @@ const buildIndicators = (palette: ChartPalette): IndicatorCardData[] => {
     splitLine: { lineStyle: { color: palette.splitLine } },
   };
 
+  const fearGreedValue = fearGreedRuntime ? Math.max(0, Math.min(100, fearGreedRuntime.value)) : 73;
+  const fearGreedLabel = fearGreedRuntime?.classification ?? '极度贪婪';
+  const fearGreedSample = fearGreedRuntime
+    ? `实时值：${fearGreedValue.toFixed(0)}（${fearGreedLabel}）${fearGreedRuntime.stale ? ' · 过期缓存' : ''}`
+    : '样例值：73（极度贪婪）';
+  const fearGreedSourceText = fearGreedRuntime?.sourceTs
+    ? `数据时间：${new Date(fearGreedRuntime.sourceTs).toLocaleString('zh-CN', { hour12: false })}`
+    : '数据时间：样例';
+  const fearGreedNote = fearGreedRuntime?.stale
+    ? `当前返回的是缓存快照，系统已在后台自动刷新。${fearGreedSourceText}`
+    : `常用于判断情绪是否处于极端区间，可作为减仓或反向布局的辅助信号。${fearGreedSourceText}`;
+
   return [
     {
       id: 'fear-greed',
       name: '贪婪恐慌指数 (Fear & Greed Index)',
       category: '情绪',
-      sample: '样例值：73（极度贪婪）',
+      sample: fearGreedSample,
       description:
         '0–100 的情绪刻度，综合波动率、成交量、社交媒体情绪等维度，数值越高代表市场越贪婪。',
-      note: '常用于判断情绪是否处于极端区间，可作为减仓或反向布局的辅助信号。',
+      note: fearGreedNote,
       chartOption: {
         tooltip: { formatter: '情绪指数：{c}' },
         series: [
@@ -138,7 +161,7 @@ const buildIndicators = (palette: ChartPalette): IndicatorCardData[] => {
               fontSize: 24,
               formatter: '{value}',
             },
-            data: [{ value: 73, name: '极度贪婪' }],
+            data: [{ value: fearGreedValue, name: fearGreedLabel }],
           },
         ],
       },
@@ -478,6 +501,57 @@ const IndicatorCard: React.FC<{ indicator: IndicatorCardData }> = ({ indicator }
   </article>
 );
 
+const toNumber = (input: unknown): number | null => {
+  if (typeof input === 'number' && Number.isFinite(input)) {
+    return input;
+  }
+
+  if (typeof input === 'string') {
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const resolveFearGreedLabel = (value: number): string => {
+  if (value <= 24) {
+    return '极度恐慌';
+  }
+  if (value <= 49) {
+    return '恐慌';
+  }
+  if (value <= 74) {
+    return '贪婪';
+  }
+  return '极度贪婪';
+};
+
+const parseFearGreedRuntime = (latest: IndicatorLatestItem): FearGreedRuntime | null => {
+  if (!latest.payload || typeof latest.payload !== 'object') {
+    return null;
+  }
+
+  const payload = latest.payload as Record<string, unknown>;
+  const value = toNumber(payload.value);
+  if (value === null) {
+    return null;
+  }
+
+  const classificationRaw = payload.classification;
+  const classification = typeof classificationRaw === 'string' && classificationRaw.trim()
+    ? classificationRaw.trim()
+    : resolveFearGreedLabel(value);
+
+  const payloadSourceTs = toNumber(payload.sourceTs);
+  return {
+    value,
+    classification,
+    stale: latest.stale,
+    sourceTs: payloadSourceTs ?? latest.sourceTs,
+  };
+};
+
 type IndicatorModuleProps = {
   focusIndicatorId?: string;
   onFocusHandled?: () => void;
@@ -487,6 +561,7 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains('dark-theme'),
   );
+  const [fearGreedRuntime, setFearGreedRuntime] = useState<FearGreedRuntime | null>(null);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -504,7 +579,33 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
   }, []);
 
   const palette = useMemo(() => createPalette(isDarkMode), [isDarkMode]);
-  const indicators = useMemo(() => buildIndicators(palette), [palette]);
+  const indicators = useMemo(() => buildIndicators(palette, fearGreedRuntime), [palette, fearGreedRuntime]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const loadFearGreed = async () => {
+      try {
+        const latest = await getIndicatorLatest('coinglass.fear_greed', undefined, { allowStale: true });
+        const runtime = parseFearGreedRuntime(latest);
+        if (!disposed && runtime) {
+          setFearGreedRuntime(runtime);
+        }
+      } catch {
+        // 接口失败时保留静态兜底数据，避免页面闪断。
+      }
+    };
+
+    void loadFearGreed();
+    const timer = window.setInterval(() => {
+      void loadFearGreed();
+    }, 60_000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!focusIndicatorId) {
