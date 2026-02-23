@@ -262,11 +262,24 @@ static void RegisterCommonServices(
         options.InstanceName = "ServerTest:";
     });
 
+    var configuredOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+    var allowedOrigins = configuredOrigins
+        .Where(origin => !string.IsNullOrWhiteSpace(origin))
+        .Select(origin => origin.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    if (allowedOrigins.Length == 0)
+    {
+        // 未配置白名单时回退到本地开发地址，避免生产环境意外全开放。
+        allowedOrigins = new[] { "http://localhost:3000", "http://127.0.0.1:3000" };
+    }
+
     services.AddCors(options =>
     {
         options.AddDefaultPolicy(policy =>
         {
-            policy.AllowAnyOrigin()
+            policy.WithOrigins(allowedOrigins)
                   .AllowAnyMethod()
                   .AllowAnyHeader();
         });
@@ -395,6 +408,7 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<UserExchangeApiKeyRepository>();
     services.AddSingleton<PositionRiskConfigStore>();
     services.AddSingleton<PositionRiskIndexManager>();
+    services.AddSingleton<TradeRecoveryTaskRepository>();
     services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
     services.AddScoped<StrategyPositionCloseService>();
     services.AddSingleton<PositionOverviewService>();
@@ -508,14 +522,18 @@ static async Task RunStartupWorkflowAsync(
         try
         {
             var marketDataEngine = app.Services.GetRequiredService<MarketDataEngine>();
+            var exchangePriceService = app.Services.GetRequiredService<ExchangePriceService>();
             var startupOptions = app.Services.GetRequiredService<IOptions<StartupOptions>>().Value;
             var timeout = TimeSpan.FromSeconds(Math.Max(1, startupOptions.MarketDataInitTimeoutSeconds));
             await marketDataEngine.WaitForInitializationAsync().WaitAsync(timeout).ConfigureAwait(false);
-            startupManager.MarkReady(SystemModule.MarketDataEngine, "行情数据引擎已就绪");
+            await exchangePriceService.WaitForInitializationAsync().WaitAsync(timeout).ConfigureAwait(false);
+            await exchangePriceService.WaitForSubscriptionReadyAsync().WaitAsync(timeout).ConfigureAwait(false);
+            await exchangePriceService.WaitForFirstPriceAsync().WaitAsync(timeout).ConfigureAwait(false);
+            startupManager.MarkReady(SystemModule.MarketDataEngine, "行情与价格推送已就绪");
         }
         catch (Exception ex)
         {
-            startupManager.MarkFailed(SystemModule.MarketDataEngine, $"行情引擎初始化失败: {ex.Message}");
+            startupManager.MarkFailed(SystemModule.MarketDataEngine, $"行情/价格推送初始化失败: {ex.Message}");
             throw;
         }
 

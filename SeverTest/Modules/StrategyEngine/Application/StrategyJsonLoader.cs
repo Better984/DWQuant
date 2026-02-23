@@ -121,7 +121,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 Name = name,
                 Description = description ?? string.Empty,
                 State = MapState(user.State),
-                CreatorUserId = definition.CreatorUid != 0 ? definition.CreatorUid : user.Uid,
+                // 运行时执行账号必须取策略实例所属用户(uid)，不能使用策略定义作者(uid)。
+                CreatorUserId = user.Uid,
                 ExchangeApiKeyId = user.ExchangeApiKeyId,
                 VersionId = version.VersionId > 0 ? version.VersionId : null,
                 Version = version.VersionNo > 0 ? version.VersionNo : 1,

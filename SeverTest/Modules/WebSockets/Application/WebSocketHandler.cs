@@ -61,7 +61,7 @@ namespace ServerTest.WebSockets
             {
                 var json = ProtocolJson.Serialize(kickMessage);
                 var bytes = Encoding.UTF8.GetBytes(json);
-                await connection.Socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+                await connection.SendTextAsync(bytes, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -253,7 +253,7 @@ namespace ServerTest.WebSockets
 
             var json = ProtocolJson.Serialize(envelope);
             var bytes = Encoding.UTF8.GetBytes(json);
-            await connection.Socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+            await connection.SendTextAsync(bytes, cancellationToken).ConfigureAwait(false);
         }
 
         private sealed class ReadResult

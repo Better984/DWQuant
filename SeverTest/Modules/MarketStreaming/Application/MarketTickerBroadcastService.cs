@@ -5,7 +5,6 @@ using ServerTest.Modules.MarketStreaming.Infrastructure;
 using ServerTest.WebSockets;
 using ServerTest.Protocol;
 using System.Collections.Concurrent;
-using System.Net.WebSockets;
 using System.Text;
 
 namespace ServerTest.Modules.MarketStreaming.Application
@@ -202,12 +201,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
         {
             try
             {
-                if (connection.Socket.State != WebSocketState.Open)
-                {
-                    return;
-                }
-
-                await connection.Socket.SendAsync(bytes, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+                await connection.SendTextAsync(bytes, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

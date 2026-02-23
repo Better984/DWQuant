@@ -16,6 +16,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
         private readonly CancellationTokenSource _cancellationTokenSource = new();
         private readonly Task _initializationTask;
         private readonly Task _subscriptionTask;
+        private readonly TaskCompletionSource<bool> _subscriptionReadyTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Exception? _initializationError;
 
         public ExchangePriceService(ILogger<ExchangePriceService> logger) : base(logger)
@@ -43,6 +44,35 @@ namespace ServerTest.Modules.MarketStreaming.Application
         public async Task WaitForSubscriptionAsync()
         {
             await _subscriptionTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 等待价格订阅完成启动前置检查（不等待订阅任务结束）。
+        /// </summary>
+        public Task WaitForSubscriptionReadyAsync()
+        {
+            return _subscriptionReadyTcs.Task;
+        }
+
+        /// <summary>
+        /// 等待首个价格进入缓存，作为价格推送可用性的就绪信号。
+        /// </summary>
+        public async Task WaitForFirstPriceAsync(CancellationToken cancellationToken = default)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (!_priceCache.IsEmpty)
+                {
+                    return;
+                }
+
+                if (_subscriptionTask.IsFaulted)
+                {
+                    await _subscriptionTask.ConfigureAwait(false);
+                }
+
+                await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -115,11 +145,13 @@ namespace ServerTest.Modules.MarketStreaming.Application
             catch (Exception ex)
             {
                 Logger.LogError(ex, "交易所初始化失败，价格订阅不会启动");
+                _subscriptionReadyTcs.TrySetException(ex);
                 throw;
             }
 
             if (cancellationToken.IsCancellationRequested)
             {
+                _subscriptionReadyTcs.TrySetCanceled(cancellationToken);
                 return;
             }
 
@@ -127,7 +159,9 @@ namespace ServerTest.Modules.MarketStreaming.Application
             {
                 var message = $"交易所初始化数量异常，期望 {ExpectedExchangeCount} 个，实际 {_exchanges.Count} 个";
                 Logger.LogError(message);
-                throw new InvalidOperationException(message);
+                var ex = new InvalidOperationException(message);
+                _subscriptionReadyTcs.TrySetException(ex);
+                throw ex;
             }
 
             var tasks = new List<Task>();
@@ -149,6 +183,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
             //    tasks.Add(WatchBitget(bitgetEx, cancellationToken));
             //}
 
+            if (tasks.Count == 0)
+            {
+                const string message = "价格订阅任务为空，无法启动价格推送";
+                Logger.LogError(message);
+                var ex = new InvalidOperationException(message);
+                _subscriptionReadyTcs.TrySetException(ex);
+                throw ex;
+            }
+
+            _subscriptionReadyTcs.TrySetResult(true);
             await Task.WhenAll(tasks);
         }
 

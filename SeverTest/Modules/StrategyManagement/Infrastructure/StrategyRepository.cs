@@ -53,6 +53,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
         private readonly DatabaseService _db;
         private readonly StrategyJsonLoader _strategyLoader;
         private readonly RealTimeStrategyEngine _strategyEngine;
+        private readonly StrategyActionTaskQueue _strategyActionTaskQueue;
         private readonly StrategyOwnershipService _ownership;
         private readonly UserExchangeApiKeyRepository _apiKeyRepository;
         private readonly StrategyRunCheckService _runCheckService;
@@ -131,6 +132,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             DatabaseService db,
             StrategyJsonLoader strategyLoader,
             RealTimeStrategyEngine strategyEngine,
+            StrategyActionTaskQueue strategyActionTaskQueue,
             StrategyOwnershipService ownership,
             UserExchangeApiKeyRepository apiKeyRepository,
             StrategyRunCheckService runCheckService,
@@ -144,6 +146,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             _db = db;
             _strategyLoader = strategyLoader;
             _strategyEngine = strategyEngine;
+            _strategyActionTaskQueue = strategyActionTaskQueue ?? throw new ArgumentNullException(nameof(strategyActionTaskQueue));
             _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
             _apiKeyRepository = apiKeyRepository ?? throw new ArgumentNullException(nameof(apiKeyRepository));
             _runCheckService = runCheckService ?? throw new ArgumentNullException(nameof(runCheckService));
@@ -1516,6 +1519,46 @@ ORDER BY version_no ASC
             try
             {
                 using var connection = await _db.GetConnectionAsync();
+                var existCmd = new MySqlCommand(@"
+SELECT 1
+FROM user_strategy
+WHERE us_id = @us_id AND uid = @uid
+LIMIT 1
+", connection);
+                existCmd.Parameters.AddWithValue("@us_id", request.UsId);
+                existCmd.Parameters.AddWithValue("@uid", uid);
+                var exists = await existCmd.ExecuteScalarAsync();
+                if (exists == null)
+                {
+                    return NotFound(ApiResponse<object>.Error("未找到策略实例"));
+                }
+
+                // 先封禁动作队列，防止删除期间残留任务继续消费。
+                _strategyActionTaskQueue.BlockStrategy(request.UsId);
+
+                var runtimeUidCode = request.UsId.ToString();
+                try
+                {
+                    _strategyEngine.RemoveStrategy(runtimeUidCode);
+                }
+                catch (Exception ex)
+                {
+                    _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    Logger.LogError(ex, "删除策略后卸载运行时失败并已回滚封禁: uid={Uid} usId={UsId}", uid, request.UsId);
+                    return StatusCode(500, ApiResponse<object>.Error("删除失败：运行时卸载异常，请重试"));
+                }
+
+                try
+                {
+                    await _ownership.ReleaseAsync(request.UsId, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    Logger.LogError(ex, "删除策略后释放租约失败并已回滚封禁: uid={Uid} usId={UsId}", uid, request.UsId);
+                    return StatusCode(500, ApiResponse<object>.Error("删除失败：租约释放异常，请重试"));
+                }
+
                 var deleteCmd = new MySqlCommand(@"
 DELETE FROM user_strategy
 WHERE us_id = @us_id AND uid = @uid
@@ -1523,11 +1566,14 @@ WHERE us_id = @us_id AND uid = @uid
                 deleteCmd.Parameters.AddWithValue("@us_id", request.UsId);
                 deleteCmd.Parameters.AddWithValue("@uid", uid);
                 var affected = await deleteCmd.ExecuteNonQueryAsync();
-
                 if (affected == 0)
                 {
+                    _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    Logger.LogWarning("策略删除时记录消失，已回滚动作封禁: uid={Uid} usId={UsId}", uid, request.UsId);
                     return NotFound(ApiResponse<object>.Error("未找到策略实例"));
                 }
+
+                Logger.LogInformation("策略删除成功并完成立即停机: uid={Uid} usId={UsId}", uid, request.UsId);
 
                 return Ok(ApiResponse<object>.Ok(new { request.UsId }, "删除成功"));
             }

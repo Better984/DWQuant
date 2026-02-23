@@ -12,50 +12,101 @@ using System.Text.Json;
 using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.TradingExecution.Domain;
+using ServerTest.Modules.TradingExecution.Infrastructure;
 
 namespace ServerTest.Modules.TradingExecution.Application
 {
     public sealed class TradeActionConsumer : BackgroundService
     {
         private readonly StrategyActionTaskQueue _queue;
+        private readonly RealTimeStrategyEngine _strategyEngine;
         private readonly StrategyPositionRepository _positionRepository;
         private readonly MarketDataEngine _marketDataEngine;
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
         private readonly PositionRiskIndexManager _riskIndexManager;
+        private readonly TradeRecoveryTaskRepository _recoveryTaskRepository;
         private readonly INotificationPublisher _notificationPublisher;
         private readonly ILogger<TradeActionConsumer> _logger;
+        private readonly string _recoveryWorkerToken;
+
+        private const int RecoveryMaxAttempts = 6;
+
+        private enum RecoveryTaskType
+        {
+            CloseWrite,
+            OpenCompensation
+        }
+
+        private sealed class RecoveryTask
+        {
+            public long TaskId { get; init; }
+            public string ProcessingToken { get; init; } = string.Empty;
+            public RecoveryTaskType Type { get; init; }
+            public int Attempt { get; init; } = 1;
+            public int MaxAttempts { get; init; } = RecoveryMaxAttempts;
+            public DateTime NotBeforeUtc { get; init; } = DateTime.UtcNow;
+            public long? Uid { get; init; }
+            public long? UsId { get; init; }
+            public long PositionId { get; init; }
+            public long? ExchangeApiKeyId { get; init; }
+            public string Exchange { get; init; } = string.Empty;
+            public string Symbol { get; init; } = string.Empty;
+            public string Side { get; init; } = string.Empty;
+            public decimal Qty { get; init; }
+            public decimal? ClosePrice { get; init; }
+            public DateTime ClosedAtUtc { get; init; }
+            public string LastError { get; init; } = string.Empty;
+        }
 
         public TradeActionConsumer(
             StrategyActionTaskQueue queue,
+            RealTimeStrategyEngine strategyEngine,
             StrategyPositionRepository positionRepository,
             MarketDataEngine marketDataEngine,
             IOrderExecutor orderExecutor,
             PositionRiskConfigStore riskConfigStore,
             PositionRiskIndexManager riskIndexManager,
+            TradeRecoveryTaskRepository recoveryTaskRepository,
             INotificationPublisher notificationPublisher,
             ILogger<TradeActionConsumer> logger)
         {
             _queue = queue ?? throw new ArgumentNullException(nameof(queue));
+            _strategyEngine = strategyEngine ?? throw new ArgumentNullException(nameof(strategyEngine));
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
             _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
+            _recoveryTaskRepository = recoveryTaskRepository ?? throw new ArgumentNullException(nameof(recoveryTaskRepository));
             _notificationPublisher = notificationPublisher ?? throw new ArgumentNullException(nameof(notificationPublisher));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _recoveryWorkerToken = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await _marketDataEngine.WaitForInitializationAsync();
+            await _recoveryTaskRepository.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
+            var recoveredCount = await _recoveryTaskRepository.RecoverStaleProcessingAsync(90, stoppingToken).ConfigureAwait(false);
+            if (recoveredCount > 0)
+            {
+                _logger.LogWarning("交易恢复任务已回收遗留processing任务: count={Count}", recoveredCount);
+            }
 
+            var actionLoop = ConsumeActionTasksAsync(stoppingToken);
+            var recoveryLoop = ConsumeRecoveryTasksAsync(stoppingToken);
+            await Task.WhenAll(actionLoop, recoveryLoop).ConfigureAwait(false);
+        }
+
+        private async Task ConsumeActionTasksAsync(CancellationToken stoppingToken)
+        {
             await foreach (var task in _queue.ReadAllAsync(stoppingToken))
             {
                 try
                 {
                     await HandleTaskAsync(task, stoppingToken).ConfigureAwait(false);
-        }
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "交易动作处理失败: uid={Uid} usId={UsId} 方法={Method}", task.Uid, task.UsId, task.Method);
@@ -63,9 +114,90 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
         }
 
+        private async Task ConsumeRecoveryTasksAsync(CancellationToken stoppingToken)
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                List<TradeRecoveryTaskEntity> tasks;
+                try
+                {
+                    tasks = await _recoveryTaskRepository.AcquireDueTasksAsync(8, _recoveryWorkerToken, stoppingToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "拉取交易恢复任务失败");
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (tasks.Count == 0)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(800), stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                foreach (var persistedTask in tasks)
+                {
+                    if (!TryBuildRecoveryTask(persistedTask, out var task))
+                    {
+                        _logger.LogError("交易恢复任务类型无效: taskId={TaskId} type={TaskType}", persistedTask.TaskId, persistedTask.TaskType);
+                        await MarkRecoveryTaskFailedAsync(
+                                new RecoveryTask
+                                {
+                                    TaskId = persistedTask.TaskId,
+                                    ProcessingToken = _recoveryWorkerToken,
+                                    Attempt = persistedTask.Attempt,
+                                    MaxAttempts = persistedTask.MaxAttempts,
+                                    Uid = persistedTask.Uid,
+                                    UsId = persistedTask.UsId,
+                                    PositionId = persistedTask.PositionId,
+                                    Exchange = persistedTask.Exchange,
+                                    Symbol = persistedTask.Symbol,
+                                    Side = persistedTask.Side,
+                                    Qty = persistedTask.Qty,
+                                    LastError = persistedTask.LastError ?? string.Empty
+                                },
+                                "恢复任务类型无效",
+                                stoppingToken)
+                            .ConfigureAwait(false);
+                        continue;
+                    }
+
+                    try
+                    {
+                        await ProcessRecoveryTaskAsync(task, stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "交易恢复任务处理异常: taskId={TaskId} type={Type} uid={Uid} usId={UsId} attempt={Attempt}",
+                            task.TaskId, task.Type, task.Uid, task.UsId, task.Attempt);
+                        await RequeueRecoveryTaskAsync(
+                                CopyRecoveryTask(task, lastError: ex.Message),
+                                "恢复任务异常",
+                                stoppingToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+
         private async Task HandleTaskAsync(StrategyActionTask task, CancellationToken ct)
         {
             if (task == null)
+            {
+                return;
+            }
+
+            if (!ShouldProcessTask(task))
             {
                 return;
             }
@@ -95,6 +227,31 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
 
             await HandleOpenAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
+        }
+
+        private bool ShouldProcessTask(StrategyActionTask task)
+        {
+            if (!task.UsId.HasValue || task.UsId.Value <= 0)
+            {
+                return true;
+            }
+
+            if (_queue.IsBlocked(task.UsId))
+            {
+                _logger.LogInformation("丢弃策略残留动作（策略已封禁）: uid={Uid} usId={UsId} method={Method}",
+                    task.Uid, task.UsId, task.Method);
+                return false;
+            }
+
+            var uidCode = task.UsId.Value.ToString();
+            if (!_strategyEngine.HasStrategy(uidCode))
+            {
+                _logger.LogInformation("丢弃策略残留动作（策略未注册）: uid={Uid} usId={UsId} method={Method}",
+                    task.Uid, task.UsId, task.Method);
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -131,14 +288,14 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
 
             // 3. 检查是否已存在相同方向的未平仓位（防止重复开仓）
-            //var existing = await _positionRepository.FindOpenAsync(task.Uid.Value, task.UsId.Value, exchange, symbol, positionSide, ct)
-            //    .ConfigureAwait(false);
-            //if (existing != null)
-            //{
-            //    _logger.LogInformation("开仓已忽略（已有仓位）: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
-            //        task.Uid, task.UsId, exchange, symbol, positionSide);
-            //    return;
-            //}
+            var existing = await _positionRepository.FindOpenAsync(task.Uid.Value, task.UsId.Value, exchange, symbol, positionSide, ct)
+                .ConfigureAwait(false);
+            if (existing != null)
+            {
+                _logger.LogInformation("开仓已忽略（已有仓位）: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
+                    task.Uid, task.UsId, exchange, symbol, positionSide);
+                return;
+            }
 
             // 4. 从市场数据引擎获取当前价格作为预估入场价格
             var entryPrice = ResolveEntryPrice(exchange, symbol);
@@ -147,10 +304,11 @@ namespace ServerTest.Modules.TradingExecution.Application
                 _logger.LogWarning("入场价格缺失，跳过开仓: {Exchange} {Symbol}", exchange, symbol);
                 return;
             }
+            OrderExecutionResult? openOrderResult = null;
             if (!isTestingTask)
             {
                 // 5. 非 testing 模式提交市价单到交易所（开仓订单，非平仓）
-                var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+                openOrderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
                 {
                     Uid = task.Uid.Value,
                     ExchangeApiKeyId = task.ExchangeApiKeyId,
@@ -162,16 +320,16 @@ namespace ServerTest.Modules.TradingExecution.Application
                 }, ct).ConfigureAwait(false);
 
                 // 6. 检查订单是否成功提交
-                if (!orderResult.Success)
+                if (!openOrderResult.Success)
                 {
-                    _logger.LogWarning("开仓订单失败: uid={Uid} usId={UsId} 错误={Error}", task.Uid, task.UsId, orderResult.ErrorMessage);
+                    _logger.LogWarning("开仓订单失败: uid={Uid} usId={UsId} 错误={Error}", task.Uid, task.UsId, openOrderResult.ErrorMessage);
                     return;
                 }
 
                 // 7. 如果订单返回了实际成交均价，使用实际成交价更新入场价格
-                if (orderResult.AveragePrice.HasValue && orderResult.AveragePrice.Value > 0)
+                if (openOrderResult.AveragePrice.HasValue && openOrderResult.AveragePrice.Value > 0)
                 {
-                    entryPrice = orderResult.AveragePrice.Value;
+                    entryPrice = openOrderResult.AveragePrice.Value;
                 }
             }
 
@@ -202,7 +360,32 @@ namespace ServerTest.Modules.TradingExecution.Application
             };
 
             // 10. 将仓位记录保存到数据库
-            var positionId = await _positionRepository.InsertAsync(entity, ct).ConfigureAwait(false);
+            long positionId;
+            try
+            {
+                positionId = await ExecuteWithRetryAsync(
+                        "开仓写库",
+                        () => _positionRepository.InsertAsync(entity, ct),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "开仓写库失败，触发补偿平仓: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
+                    task.Uid,
+                    task.UsId,
+                    exchange,
+                    symbol,
+                    positionSide);
+
+                if (!isTestingTask && openOrderResult?.Success == true)
+                {
+                    await TryCompensateOpenOrderAsync(task, exchange, symbol, orderSide, ct).ConfigureAwait(false);
+                }
+
+                return;
+            }
             entity.PositionId = positionId;
 
             // 11. 如果启用了追踪止损，保存追踪止损配置到风险配置存储
@@ -261,15 +444,47 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            var existing = await _positionRepository.FindOpenAsync(task.Uid.Value, task.UsId.Value, exchange, symbol, positionSide, ct)
-                .ConfigureAwait(false);
-            if (existing == null)
+            var closedCount = 0;
+            while (!ct.IsCancellationRequested)
             {
-                _logger.LogInformation("没有可平仓位: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
-                    task.Uid, task.UsId, exchange, symbol, positionSide);
-                return;
-            }
+                var existing = await _positionRepository.FindOpenAsync(task.Uid.Value, task.UsId.Value, exchange, symbol, positionSide, ct)
+                    .ConfigureAwait(false);
+                if (existing == null)
+                {
+                    if (closedCount == 0)
+                    {
+                        _logger.LogInformation("没有可平仓位: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
+                            task.Uid, task.UsId, exchange, symbol, positionSide);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("平仓动作完成: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} 共处理{ClosedCount}个仓位",
+                            task.Uid, task.UsId, exchange, symbol, positionSide, closedCount);
+                    }
+                    return;
+                }
 
+                var closed = await TryCloseSinglePositionAsync(existing, exchange, symbol, orderSide, isTestingTask, ct)
+                    .ConfigureAwait(false);
+                if (!closed)
+                {
+                    _logger.LogWarning("平仓动作中断: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} 已处理{ClosedCount}个仓位",
+                        task.Uid, task.UsId, exchange, symbol, positionSide, closedCount);
+                    return;
+                }
+
+                closedCount++;
+            }
+        }
+
+        private async Task<bool> TryCloseSinglePositionAsync(
+            StrategyPosition existing,
+            string exchange,
+            string symbol,
+            string orderSide,
+            bool isTestingTask,
+            CancellationToken ct)
+        {
             decimal? closePrice;
             var useLocalSimulation = isTestingTask || !existing.ExchangeApiKeyId.HasValue;
             if (useLocalSimulation)
@@ -292,28 +507,69 @@ namespace ServerTest.Modules.TradingExecution.Application
                 if (!orderResult.Success)
                 {
                     _logger.LogWarning("平仓订单失败: positionId={PositionId} 错误={Error}", existing.PositionId, orderResult.ErrorMessage);
-                    return;
+                    return false;
                 }
 
                 closePrice = ResolveClosePrice(orderResult, exchange, symbol);
             }
 
-            await _positionRepository.CloseAsync(
+            var closedAt = DateTime.UtcNow;
+            int closeAffected;
+            try
+            {
+                closeAffected = await ExecuteWithRetryAsync(
+                        "平仓写库",
+                        () => _positionRepository.CloseAsync(
+                            existing.PositionId,
+                            trailingTriggered: false,
+                            closedAt: closedAt,
+                            closeReason: null,
+                            closePrice: closePrice,
+                            ct),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "平仓订单已提交但本地写库异常，已转入恢复队列: positionId={PositionId} uid={Uid} usId={UsId}",
                     existing.PositionId,
-                    trailingTriggered: false,
-                    closedAt: DateTime.UtcNow,
-                    closeReason: null,
-                    closePrice: closePrice,
-                    ct)
-                .ConfigureAwait(false);
-            _riskConfigStore.Remove(existing.PositionId);
-            _riskIndexManager.RemovePosition(existing.PositionId);
+                    existing.Uid,
+                    existing.UsId);
+                await EnqueueCloseWriteRecoveryAsync(existing, closePrice, closedAt, ex.Message, ct).ConfigureAwait(false);
+                return false;
+            }
+
+            if (closeAffected <= 0)
+            {
+                var latest = await _positionRepository.GetByIdAsync(existing.PositionId, existing.Uid, ct).ConfigureAwait(false);
+                if (latest == null || !string.Equals(latest.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError(
+                        "平仓订单已提交但本地写库未生效: positionId={PositionId} uid={Uid} usId={UsId}",
+                        existing.PositionId,
+                        existing.Uid,
+                        existing.UsId);
+                    await EnqueueCloseWriteRecoveryAsync(existing, closePrice, closedAt, "平仓写库返回0且仓位仍为Open", ct)
+                        .ConfigureAwait(false);
+                    return false;
+                }
+
+                _logger.LogWarning(
+                    "平仓写库返回0行，但仓位已是Closed，按成功处理: positionId={PositionId} uid={Uid} usId={UsId}",
+                    existing.PositionId,
+                    existing.Uid,
+                    existing.UsId);
+            }
+
+            CleanupClosedPositionLocalState(existing.PositionId);
 
             _logger.LogInformation("仓位已平: id={PositionId} uid={Uid} usId={UsId} mode={Mode}",
                 existing.PositionId,
                 existing.Uid,
                 existing.UsId,
                 useLocalSimulation ? "testing" : "live");
+            return true;
         }
 
         private decimal ResolveEntryPrice(string exchange, string symbol)
@@ -354,6 +610,566 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
 
             return fallbackEntryPrice > 0 ? fallbackEntryPrice : null;
+        }
+
+        private async Task TryCompensateOpenOrderAsync(
+            StrategyActionTask task,
+            string exchange,
+            string symbol,
+            string openOrderSide,
+            CancellationToken ct)
+        {
+            if (!task.Uid.HasValue || task.OrderQty <= 0)
+            {
+                return;
+            }
+
+            var compensateSide = string.Equals(openOrderSide, "buy", StringComparison.OrdinalIgnoreCase)
+                ? "sell"
+                : "buy";
+
+            var (success, error) = await TryExecuteCompensationOrderAsync(
+                    task.Uid.Value,
+                    task.ExchangeApiKeyId,
+                    exchange,
+                    symbol,
+                    compensateSide,
+                    task.OrderQty,
+                    ct)
+                .ConfigureAwait(false);
+
+            if (success)
+            {
+                _logger.LogWarning(
+                    "开仓写库失败后补偿平仓成功: uid={Uid} usId={UsId} {Exchange} {Symbol}",
+                    task.Uid,
+                    task.UsId,
+                    exchange,
+                    symbol);
+                return;
+            }
+
+            _logger.LogError(
+                "开仓写库失败后补偿平仓失败，已转入恢复队列: uid={Uid} usId={UsId} {Exchange} {Symbol} 错误={Error}",
+                task.Uid,
+                task.UsId,
+                exchange,
+                symbol,
+                error);
+
+            await EnqueueOpenCompensationRecoveryAsync(task, exchange, symbol, compensateSide, error, ct).ConfigureAwait(false);
+        }
+
+        private async Task<(bool Success, string Error)> TryExecuteCompensationOrderAsync(
+            long uid,
+            long? exchangeApiKeyId,
+            string exchange,
+            string symbol,
+            string side,
+            decimal qty,
+            CancellationToken ct)
+        {
+            try
+            {
+                var compensateResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+                {
+                    Uid = uid,
+                    ExchangeApiKeyId = exchangeApiKeyId,
+                    Exchange = exchange,
+                    Symbol = symbol,
+                    Side = side,
+                    Qty = qty,
+                    ReduceOnly = true
+                }, ct).ConfigureAwait(false);
+
+                return compensateResult.Success
+                    ? (true, string.Empty)
+                    : (false, compensateResult.ErrorMessage ?? "补偿平仓失败");
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
+        }
+
+        private async Task EnqueueOpenCompensationRecoveryAsync(
+            StrategyActionTask task,
+            string exchange,
+            string symbol,
+            string compensateSide,
+            string error,
+            CancellationToken ct)
+        {
+            var recoveryTask = new RecoveryTask
+            {
+                Type = RecoveryTaskType.OpenCompensation,
+                Attempt = 1,
+                MaxAttempts = RecoveryMaxAttempts,
+                NotBeforeUtc = DateTime.UtcNow.AddSeconds(2),
+                Uid = task.Uid,
+                UsId = task.UsId,
+                ExchangeApiKeyId = task.ExchangeApiKeyId,
+                Exchange = exchange,
+                Symbol = symbol,
+                Side = compensateSide,
+                Qty = task.OrderQty,
+                LastError = error ?? string.Empty
+            };
+
+            await TryEnqueueRecoveryTaskAsync(recoveryTask, "开仓补偿恢复", ct).ConfigureAwait(false);
+        }
+
+        private async Task EnqueueCloseWriteRecoveryAsync(
+            StrategyPosition existing,
+            decimal? closePrice,
+            DateTime closedAtUtc,
+            string error,
+            CancellationToken ct)
+        {
+            var recoveryTask = new RecoveryTask
+            {
+                Type = RecoveryTaskType.CloseWrite,
+                Attempt = 1,
+                MaxAttempts = RecoveryMaxAttempts,
+                NotBeforeUtc = DateTime.UtcNow.AddSeconds(2),
+                Uid = existing.Uid,
+                UsId = existing.UsId,
+                PositionId = existing.PositionId,
+                ExchangeApiKeyId = existing.ExchangeApiKeyId,
+                Exchange = existing.Exchange ?? string.Empty,
+                Symbol = existing.Symbol ?? string.Empty,
+                Side = existing.Side ?? string.Empty,
+                Qty = existing.Qty,
+                ClosePrice = closePrice,
+                ClosedAtUtc = closedAtUtc,
+                LastError = error ?? string.Empty
+            };
+
+            await TryEnqueueRecoveryTaskAsync(recoveryTask, "平仓写库恢复", ct).ConfigureAwait(false);
+        }
+
+        private async Task TryEnqueueRecoveryTaskAsync(RecoveryTask task, string scene, CancellationToken ct)
+        {
+            var entity = new TradeRecoveryTaskEntity
+            {
+                TaskType = MapRecoveryTaskType(task.Type),
+                Uid = task.Uid,
+                UsId = task.UsId,
+                PositionId = task.PositionId,
+                ExchangeApiKeyId = task.ExchangeApiKeyId,
+                Exchange = task.Exchange,
+                Symbol = task.Symbol,
+                Side = task.Side,
+                Qty = task.Qty,
+                ClosePrice = task.ClosePrice,
+                ClosedAtUtc = task.ClosedAtUtc == default ? null : task.ClosedAtUtc,
+                Attempt = Math.Max(1, task.Attempt),
+                MaxAttempts = Math.Max(1, task.MaxAttempts),
+                NextRetryAtUtc = task.NotBeforeUtc.ToUniversalTime(),
+                LastError = task.LastError
+            };
+
+            try
+            {
+                var taskId = await _recoveryTaskRepository.InsertPendingAsync(entity, ct).ConfigureAwait(false);
+                _logger.LogWarning("已持久化交易恢复任务: taskId={TaskId} scene={Scene} type={Type} uid={Uid} usId={UsId} attempt={Attempt}",
+                    taskId, scene, task.Type, task.Uid, task.UsId, task.Attempt);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "交易恢复任务入库失败: scene={Scene} type={Type} uid={Uid} usId={UsId}",
+                    scene, task.Type, task.Uid, task.UsId);
+                await TryPublishRecoveryFailedAsync(
+                        CopyRecoveryTask(task, lastError: ex.Message),
+                        "恢复任务入库失败",
+                        ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private async Task ProcessRecoveryTaskAsync(RecoveryTask task, CancellationToken ct)
+        {
+            if (task.NotBeforeUtc > DateTime.UtcNow)
+            {
+                var delay = task.NotBeforeUtc - DateTime.UtcNow;
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, ct).ConfigureAwait(false);
+                }
+            }
+
+            switch (task.Type)
+            {
+                case RecoveryTaskType.CloseWrite:
+                    await ProcessCloseWriteRecoveryAsync(task, ct).ConfigureAwait(false);
+                    return;
+                case RecoveryTaskType.OpenCompensation:
+                    await ProcessOpenCompensationRecoveryAsync(task, ct).ConfigureAwait(false);
+                    return;
+                default:
+                    await MarkRecoveryTaskFailedAsync(task, "未知恢复任务类型", ct).ConfigureAwait(false);
+                    return;
+            }
+        }
+
+        private async Task ProcessCloseWriteRecoveryAsync(RecoveryTask task, CancellationToken ct)
+        {
+            if (!task.Uid.HasValue || task.PositionId <= 0)
+            {
+                await MarkRecoveryTaskFailedAsync(task, "平仓写库恢复参数无效", ct).ConfigureAwait(false);
+                return;
+            }
+
+            var latest = await _positionRepository.GetByIdAsync(task.PositionId, task.Uid.Value, ct).ConfigureAwait(false);
+            if (latest != null && string.Equals(latest.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+            {
+                CleanupClosedPositionLocalState(task.PositionId);
+                _logger.LogInformation("恢复任务命中已闭仓状态: taskId={TaskId} positionId={PositionId} uid={Uid} usId={UsId}",
+                    task.TaskId, task.PositionId, task.Uid, task.UsId);
+                await MarkRecoveryTaskSucceededAsync(task, ct).ConfigureAwait(false);
+                return;
+            }
+
+            try
+            {
+                var affected = await _positionRepository.CloseAsync(
+                        task.PositionId,
+                        trailingTriggered: false,
+                        closedAt: task.ClosedAtUtc == default ? DateTime.UtcNow : task.ClosedAtUtc,
+                        closeReason: "recovery",
+                        closePrice: task.ClosePrice,
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (affected > 0)
+                {
+                    CleanupClosedPositionLocalState(task.PositionId);
+                    _logger.LogWarning("恢复任务平仓写库成功: taskId={TaskId} positionId={PositionId} uid={Uid} usId={UsId} attempt={Attempt}",
+                        task.TaskId, task.PositionId, task.Uid, task.UsId, task.Attempt);
+                    await MarkRecoveryTaskSucceededAsync(task, ct).ConfigureAwait(false);
+                    return;
+                }
+
+                latest = await _positionRepository.GetByIdAsync(task.PositionId, task.Uid.Value, ct).ConfigureAwait(false);
+                if (latest != null && string.Equals(latest.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+                {
+                    CleanupClosedPositionLocalState(task.PositionId);
+                    _logger.LogInformation("恢复任务确认仓位已闭: taskId={TaskId} positionId={PositionId} uid={Uid} usId={UsId}",
+                        task.TaskId, task.PositionId, task.Uid, task.UsId);
+                    await MarkRecoveryTaskSucceededAsync(task, ct).ConfigureAwait(false);
+                    return;
+                }
+
+                await RequeueRecoveryTaskAsync(task, "平仓写库恢复仍未成功", ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await RequeueRecoveryTaskAsync(
+                        CopyRecoveryTask(task, lastError: ex.Message),
+                        "平仓写库恢复异常",
+                        ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private async Task ProcessOpenCompensationRecoveryAsync(RecoveryTask task, CancellationToken ct)
+        {
+            if (!task.Uid.HasValue || task.Qty <= 0)
+            {
+                await MarkRecoveryTaskFailedAsync(task, "开仓补偿恢复参数无效", ct).ConfigureAwait(false);
+                return;
+            }
+
+            var (success, error) = await TryExecuteCompensationOrderAsync(
+                    task.Uid.Value,
+                    task.ExchangeApiKeyId,
+                    task.Exchange,
+                    task.Symbol,
+                    task.Side,
+                    task.Qty,
+                    ct)
+                .ConfigureAwait(false);
+
+            if (success)
+            {
+                _logger.LogWarning("恢复任务补偿平仓成功: taskId={TaskId} uid={Uid} usId={UsId} {Exchange} {Symbol} attempt={Attempt}",
+                    task.TaskId, task.Uid, task.UsId, task.Exchange, task.Symbol, task.Attempt);
+                await MarkRecoveryTaskSucceededAsync(task, ct).ConfigureAwait(false);
+                return;
+            }
+
+            await RequeueRecoveryTaskAsync(
+                    CopyRecoveryTask(task, lastError: error),
+                    "开仓补偿恢复失败",
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        private async Task RequeueRecoveryTaskAsync(RecoveryTask task, string reason, CancellationToken ct)
+        {
+            if (task.Attempt >= task.MaxAttempts)
+            {
+                _logger.LogError("恢复任务重试耗尽: taskId={TaskId} type={Type} uid={Uid} usId={UsId} positionId={PositionId} reason={Reason} error={Error}",
+                    task.TaskId, task.Type, task.Uid, task.UsId, task.PositionId, reason, task.LastError);
+                await MarkRecoveryTaskFailedAsync(task, reason, ct).ConfigureAwait(false);
+                return;
+            }
+
+            var nextAttempt = task.Attempt + 1;
+            var nextRetryAtUtc = DateTime.UtcNow.Add(BuildRecoveryDelay(nextAttempt));
+            var affected = await _recoveryTaskRepository.RequeueAsync(
+                    task.TaskId,
+                    task.ProcessingToken,
+                    nextAttempt,
+                    nextRetryAtUtc,
+                    task.LastError,
+                    ct)
+                .ConfigureAwait(false);
+            if (affected <= 0)
+            {
+                _logger.LogWarning("恢复任务重入库失败（任务可能已被其他节点处理）: taskId={TaskId} type={Type}", task.TaskId, task.Type);
+                return;
+            }
+
+            _logger.LogWarning(
+                "恢复任务重入库成功: taskId={TaskId} type={Type} uid={Uid} usId={UsId} nextAttempt={Attempt} reason={Reason}",
+                task.TaskId,
+                task.Type,
+                task.Uid,
+                task.UsId,
+                nextAttempt,
+                reason);
+        }
+
+        private async Task MarkRecoveryTaskSucceededAsync(RecoveryTask task, CancellationToken ct)
+        {
+            if (task.TaskId <= 0 || string.IsNullOrWhiteSpace(task.ProcessingToken))
+            {
+                return;
+            }
+
+            var affected = await _recoveryTaskRepository.MarkSucceededAsync(task.TaskId, task.ProcessingToken, ct)
+                .ConfigureAwait(false);
+            if (affected <= 0)
+            {
+                _logger.LogWarning("标记恢复任务成功失败（任务可能已被处理）: taskId={TaskId} type={Type}", task.TaskId, task.Type);
+            }
+        }
+
+        private async Task MarkRecoveryTaskFailedAsync(RecoveryTask task, string reason, CancellationToken ct)
+        {
+            if (task.TaskId > 0 && !string.IsNullOrWhiteSpace(task.ProcessingToken))
+            {
+                var affected = await _recoveryTaskRepository.MarkFailedAsync(
+                        task.TaskId,
+                        task.ProcessingToken,
+                        task.Attempt,
+                        $"{reason}; {task.LastError}".Trim(';', ' '),
+                        ct)
+                    .ConfigureAwait(false);
+                if (affected <= 0)
+                {
+                    _logger.LogWarning("标记恢复任务失败未生效（任务可能已被处理）: taskId={TaskId} type={Type}", task.TaskId, task.Type);
+                }
+            }
+
+            await TryPublishRecoveryFailedAsync(task, reason, ct).ConfigureAwait(false);
+        }
+
+        private bool TryBuildRecoveryTask(TradeRecoveryTaskEntity persistedTask, out RecoveryTask task)
+        {
+            task = default!;
+            if (!TryParseRecoveryTaskType(persistedTask.TaskType, out var taskType))
+            {
+                return false;
+            }
+
+            task = new RecoveryTask
+            {
+                TaskId = persistedTask.TaskId,
+                ProcessingToken = _recoveryWorkerToken,
+                Type = taskType,
+                Attempt = Math.Max(1, persistedTask.Attempt),
+                MaxAttempts = Math.Max(1, persistedTask.MaxAttempts),
+                NotBeforeUtc = persistedTask.NextRetryAtUtc,
+                Uid = persistedTask.Uid,
+                UsId = persistedTask.UsId,
+                PositionId = persistedTask.PositionId,
+                ExchangeApiKeyId = persistedTask.ExchangeApiKeyId,
+                Exchange = persistedTask.Exchange ?? string.Empty,
+                Symbol = persistedTask.Symbol ?? string.Empty,
+                Side = persistedTask.Side ?? string.Empty,
+                Qty = persistedTask.Qty,
+                ClosePrice = persistedTask.ClosePrice,
+                ClosedAtUtc = persistedTask.ClosedAtUtc ?? default,
+                LastError = persistedTask.LastError ?? string.Empty
+            };
+            return true;
+        }
+
+        private static string MapRecoveryTaskType(RecoveryTaskType type)
+        {
+            return type switch
+            {
+                RecoveryTaskType.CloseWrite => TradeRecoveryTaskTypes.CloseWrite,
+                RecoveryTaskType.OpenCompensation => TradeRecoveryTaskTypes.OpenCompensation,
+                _ => type.ToString().ToLowerInvariant()
+            };
+        }
+
+        private static bool TryParseRecoveryTaskType(string taskType, out RecoveryTaskType type)
+        {
+            type = default;
+            if (string.IsNullOrWhiteSpace(taskType))
+            {
+                return false;
+            }
+
+            switch (taskType.Trim().ToLowerInvariant())
+            {
+                case TradeRecoveryTaskTypes.CloseWrite:
+                    type = RecoveryTaskType.CloseWrite;
+                    return true;
+                case TradeRecoveryTaskTypes.OpenCompensation:
+                    type = RecoveryTaskType.OpenCompensation;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static RecoveryTask CopyRecoveryTask(
+            RecoveryTask source,
+            int? attempt = null,
+            DateTime? notBeforeUtc = null,
+            string? lastError = null)
+        {
+            return new RecoveryTask
+            {
+                TaskId = source.TaskId,
+                ProcessingToken = source.ProcessingToken,
+                Type = source.Type,
+                Attempt = attempt ?? source.Attempt,
+                MaxAttempts = source.MaxAttempts,
+                NotBeforeUtc = notBeforeUtc ?? source.NotBeforeUtc,
+                Uid = source.Uid,
+                UsId = source.UsId,
+                PositionId = source.PositionId,
+                ExchangeApiKeyId = source.ExchangeApiKeyId,
+                Exchange = source.Exchange,
+                Symbol = source.Symbol,
+                Side = source.Side,
+                Qty = source.Qty,
+                ClosePrice = source.ClosePrice,
+                ClosedAtUtc = source.ClosedAtUtc,
+                LastError = lastError ?? source.LastError
+            };
+        }
+
+        private static TimeSpan BuildRecoveryDelay(int attempt)
+        {
+            var seconds = Math.Min(60, Math.Max(2, attempt * attempt));
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        private async Task TryPublishRecoveryFailedAsync(RecoveryTask task, string reason, CancellationToken ct)
+        {
+            if (!task.Uid.HasValue || task.Uid.Value <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var payload = JsonSerializer.Serialize(new
+                {
+                    type = task.Type.ToString(),
+                    uid = task.Uid,
+                    usId = task.UsId,
+                    positionId = task.PositionId,
+                    exchange = task.Exchange,
+                    symbol = task.Symbol,
+                    side = task.Side,
+                    qty = task.Qty,
+                    attempt = task.Attempt,
+                    reason,
+                    error = task.LastError,
+                    occurredAt = DateTime.UtcNow
+                });
+
+                await _notificationPublisher.PublishToUserAsync(new NotificationPublishRequest
+                {
+                    UserId = task.Uid.Value,
+                    Category = NotificationCategory.Risk,
+                    Severity = NotificationSeverity.Critical,
+                    Template = "trade.recovery.failed",
+                    PayloadJson = payload,
+                    DedupeKey = $"trade_recovery_failed:{task.Type}:{task.UsId}:{task.PositionId}:{task.Exchange}:{task.Symbol}"
+                }, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "发布交易恢复失败告警异常: type={Type} uid={Uid} usId={UsId}",
+                    task.Type, task.Uid, task.UsId);
+            }
+        }
+
+        private void CleanupClosedPositionLocalState(long positionId)
+        {
+            _riskConfigStore.Remove(positionId);
+            _riskIndexManager.RemovePosition(positionId);
+        }
+
+        private async Task<T> ExecuteWithRetryAsync<T>(
+            string operationName,
+            Func<Task<T>> operation,
+            CancellationToken ct,
+            int maxAttempts = 3)
+        {
+            if (operation == null)
+            {
+                throw new ArgumentNullException(nameof(operation));
+            }
+
+            if (maxAttempts <= 0)
+            {
+                maxAttempts = 1;
+            }
+
+            Exception? lastException = null;
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    return await operation().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    if (attempt >= maxAttempts)
+                    {
+                        break;
+                    }
+
+                    var delayMs = 150 * attempt;
+                    _logger.LogWarning(
+                        ex,
+                        "{Operation}失败，准备重试: 第{Attempt}/{MaxAttempts}次，延迟{DelayMs}ms",
+                        operationName,
+                        attempt,
+                        maxAttempts,
+                        delayMs);
+                    await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                }
+            }
+
+            throw new InvalidOperationException($"{operationName}连续重试失败", lastException);
         }
 
         private static decimal? BuildStopLossPrice(decimal entryPrice, decimal? stopLossPct, int leverage, string side)

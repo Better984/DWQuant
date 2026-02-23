@@ -15,6 +15,8 @@ namespace ServerTest.Modules.StrategyRuntime.Application
     public sealed class StrategyRuntimeLeaseHostedService : BackgroundService
     {
         private static readonly string[] RunnableStates = { "running", "paused_open_position", "testing" };
+        // 多节点下优先安全：租约协调首轮异常即触发安全降级，缩短重复执行窗口。
+        private const int LeaseFailureSafeModeThreshold = 1;
 
         private readonly StrategyOwnershipService _ownership;
         private readonly StrategyRuntimeRepository _runtimeRepository;
@@ -24,6 +26,8 @@ namespace ServerTest.Modules.StrategyRuntime.Application
         private readonly ILogger<StrategyRuntimeLeaseHostedService> _logger;
         private readonly ConcurrentDictionary<long, DateTime> _lastUpdated = new();
         private DateTime _lastSyncUtc = DateTime.MinValue;
+        private int _consecutiveLeaseFailures;
+        private bool _safeModeActive;
 
         public StrategyRuntimeLeaseHostedService(
             StrategyOwnershipService ownership,
@@ -65,6 +69,18 @@ namespace ServerTest.Modules.StrategyRuntime.Application
                         await SyncStrategiesAsync(stoppingToken).ConfigureAwait(false);
                         _lastSyncUtc = DateTime.UtcNow;
                     }
+
+                    if (_consecutiveLeaseFailures > 0)
+                    {
+                        _logger.LogInformation("策略租约协调恢复: 连续失败次数已清零，之前失败次数={FailureCount}", _consecutiveLeaseFailures);
+                        _consecutiveLeaseFailures = 0;
+                    }
+
+                    if (_safeModeActive)
+                    {
+                        _safeModeActive = false;
+                        _logger.LogInformation("策略租约安全降级已解除");
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -72,7 +88,13 @@ namespace ServerTest.Modules.StrategyRuntime.Application
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "策略租约周期执行失败");
+                    _consecutiveLeaseFailures++;
+                    _logger.LogError(ex, "策略租约周期执行失败: 连续失败次数={FailureCount}", _consecutiveLeaseFailures);
+
+                    if (_consecutiveLeaseFailures >= LeaseFailureSafeModeThreshold)
+                    {
+                        await EnterSafeModeAsync(stoppingToken).ConfigureAwait(false);
+                    }
                 }
 
                 try
@@ -188,6 +210,40 @@ namespace ServerTest.Modules.StrategyRuntime.Application
 
             await _ownership.ReleaseAsync(usId, ct).ConfigureAwait(false);
             _logger.LogWarning("策略 {UsId} 已释放: {Reason}", usId, reason);
+        }
+
+        /// <summary>
+        /// 当租约协调连续失败时进入安全降级：停止本节点托管策略，降低重复执行风险。
+        /// </summary>
+        private async Task EnterSafeModeAsync(CancellationToken ct)
+        {
+            if (!_safeModeActive)
+            {
+                _safeModeActive = true;
+                _logger.LogError("策略租约连续失败达到阈值({Threshold})，进入安全降级，停止本节点已托管策略",
+                    LeaseFailureSafeModeThreshold);
+            }
+
+            var ownedIds = _ownership.GetOwnedIdsSnapshot();
+            foreach (var usId in ownedIds)
+            {
+                try
+                {
+                    _strategyEngine.RemoveStrategy(usId.ToString());
+                    _ownership.Untrack(usId);
+                    _lastUpdated.TryRemove(usId, out _);
+                    await _ownership.ReleaseAsync(usId, ct).ConfigureAwait(false);
+                    _logger.LogWarning("安全降级已下线策略 {UsId}", usId);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "安全降级下线策略失败: {UsId}", usId);
+                }
+            }
         }
 
         private static bool IsRunnableState(string? state)

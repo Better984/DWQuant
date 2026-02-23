@@ -145,6 +145,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return true;
         }
 
+        /// <summary>
+        /// 判断指定策略是否仍在当前节点运行时中注册。
+        /// </summary>
+        public bool HasStrategy(string uidCode)
+        {
+            if (string.IsNullOrWhiteSpace(uidCode))
+            {
+                return false;
+            }
+
+            return _strategyKeyByUid.ContainsKey(uidCode);
+        }
+
         public int GetRegisteredStrategyCount()
         {
             var total = 0;
