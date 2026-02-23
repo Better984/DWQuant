@@ -17,6 +17,7 @@ import { Dialog, useNotification } from '../ui/index.ts';
 import AlertDialog from '../dialogs/AlertDialog';
 import { HttpClient, getToken } from '../../network/index.ts';
 import './StrategyItem.css';
+import './StrategyModule.css';
 
 type StrategyListRecord = {
   usId: number;
@@ -81,6 +82,9 @@ const resolveStatus = (state: string | undefined): StrategyItemProps['status'] =
   }
   if (normalized === 'paused_open_position') {
     return 'paused_open_position';
+  }
+  if (normalized === 'testing') {
+    return 'testing';
   }
   return 'completed';
 };
@@ -331,7 +335,7 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
 
   const handleUpdateStatus = async (
     usId: number,
-    status: 'running' | 'paused' | 'paused_open_position' | 'completed',
+    status: 'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed',
   ) => {
     const data = await client.postProtocol<StrategyStateUpdateResponse>('/api/strategy/instances/state', 'strategy.instance.state.update', {
       id: usId,

@@ -1,0 +1,102 @@
+﻿{
+  "schemaVersion": "1.0.0",
+  "description": "TA 指标跨端一致性黄金样本配置",
+  "tolerance": 1e-10,
+  "generator": {
+    "length": 360,
+    "basePrice": 100.0,
+    "trendStep": 0.18,
+    "openWaveAmplitude": 2.4,
+    "closeWaveAmplitude": 1.1,
+    "highPadding": 1.35,
+    "lowPadding": 1.25,
+    "volumeBase": 1200.0,
+    "volumeWaveAmplitude": 95.0
+  },
+  "cases": [
+    {
+      "name": "MA_real_open",
+      "indicator": "MA",
+      "realSources": ["OPEN"],
+      "parameters": [20, 0]
+    },
+    {
+      "name": "EMA_real_close",
+      "indicator": "EMA",
+      "realSources": ["CLOSE"],
+      "parameters": [21]
+    },
+    {
+      "name": "MACD_real_close",
+      "indicator": "MACD",
+      "realSources": ["CLOSE"],
+      "parameters": [12, 26, 9]
+    },
+    {
+      "name": "RSI_real_hlc3",
+      "indicator": "RSI",
+      "realSources": ["HLC3"],
+      "parameters": [14]
+    },
+    {
+      "name": "BBANDS_real_oc2",
+      "indicator": "BBANDS",
+      "realSources": ["OC2"],
+      "parameters": [20, 2.0, 2.0, 0]
+    },
+    {
+      "name": "STOCH_hlc",
+      "indicator": "STOCH",
+      "realSources": [],
+      "parameters": [5, 3, 0, 3, 0]
+    },
+    {
+      "name": "STOCHRSI_real_close",
+      "indicator": "STOCHRSI",
+      "realSources": ["CLOSE"],
+      "parameters": [14, 5, 3, 0]
+    },
+    {
+      "name": "ATR_hlc",
+      "indicator": "ATR",
+      "realSources": [],
+      "parameters": [14]
+    },
+    {
+      "name": "ADX_hlc",
+      "indicator": "ADX",
+      "realSources": [],
+      "parameters": [14]
+    },
+    {
+      "name": "OBV_close_volume",
+      "indicator": "OBV",
+      "realSources": [],
+      "parameters": []
+    },
+    {
+      "name": "ADOSC_hlcv",
+      "indicator": "ADOSC",
+      "realSources": [],
+      "parameters": [3, 10]
+    },
+    {
+      "name": "BETA_real_open_close",
+      "indicator": "BETA",
+      "realSources": ["OPEN", "CLOSE"],
+      "parameters": [5]
+    },
+    {
+      "name": "CORREL_real_open_close",
+      "indicator": "CORREL",
+      "realSources": ["OPEN", "CLOSE"],
+      "parameters": [30]
+    },
+    {
+      "name": "ROC_real_hl2",
+      "indicator": "ROC",
+      "realSources": ["HL2"],
+      "parameters": [10]
+    }
+  ]
+}

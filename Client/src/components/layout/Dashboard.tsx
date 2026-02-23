@@ -19,6 +19,8 @@ import './Dashboard.css';
 import { getAuthProfile } from '../../auth/profileStore.ts';
 import { ensureWsConnected, getWsStatus, onWsStatusChange } from '../../network/index.ts';
 import { useNotification } from '../ui/index.ts';
+import { HttpClient } from '../../network/httpClient.ts';
+import { getToken } from '../../network/tokenStore.ts';
 
 const HomeModule = lazy(() => import('../home/HomeModule'));
 const MarketModule = lazy(() => import('../market/MarketModule'));
@@ -31,6 +33,8 @@ const StrategyList = lazy(() => import('../strategy/StrategyList'));
 const UserSettings = lazy(() => import('../user/UserSettings'));
 const IndicatorGeneratorSelector = lazy(() => import('../indicator/IndicatorGeneratorSelector'));
 const HistoricalDataCacheDialog = lazy(() => import('../dialogs/HistoricalDataCacheDialog'));
+const TalibRandomParityTestDialog = lazy(() => import('../dialogs/TalibRandomParityTestDialog'));
+const SuperAdminTestDialog = lazy(() => import('../dialogs/SuperAdminTestDialog'));
 
 const menuBreadcrumbMap: { [key: number]: { first: string; second: string } } = {
   0: { first: '主页', second: '概览' },
@@ -59,9 +63,12 @@ const Dashboard: React.FC = () => {
   const rightSidebarResizeRef = useRef<{ x: number; width: number } | null>(null);
   const rightSidebarResizeFrameRef = useRef<number | null>(null);
   const [userProfile] = useState(() => getAuthProfile());
+  const normalizedRole = Number(userProfile?.role ?? NaN);
+  const isSuperAdmin = normalizedRole === 255;
+  const [isSuperAdminVerified, setIsSuperAdminVerified] = useState(isSuperAdmin);
   const userDisplayName = userProfile?.nickname || userProfile?.email || 'User';
   const userRoleLabel = (() => {
-    switch (userProfile?.role) {
+    switch (normalizedRole) {
       case 255:
         return '超级管理';
       case 40:
@@ -77,9 +84,13 @@ const Dashboard: React.FC = () => {
   const [wsStatus, setWsStatus] = useState(getWsStatus());
   const wsNotifiedRef = useRef(false);
   const { success } = useNotification();
+  const httpClient = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
   const [showIndicatorGenerator, setShowIndicatorGenerator] = useState(false);
   const [showHistoricalCacheDialog, setShowHistoricalCacheDialog] = useState(false);
+  const [showTalibRandomParityDialog, setShowTalibRandomParityDialog] = useState(false);
+  const [showSuperAdminTestDialog, setShowSuperAdminTestDialog] = useState(false);
+  const [superAdminTestEnabled, setSuperAdminTestEnabled] = useState(false);
 
   // 从右侧行情面板跳转到左侧“行情”菜单
   const handleOpenMarketFromRightPanel = (symbol: string) => {
@@ -241,6 +252,75 @@ const Dashboard: React.FC = () => {
       unsubscribe();
     };
   }, [success]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const verifySuperAdminAsync = async () => {
+      try {
+        const capability = await httpClient.postProtocol<{ enabled?: boolean }>(
+          '/api/admin/user/test/capability',
+          'admin.user.test.capability',
+          {},
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setIsSuperAdminVerified(true);
+        setSuperAdminTestEnabled(Boolean(capability?.enabled));
+        return;
+      } catch {
+        // 兼容旧后端：capability 接口缺失时，回退到现有接口做超管校验。
+      }
+
+      const query = userProfile?.email?.trim();
+      if (!query) {
+        if (!cancelled) {
+          setIsSuperAdminVerified(isSuperAdmin);
+          setSuperAdminTestEnabled(false);
+        }
+        return;
+      }
+
+      try {
+        const result = await httpClient.postProtocol<{ account?: { uid?: number } }>(
+          '/api/admin/user/universal-search',
+          'admin.user.universal-search',
+          { query },
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setIsSuperAdminVerified(Boolean(result?.account?.uid));
+        setSuperAdminTestEnabled(false);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setIsSuperAdminVerified(isSuperAdmin);
+        setSuperAdminTestEnabled(false);
+      }
+    };
+
+    verifySuperAdminAsync().catch(() => {
+      if (cancelled) {
+        return;
+      }
+      setIsSuperAdminVerified(isSuperAdmin);
+      setSuperAdminTestEnabled(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [httpClient, isSuperAdmin, userProfile?.email]);
+
+  const canSeeTestSection = isSuperAdmin || isSuperAdminVerified;
 
   const renderMainContent = () => {
     switch (activeMenuIndex) {
@@ -469,25 +549,43 @@ const Dashboard: React.FC = () => {
             <span className="sidebar-menu-text">我的</span>
           </div>
 
-          <div className="sidebar-test-section">
-            <div className="sidebar-test-title">测试</div>
-            <div className="sidebar-test-actions">
-              <button
-                type="button"
-                className="sidebar-test-button"
-                onClick={() => setShowIndicatorGenerator(true)}
-              >
-                指标创建器
-              </button>
-              <button
-                type="button"
-                className="sidebar-test-button"
-                onClick={() => setShowHistoricalCacheDialog(true)}
-              >
-                回测区间
-              </button>
+          {canSeeTestSection && (
+            <div className="sidebar-test-section">
+              <div className="sidebar-test-title">测试</div>
+              <div className="sidebar-test-actions">
+                <button
+                  type="button"
+                  className="sidebar-test-button"
+                  onClick={() => setShowIndicatorGenerator(true)}
+                >
+                  指标创建器
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-test-button"
+                  onClick={() => setShowHistoricalCacheDialog(true)}
+                >
+                  回测区间
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-test-button"
+                  onClick={() => setShowTalibRandomParityDialog(true)}
+                >
+                  随机一致性测试
+                </button>
+                {superAdminTestEnabled && (
+                  <button
+                    type="button"
+                    className="sidebar-test-button"
+                    onClick={() => setShowSuperAdminTestDialog(true)}
+                  >
+                    超级测试台
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
         </div>
 
@@ -612,6 +710,20 @@ const Dashboard: React.FC = () => {
         <HistoricalDataCacheDialog
           open={showHistoricalCacheDialog}
           onClose={() => setShowHistoricalCacheDialog(false)}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <TalibRandomParityTestDialog
+          open={showTalibRandomParityDialog}
+          onClose={() => setShowTalibRandomParityDialog(false)}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <SuperAdminTestDialog
+          open={showSuperAdminTestDialog}
+          onClose={() => setShowSuperAdminTestDialog(false)}
         />
       </Suspense>
     </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import Avatar, { type AvatarProps, type AvatarSize } from './Avatar';
+import Avatar, { type AvatarSize } from './Avatar';
 import './AvatarGroup.css';
 
 export interface AvatarGroupItem {

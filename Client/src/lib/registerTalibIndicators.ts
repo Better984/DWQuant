@@ -16,6 +16,7 @@ import {
   type TalibCalcResult,
   type TalibRuntimeCalcSpec,
 } from "./talibIndicatorAdapter";
+import { resolveTalibGroupCn, resolveTalibIndicatorDisplayName } from "./talibLocale";
 
 export type TalibIndicatorInputOption = {
   label: string;
@@ -64,10 +65,12 @@ export type TalibIndicatorEditorSchema = {
 
 export type TalibRegisteredIndicatorMeta = {
   name: string;
+  displayName: string;
   code: string;
   talibCode: string;
   pane: "main" | "sub";
   group: string;
+  groupCn: string;
 };
 
 type TalibConfigEnumOption = {
@@ -97,10 +100,14 @@ type TalibConfigOutput = {
 
 type TalibConfigIndicator = {
   code: string;
+  abbr_en?: string;
   name_en?: string;
+  name_cn?: string;
   method?: string;
   group?: string;
+  group_cn?: string;
   indicator_type?: string;
+  indicator_type_cn?: string;
   inputs?: {
     series?: string[];
   };
@@ -142,9 +149,11 @@ type TalibMetaRoot = Record<string, TalibMetaIndicator>;
 
 type RuntimeIndicatorSpec = {
   name: string;
+  displayName: string;
   backendCode: string;
   talibCode: string;
   group: string;
+  groupCn: string;
   series: IndicatorSeries;
   shouldOhlc: boolean;
   shouldFormatBigNumber: boolean;
@@ -638,6 +647,14 @@ function buildRuntimeSpecs(root: TalibConfigRoot, meta: TalibMetaRoot): {
     const figures = buildFigures(indicator, metaDef);
     const series = resolveSeries(indicator, metaDef);
     const range = resolveRange(talibCode);
+    const rawGroup = indicator.indicator_type ?? indicator.group ?? metaDef.group ?? "Other";
+    const groupCn = resolveTalibGroupCn(rawGroup, indicator.indicator_type_cn ?? indicator.group_cn);
+    const displayName = resolveTalibIndicatorDisplayName(
+      indicator.code,
+      indicator.name_cn,
+      indicator.name_en,
+      indicator.abbr_en
+    );
     const calcSpec: TalibRuntimeCalcSpec = {
       code: talibCode,
       inputSeries: defaultInputSeries,
@@ -652,9 +669,11 @@ function buildRuntimeSpecs(root: TalibConfigRoot, meta: TalibMetaRoot): {
 
     specs.push({
       name: `ta_${indicator.code}`,
+      displayName,
       backendCode: indicator.code,
       talibCode,
-      group: indicator.indicator_type ?? indicator.group ?? metaDef.group ?? "Other",
+      group: rawGroup,
+      groupCn,
       series,
       shouldOhlc: series === IndicatorSeries.Price,
       shouldFormatBigNumber: resolveShouldFormatBigNumber(indicator, metaDef),
@@ -833,18 +852,23 @@ export function getTalibIndicatorMetaList(): TalibRegisteredIndicatorMeta[] {
   for (const spec of runtimeSpecByName.values()) {
     list.push({
       name: spec.name,
+      displayName: spec.displayName,
       code: spec.backendCode,
       talibCode: spec.talibCode,
       pane: spec.series === IndicatorSeries.Price ? "main" : "sub",
       group: spec.group,
+      groupCn: spec.groupCn,
     });
   }
   return list.sort((a, b) => {
     if (a.pane !== b.pane) {
       return a.pane.localeCompare(b.pane);
     }
-    if (a.group !== b.group) {
-      return a.group.localeCompare(b.group);
+    if (a.groupCn !== b.groupCn) {
+      return a.groupCn.localeCompare(b.groupCn);
+    }
+    if (a.displayName !== b.displayName) {
+      return a.displayName.localeCompare(b.displayName);
     }
     return a.name.localeCompare(b.name);
   });

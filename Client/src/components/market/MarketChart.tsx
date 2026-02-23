@@ -253,26 +253,13 @@ const TIMEZONE_OPTIONS = [
 
 const MAIN_INDICATORS = TA_MAIN_INDICATORS;
 
-const INDICATOR_GROUP_LABELS: Record<string, string> = {
-  "Overlap Studies": "Overlay",
-  "Price Transform": "Price Transform",
-  "Momentum Indicators": "Momentum",
-  "Volume Indicators": "Volume",
-  "Volatility Indicators": "Volatility",
-  "Cycle Indicators": "Cycle",
-  "Pattern Recognition": "Pattern",
-  "Math Transform": "Math Transform",
-  "Math Operators": "Math Operators",
-  "Statistic Functions": "Statistics",
-};
-
 function normalizeIndicatorName(name: string): string {
   return name.replace(/^ta_/, "");
 }
 
 function normalizeIndicatorGroupLabel(group: string): string {
   const trimmed = group.trim();
-  return INDICATOR_GROUP_LABELS[trimmed] ?? (trimmed || "Other");
+  return trimmed || "其他";
 }
 
 const CrossStarIcon: ToolIconComponent = (props) => (
@@ -891,7 +878,8 @@ const MarketChart: React.FC<MarketChartProps> = ({
       if (indicatorPaneFilter === "sub" && item.pane !== "sub") {
         continue;
       }
-      groups.add(normalizeIndicatorGroupLabel(item.group));
+      const groupLabel = normalizeIndicatorGroupLabel(item.groupCn || item.group);
+      groups.add(groupLabel);
     }
     return Array.from(groups).sort((a, b) => a.localeCompare(b));
   }, [indicatorCatalog, indicatorPaneFilter]);
@@ -906,12 +894,12 @@ const MarketChart: React.FC<MarketChartProps> = ({
       if (indicatorPaneFilter === "sub" && item.pane !== "sub") {
         continue;
       }
-      const groupLabel = normalizeIndicatorGroupLabel(item.group);
+      const groupLabel = normalizeIndicatorGroupLabel(item.groupCn || item.group);
       if (indicatorGroupFilter !== "ALL" && groupLabel !== indicatorGroupFilter) {
         continue;
       }
       if (keyword.length > 0) {
-        const haystack = `${item.name} ${item.code} ${item.talibCode} ${groupLabel}`.toLowerCase();
+        const haystack = `${item.displayName} ${item.name} ${item.code} ${item.talibCode} ${groupLabel}`.toLowerCase();
         if (!haystack.includes(keyword)) {
           continue;
         }
@@ -923,7 +911,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
     }
     const entries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
     entries.forEach(([, items]) => {
-      items.sort((a, b) => a.name.localeCompare(b.name));
+      items.sort((a, b) => a.displayName.localeCompare(b.displayName));
     });
     return entries;
   }, [indicatorCatalog, indicatorGroupFilter, indicatorPaneFilter, indicatorSearchKeyword]);
@@ -2605,7 +2593,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
               className="market-chart-indicator-search"
               value={indicatorSearchKeyword}
               onChange={(event) => setIndicatorSearchKeyword(event.target.value)}
-              placeholder="搜索指标名称 / 代码（如 MA, RSI, CDL）"
+              placeholder="搜索指标名称 / 中文 / 代码（如 MA, RSI, CDL）"
             />
             <span className="market-chart-indicator-picker-stat">
               {filteredIndicatorGroups.reduce((sum, [, items]) => sum + items.length, 0)} 个
@@ -2689,10 +2677,10 @@ const MarketChart: React.FC<MarketChartProps> = ({
                           onClick={() => handleSelectIndicatorFromDialog(item.name, item.pane)}
                         >
                           <span className="market-chart-indicator-item-name">
-                            {normalizeIndicatorName(item.name)}
+                            {item.displayName || normalizeIndicatorName(item.name)}
                           </span>
                           <span className="market-chart-indicator-item-meta">
-                            {item.pane === "main" ? "主图" : "副图"}
+                            {item.code} · {item.pane === "main" ? "主图" : "副图"}
                           </span>
                         </button>
                       );

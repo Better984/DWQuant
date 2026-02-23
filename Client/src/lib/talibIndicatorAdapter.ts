@@ -1,5 +1,11 @@
 import { TAFuncs } from "talib-web";
 import type { KLineData } from "klinecharts";
+import {
+  normalizeTalibInputSource,
+  resolveTalibSeriesValue,
+  roundAwayFromZero,
+  type TalibInputSource,
+} from "./talibCalcRules";
 
 export type TalibCalcResult = Record<string, number | undefined>;
 
@@ -30,21 +36,11 @@ type TalibRuntimeExtendData = {
 };
 
 type TalibFunction = (params: Record<string, unknown>) => Record<string, unknown>;
+type NumericArrayLike = { length: number; [index: number]: unknown };
 
 const TALIB_FUNCTIONS = TAFuncs as unknown as Record<string, TalibFunction>;
 
-function toNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function toOutputValue(values: number[] | undefined, index: number): number | undefined {
+function toOutputValue(values: Array<number | undefined> | undefined, index: number): number | undefined {
   const value = values?.[index];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -53,68 +49,57 @@ function normalizeInputKey(value: string): string {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeInputSource(value: string): string {
-  const normalized = normalizeInputKey(value);
-  switch (normalized) {
-    case "OPEN":
-      return "OPEN";
-    case "HIGH":
-      return "HIGH";
-    case "LOW":
-      return "LOW";
-    case "CLOSE":
-      return "CLOSE";
-    case "VOLUME":
-      return "VOLUME";
-    case "HL2":
-      return "HL2";
-    case "HLC3":
-      return "HLC3";
-    case "OHLC4":
-      return "OHLC4";
-    case "OC2":
-      return "OC2";
-    case "HLCC4":
-      return "HLCC4";
-    default:
-      return "CLOSE";
+function isNumericArrayLike(value: unknown): value is NumericArrayLike {
+  if (Array.isArray(value)) {
+    return true;
   }
+  if (ArrayBuffer.isView(value)) {
+    const maybeLength = (value as { length?: unknown }).length;
+    return typeof maybeLength === "number";
+  }
+  return false;
 }
 
-function resolveSeriesValue(item: KLineData, key: string): number {
-  const open = toNumber(item.open);
-  const high = toNumber(item.high);
-  const low = toNumber(item.low);
-  const close = toNumber(item.close);
-  const volume = toNumber(item.volume);
-  switch (key) {
-    case "OPEN":
-      return open;
-    case "HIGH":
-      return high;
-    case "LOW":
-      return low;
-    case "CLOSE":
-      return close;
-    case "VOLUME":
-      return volume;
-    case "HL2":
-      return (high + low) / 2;
-    case "HLC3":
-      return (high + low + close) / 3;
-    case "OHLC4":
-      return (open + high + low + close) / 4;
-    case "OC2":
-      return (open + close) / 2;
-    case "HLCC4":
-      return (high + low + close + close) / 4;
-    default:
-      return close;
+function toFiniteOrUndefined(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
   }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function alignOutputTail(rawValues: unknown, expectedLength: number): Array<number | undefined> {
+  const aligned: Array<number | undefined> = new Array(expectedLength).fill(undefined);
+  if (!isNumericArrayLike(rawValues) || expectedLength <= 0) {
+    return aligned;
+  }
+
+  const copyCount = Math.min(expectedLength, rawValues.length);
+  const startIndex = Math.max(0, expectedLength - copyCount);
+  for (let i = 0; i < copyCount; i += 1) {
+    aligned[startIndex + i] = toFiniteOrUndefined(rawValues[i]);
+  }
+  return aligned;
+}
+
+function tryGetOutputArray(rawOutputs: Record<string, unknown>, outputKey: string): unknown {
+  const direct = rawOutputs[outputKey];
+  if (isNumericArrayLike(direct)) {
+    return direct;
+  }
+
+  const normalized = normalizeInputKey(outputKey);
+  for (const [key, value] of Object.entries(rawOutputs)) {
+    if (normalizeInputKey(key) === normalized && isNumericArrayLike(value)) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 function buildSeries(data: KLineData[], key: string): number[] {
-  return data.map((item) => resolveSeriesValue(item, key));
+  const source = normalizeTalibInputSource(key);
+  return data.map((item) => resolveTalibSeriesValue(item, source));
 }
 
 function resolveConfiguredSource(
@@ -159,7 +144,7 @@ function resolveOptionValue(paramValue: number | undefined, defaultValue: number
   const baseValue = Number.isFinite(paramValue) ? Number(paramValue) : Number.isFinite(defaultValue) ? Number(defaultValue) : 0;
   const normalizedType = optionType.trim().toLowerCase();
   if (normalizedType === "integer" || normalizedType === "matype") {
-    return Math.round(baseValue);
+    return roundAwayFromZero(baseValue);
   }
   return baseValue;
 }
@@ -185,6 +170,10 @@ function resolveRuntimeInputMap(runtimeExtendData: unknown): Record<string, stri
     normalizedMap[key] = normalizeInputSource(rawValue);
   }
   return normalizedMap;
+}
+
+function normalizeInputSource(value: string): TalibInputSource {
+  return normalizeTalibInputSource(value);
 }
 
 export function calcTalibIndicator(
@@ -226,17 +215,19 @@ export function calcTalibIndicator(
     }
 
     const rawOutputs = fn(params);
-    const outputArrays = new Map<string, number[]>();
+    const outputArrays = new Map<string, Array<number | undefined>>();
+    let configuredOutputFound = 0;
     for (const output of spec.outputs) {
-      const raw = rawOutputs[output.key];
+      const raw = tryGetOutputArray(rawOutputs, output.key);
       if (Array.isArray(raw)) {
-        outputArrays.set(output.key, raw as number[]);
+        configuredOutputFound += 1;
+        outputArrays.set(output.key, alignOutputTail(raw, data.length));
       }
     }
-    if (outputArrays.size === 0) {
+    if (configuredOutputFound === 0) {
       for (const [key, raw] of Object.entries(rawOutputs)) {
         if (Array.isArray(raw)) {
-          outputArrays.set(key, raw as number[]);
+          outputArrays.set(key, alignOutputTail(raw, data.length));
         }
       }
     }

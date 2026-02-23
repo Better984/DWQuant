@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Dialog, SearchInput, useNotification } from '../ui/index.ts';
+import { resolveTalibGroupCn, resolveTalibIndicatorDisplayName } from '../../lib/talibLocale';
 import './IndicatorGeneratorSelector.css';
 
 interface TalibEnumOption {
@@ -34,7 +35,9 @@ interface TalibIndicator {
   name_cn?: string;
   method?: string;
   group?: string;
+  group_cn?: string;
   indicator_type?: string;
+  indicator_type_cn?: string;
   inputs?: {
     shape?: string;
     series?: string[];
@@ -48,6 +51,16 @@ interface TalibRoot {
   common?: Record<string, TalibCommonOption>;
   indicators: TalibIndicator[];
 }
+
+interface TalibMetaOption {
+  defaultValue?: number;
+}
+
+interface TalibMetaIndicator {
+  options?: TalibMetaOption[];
+}
+
+type TalibMetaRoot = Record<string, TalibMetaIndicator>;
 
 interface ParamDefinition {
   id: string;
@@ -69,6 +82,17 @@ export interface GeneratedIndicatorPayload {
 }
 
 type IndicatorDialogMode = 'create' | 'edit';
+type IndicatorFilterPane = 'all' | 'main' | 'sub';
+type IndicatorPane = 'main' | 'sub';
+type ConfigurableInputKind = 'real' | 'periods';
+
+interface ConfigurableInputSlot {
+  id: string;
+  kind: ConfigurableInputKind;
+  label: string;
+  keyName: string;
+  fallback: string;
+}
 
 interface IndicatorGeneratorSelectorProps {
   open: boolean;
@@ -119,14 +143,64 @@ const TIMEFRAME_OPTIONS = [
 
 const OFFSET_DEFAULT = { min: '1', max: '1' };
 
+const TALIB_CODE_ALIAS: Record<string, string> = {
+  CONCEALINGBABYSWALLOW: 'CDLCONCEALBABYSWALL',
+  GAPSIDEBYSIDEWHITELINES: 'CDLGAPSIDESIDEWHITE',
+  HIKKAKEMODIFIED: 'CDLHIKKAKEMOD',
+  IDENTICALTHREECROWS: 'CDLIDENTICAL3CROWS',
+  PIERCINGLINE: 'CDLPIERCING',
+  RISINGFALLINGTHREEMETHODS: 'CDLRISEFALL3METHODS',
+  TAKURILINE: 'CDLTAKURI',
+  UNIQUETHREERIVER: 'CDLUNIQUE3RIVER',
+  UPDOWNSIDEGAPTHREEMETHODS: 'CDLXSIDEGAP3METHODS',
+};
+
+const normalizeTalibLookupKey = (value: string): string =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
 const getIndicatorName = (indicator: TalibIndicator) =>
-  indicator.name_cn || indicator.name_en || indicator.abbr_en || indicator.code;
+  resolveTalibIndicatorDisplayName(
+    indicator.code,
+    indicator.name_cn,
+    indicator.name_en,
+    indicator.abbr_en
+  );
 
 const getIndicatorDisplayName = (indicator: TalibIndicator) =>
-  indicator.name_cn || indicator.name_en || indicator.abbr_en || indicator.code;
+  resolveTalibIndicatorDisplayName(
+    indicator.code,
+    indicator.name_cn,
+    indicator.name_en,
+    indicator.abbr_en
+  );
 
 const getIndicatorCategory = (indicator: TalibIndicator) =>
-  indicator.indicator_type || indicator.group || 'Other';
+  resolveTalibGroupCn(
+    indicator.indicator_type || indicator.group || 'Other',
+    indicator.indicator_type_cn || indicator.group_cn
+  );
+
+function isMainIndicatorGroupText(value: string | null | undefined): boolean {
+  const text = (value ?? '').trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+
+  return (
+    text.includes('overlap studies') ||
+    text.includes('price transform') ||
+    text.includes('叠加') ||
+    text.includes('价格变换')
+  );
+}
+
+function getIndicatorPane(indicator: TalibIndicator): IndicatorPane {
+  const rawGroup = indicator.indicator_type || indicator.group || '';
+  const rawGroupCn = indicator.indicator_type_cn || indicator.group_cn || '';
+  return isMainIndicatorGroupText(rawGroup) || isMainIndicatorGroupText(rawGroupCn)
+    ? 'main'
+    : 'sub';
+}
 
 const normalizeTimeframe = (raw: string) => {
   const value = raw.trim().toLowerCase().replace(/\s+/g, '');
@@ -152,6 +226,127 @@ const normalizeTimeframe = (raw: string) => {
   return value;
 };
 
+function resolveTalibMetaCode(
+  indicator: TalibIndicator,
+  metaCodeIndex: Map<string, string>,
+): string | null {
+  const candidates: string[] = [];
+  const upperCode = (indicator.code || '').toUpperCase();
+  if (upperCode && TALIB_CODE_ALIAS[upperCode]) {
+    candidates.push(TALIB_CODE_ALIAS[upperCode]);
+  }
+  if (indicator.code) {
+    candidates.push(indicator.code);
+    candidates.push(`CDL${indicator.code}`);
+  }
+  if (indicator.method) {
+    candidates.push(indicator.method);
+    candidates.push(`cdl${indicator.method}`);
+  }
+  if (indicator.name_en) {
+    candidates.push(indicator.name_en);
+  }
+
+  for (const candidate of candidates) {
+    const key = normalizeTalibLookupKey(candidate);
+    if (!key) {
+      continue;
+    }
+    const resolved = metaCodeIndex.get(key);
+    if (resolved) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+function parseNamedInputMap(rawInput: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!rawInput.includes('=')) {
+    return map;
+  }
+
+  const separator = rawInput.includes(';') ? ';' : ',';
+  const pairs = rawInput.split(separator).map((item) => item.trim()).filter(Boolean);
+  for (const pair of pairs) {
+    const index = pair.indexOf('=');
+    if (index <= 0 || index >= pair.length - 1) {
+      continue;
+    }
+    const key = pair.slice(0, index).trim().toUpperCase();
+    const value = pair.slice(index + 1).trim();
+    if (!key || !value) {
+      continue;
+    }
+    map.set(key, value);
+  }
+
+  return map;
+}
+
+function resolveInputSelectionsFromConfig(
+  rawInput: string,
+  slots: ConfigurableInputSlot[],
+): string[] {
+  if (slots.length === 0) {
+    return [];
+  }
+
+  const trimmed = rawInput.trim();
+  if (!trimmed) {
+    return slots.map((slot) => slot.fallback);
+  }
+
+  const namedMap = parseNamedInputMap(trimmed);
+  if (namedMap.size > 0) {
+    return slots.map((slot) => {
+      const exact = namedMap.get(slot.keyName.toUpperCase());
+      if (exact) {
+        return exact;
+      }
+
+      // 兼容早期命名：Real1 / Periods1
+      if (slot.keyName === 'Real' && namedMap.has('REAL1')) {
+        return namedMap.get('REAL1') || slot.fallback;
+      }
+      if (slot.keyName === 'Periods' && namedMap.has('PERIODS1')) {
+        return namedMap.get('PERIODS1') || slot.fallback;
+      }
+
+      return slot.fallback;
+    });
+  }
+
+  const parts = trimmed.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) {
+    return slots.map((slot) => slot.fallback);
+  }
+
+  return slots.map((slot, index) => parts[index] || parts[0] || slot.fallback);
+}
+
+function buildConfigInputValue(
+  slots: ConfigurableInputSlot[],
+  selections: string[],
+): string {
+  if (slots.length === 0) {
+    return 'Close';
+  }
+
+  const values = slots.map(
+    (slot, index) => selections[index]?.trim() || slot.fallback || 'Close'
+  );
+  const allReal = slots.every((slot) => slot.kind === 'real');
+  if (allReal) {
+    return values.length > 1 ? values.join(',') : values[0] || 'Close';
+  }
+
+  // 含 Periods 时使用命名编码，避免与多 Real 的逗号格式冲突。
+  return slots
+    .map((slot, index) => `${slot.keyName}=${values[index]}`)
+    .join(';');
+}
+
 const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
   open,
   onClose,
@@ -164,10 +359,13 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
 }) => {
   const { success, error } = useNotification();
   const [catalog, setCatalog] = useState<TalibRoot | null>(null);
+  const [metaRoot, setMetaRoot] = useState<TalibMetaRoot | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [step, setStep] = useState<'select' | 'config'>('select');
   const [searchTerm, setSearchTerm] = useState('');
+  const [indicatorPaneFilter, setIndicatorPaneFilter] = useState<IndicatorFilterPane>('all');
+  const [indicatorGroupFilter, setIndicatorGroupFilter] = useState<string>('ALL');
   const [activeIndicator, setActiveIndicator] = useState<TalibIndicator | null>(null);
   const [timeframe, setTimeframe] = useState('m1');
   const [calcMode, setCalcMode] = useState('OnBarClose');
@@ -190,23 +388,38 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     if (!open) {
       setStep('select');
       setSearchTerm('');
+      setIndicatorPaneFilter('all');
+      setIndicatorGroupFilter('ALL');
       setActiveIndicator(null);
       setGeneratedConfig(null);
       return;
     }
-    if (catalog || isLoading) {
+    if (isLoading || (catalog && metaRoot)) {
       return;
     }
     setIsLoading(true);
-    fetch('/talib_indicators_config.json')
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return response.json();
-      })
-      .then((data) => {
-        setCatalog(data as TalibRoot);
+    const loadCatalog = catalog
+      ? Promise.resolve(catalog)
+      : fetch('/talib_indicators_config.json').then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json() as Promise<TalibRoot>;
+        });
+
+    const loadMeta = metaRoot
+      ? Promise.resolve(metaRoot)
+      : fetch('/talib_web_api_meta.json').then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json() as Promise<TalibMetaRoot>;
+        });
+
+    Promise.all([loadCatalog, loadMeta])
+      .then(([catalogData, metaData]) => {
+        setCatalog(catalogData);
+        setMetaRoot(metaData);
         setLoadError(null);
       })
       .catch((err: Error) => {
@@ -216,7 +429,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       .finally(() => {
         setIsLoading(false);
       });
-  }, [catalog, error, isLoading, open]);
+  }, [catalog, error, isLoading, metaRoot, open]);
 
   useEffect(() => {
     if (!open || !isEditMode || !catalog || !initialIndicator) {
@@ -237,7 +450,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     setActiveIndicator(matched);
   }, [catalog, error, initialIndicator, isEditMode, open]);
 
-  const filteredIndicators = useMemo(() => {
+  const searchedIndicators = useMemo(() => {
     if (!catalog?.indicators) {
       return [];
     }
@@ -246,13 +459,17 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       return catalog.indicators;
     }
     return catalog.indicators.filter((indicator) => {
+      const category = getIndicatorCategory(indicator);
       const haystack = [
         indicator.code,
         indicator.abbr_en,
         indicator.name_en,
         indicator.name_cn,
         indicator.group,
+        indicator.group_cn,
         indicator.indicator_type,
+        indicator.indicator_type_cn,
+        category,
       ]
         .filter(Boolean)
         .join(' ')
@@ -261,10 +478,46 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     });
   }, [catalog, searchTerm]);
 
+  const indicatorGroupOptions = useMemo(() => {
+    const groups = new Set<string>();
+    for (const indicator of searchedIndicators) {
+      const pane = getIndicatorPane(indicator);
+      if (indicatorPaneFilter === 'main' && pane !== 'main') {
+        continue;
+      }
+      if (indicatorPaneFilter === 'sub' && pane !== 'sub') {
+        continue;
+      }
+      groups.add(getIndicatorCategory(indicator));
+    }
+    return Array.from(groups).sort((a, b) => a.localeCompare(b));
+  }, [indicatorPaneFilter, searchedIndicators]);
+
+  useEffect(() => {
+    if (indicatorGroupFilter === 'ALL') {
+      return;
+    }
+    if (!indicatorGroupOptions.includes(indicatorGroupFilter)) {
+      setIndicatorGroupFilter('ALL');
+    }
+  }, [indicatorGroupFilter, indicatorGroupOptions]);
+
   const groupedIndicators = useMemo(() => {
     const map = new Map<string, TalibIndicator[]>();
-    filteredIndicators.forEach((indicator) => {
+    searchedIndicators.forEach((indicator) => {
+      const pane = getIndicatorPane(indicator);
+      if (indicatorPaneFilter === 'main' && pane !== 'main') {
+        return;
+      }
+      if (indicatorPaneFilter === 'sub' && pane !== 'sub') {
+        return;
+      }
+
       const key = getIndicatorCategory(indicator);
+      if (indicatorGroupFilter !== 'ALL' && key !== indicatorGroupFilter) {
+        return;
+      }
+
       if (!map.has(key)) {
         map.set(key, []);
       }
@@ -276,7 +529,39 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       list.sort((a, b) => getIndicatorName(a).localeCompare(getIndicatorName(b)));
     });
     return entries;
-  }, [filteredIndicators]);
+  }, [indicatorGroupFilter, indicatorPaneFilter, searchedIndicators]);
+
+  const visibleIndicatorCount = useMemo(
+    () => groupedIndicators.reduce((sum, [, indicators]) => sum + indicators.length, 0),
+    [groupedIndicators]
+  );
+
+  const metaCodeIndex = useMemo(() => {
+    const index = new Map<string, string>();
+    if (!metaRoot) {
+      return index;
+    }
+    for (const code of Object.keys(metaRoot)) {
+      index.set(normalizeTalibLookupKey(code), code);
+    }
+    return index;
+  }, [metaRoot]);
+
+  const activeIndicatorMetaDefaults = useMemo<Array<number | undefined>>(() => {
+    if (!activeIndicator || !metaRoot) {
+      return [];
+    }
+    const talibCode = resolveTalibMetaCode(activeIndicator, metaCodeIndex);
+    if (!talibCode) {
+      return [];
+    }
+    const options = metaRoot[talibCode]?.options || [];
+    return options.map((option) =>
+      typeof option.defaultValue === 'number' && Number.isFinite(option.defaultValue)
+        ? option.defaultValue
+        : undefined
+    );
+  }, [activeIndicator, metaCodeIndex, metaRoot]);
 
   const paramDefinitions = useMemo<ParamDefinition[]>(() => {
     if (!catalog || !activeIndicator) {
@@ -297,7 +582,10 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
             label: ref.key,
             description: ref.desc,
             type: ref.type === 'enum' ? 'enum' : 'number',
-            defaultValue: ref.default,
+            defaultValue:
+              typeof ref.default === 'number' && Number.isFinite(ref.default)
+                ? ref.default
+                : activeIndicatorMetaDefaults[index],
             enumOptions: ref.enum || [],
           } as ParamDefinition;
         }
@@ -309,24 +597,59 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
           label: option.key,
           description: option.desc,
           type: 'number',
+          defaultValue: activeIndicatorMetaDefaults[index],
         } as ParamDefinition;
       })
       .filter(Boolean) as ParamDefinition[];
-  }, [activeIndicator, catalog]);
+  }, [activeIndicator, activeIndicatorMetaDefaults, catalog]);
 
-  const realInputCount = useMemo(() => {
+  const configurableInputSlots = useMemo<ConfigurableInputSlot[]>(() => {
     const series = activeIndicator?.inputs?.series || [];
-    return series.filter((item) => item.toLowerCase() === 'real').length;
+    const realCount = series.filter((item) => item.toLowerCase() === 'real').length;
+    const periodsCount = series.filter((item) => item.toLowerCase() === 'periods').length;
+    let realIndex = 0;
+    let periodsIndex = 0;
+
+    const slots: ConfigurableInputSlot[] = [];
+    for (const rawSeries of series) {
+      const seriesName = rawSeries.toLowerCase();
+      if (seriesName === 'real') {
+        realIndex += 1;
+        const keyName = realCount > 1 ? `Real${realIndex}` : 'Real';
+        slots.push({
+          id: `real-${realIndex}`,
+          kind: 'real',
+          label: realCount > 1 ? `输入 ${realIndex}（Real）` : '输入来源（Real）',
+          keyName,
+          fallback: 'Close',
+        });
+        continue;
+      }
+
+      if (seriesName === 'periods') {
+        periodsIndex += 1;
+        const keyName = periodsCount > 1 ? `Periods${periodsIndex}` : 'Periods';
+        slots.push({
+          id: `periods-${periodsIndex}`,
+          kind: 'periods',
+          label: periodsCount > 1 ? `周期序列 ${periodsIndex}（Periods）` : '周期序列（Periods）',
+          keyName,
+          fallback: 'Close',
+        });
+      }
+    }
+
+    return slots;
   }, [activeIndicator]);
+
+  const outputOptions = useMemo(() => activeIndicator?.outputs || [], [activeIndicator]);
 
   useEffect(() => {
     if (!activeIndicator) {
       return;
     }
     setGeneratedConfig(null);
-    const outputs = activeIndicator.outputs || [];
-    const defaultOutput = outputs.length > 0 ? outputs[0].key : 'Value';
-    const inputSlots = Math.max(1, realInputCount);
+    const defaultOutput = outputOptions.length > 0 ? outputOptions[0].key : 'Value';
     if (isEditMode && initialIndicator) {
       const config = initialIndicator.config as {
         timeframe?: string;
@@ -354,15 +677,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       setOutputSelection(nextOutput);
 
       const rawInput = (config?.input || '').trim();
-      const inputParts = rawInput
-        ? rawInput.split(',').map((part) => part.trim()).filter(Boolean)
-        : [];
-      const nextInputs = Array.from({ length: inputSlots }, (_, index) => {
-        if (inputParts.length > 0) {
-          return inputParts[index] || inputParts[0];
-        }
-        return 'Close';
-      });
+      const nextInputs = resolveInputSelectionsFromConfig(rawInput, configurableInputSlots);
       setInputSelections(nextInputs);
 
       const configParams = Array.isArray(config?.params) ? config.params.map(Number) : [];
@@ -373,7 +688,8 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
             const fallback = param.defaultValue ?? param.enumOptions?.[0]?.value ?? 0;
             return String(fallback);
           }
-          return '';
+          const fallback = param.defaultValue ?? 0;
+          return String(fallback);
         }
         return String(raw);
       });
@@ -386,17 +702,18 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     setOffsetMin(OFFSET_DEFAULT.min);
     setOffsetMax(OFFSET_DEFAULT.max);
     setOutputSelection(defaultOutput);
-    setInputSelections(Array.from({ length: inputSlots }, () => 'Close'));
+    setInputSelections(configurableInputSlots.map((slot) => slot.fallback));
 
     const defaults = paramDefinitions.map((param) => {
       if (param.type === 'enum') {
         const fallback = param.defaultValue ?? param.enumOptions?.[0]?.value ?? 0;
         return String(fallback);
       }
-      return '';
+      const fallback = param.defaultValue ?? 0;
+      return String(fallback);
     });
     setParamValues(defaults);
-  }, [activeIndicator, initialIndicator, isEditMode, paramDefinitions, realInputCount]);
+  }, [activeIndicator, configurableInputSlots, initialIndicator, isEditMode, outputOptions, paramDefinitions]);
 
   const handleSelectIndicator = (indicator: TalibIndicator) => {
     setActiveIndicator(indicator);
@@ -434,7 +751,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     offsetMaxValue < 0 ||
     offsetMaxValue < offsetMinValue;
 
-  const hasInvalidParams = paramDefinitions.some((param, index) => {
+  const hasInvalidParams = paramDefinitions.some((_, index) => {
     const raw = paramValues[index];
     if (raw === undefined || raw === '') {
       return true;
@@ -461,10 +778,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       }
       return Number(raw);
     });
-    const input =
-      realInputCount > 1
-        ? inputSelections.map((selection) => selection || 'Close').join(',')
-        : inputSelections[0] || 'Close';
+    const input = buildConfigInputValue(configurableInputSlots, inputSelections);
 
     const config = {
       refType: 'Indicator',
@@ -533,14 +847,58 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               onClear={() => setSearchTerm('')}
-              placeholder="搜索指标 / 代码"
+              placeholder="搜索指标名称 / 中文 / 代码（如 MA, RSI, CDL）"
               showShortcut={false}
               type="gray"
               className="indicator-generator__search"
             />
             <div className="indicator-generator__stats">
-              {isLoading ? '加载中...' : `共 ${filteredIndicators.length} 项`}
+              {isLoading ? '加载中...' : `共 ${visibleIndicatorCount} 项`}
             </div>
+          </div>
+
+          <div className="indicator-generator__filter-row">
+            <button
+              type="button"
+              className={`indicator-generator__filter-button ${indicatorPaneFilter === 'all' ? 'is-active' : ''}`}
+              onClick={() => setIndicatorPaneFilter('all')}
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              className={`indicator-generator__filter-button ${indicatorPaneFilter === 'main' ? 'is-active' : ''}`}
+              onClick={() => setIndicatorPaneFilter('main')}
+            >
+              主图
+            </button>
+            <button
+              type="button"
+              className={`indicator-generator__filter-button ${indicatorPaneFilter === 'sub' ? 'is-active' : ''}`}
+              onClick={() => setIndicatorPaneFilter('sub')}
+            >
+              副图
+            </button>
+          </div>
+
+          <div className="indicator-generator__filter-row indicator-generator__filter-row-groups ui-scrollable">
+            <button
+              type="button"
+              className={`indicator-generator__filter-button ${indicatorGroupFilter === 'ALL' ? 'is-active' : ''}`}
+              onClick={() => setIndicatorGroupFilter('ALL')}
+            >
+              全部分类
+            </button>
+            {indicatorGroupOptions.map((group) => (
+              <button
+                key={group}
+                type="button"
+                className={`indicator-generator__filter-button ${indicatorGroupFilter === group ? 'is-active' : ''}`}
+                onClick={() => setIndicatorGroupFilter(group)}
+              >
+                {group}
+              </button>
+            ))}
           </div>
 
           {loadError && (
@@ -575,6 +933,9 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                           <div className="indicator-generator__card-code">{indicator.code}</div>
                           <div className="indicator-generator__card-name">
                             {getIndicatorDisplayName(indicator)}
+                          </div>
+                          <div className="indicator-generator__card-meta">
+                            {getIndicatorPane(indicator) === 'main' ? '主图' : '副图'}
                           </div>
                           {indicator.outputs && indicator.outputs.length > 0 && (
                             <div className="indicator-generator__card-meta">
@@ -661,35 +1022,72 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                 )}
               </div>
 
-              {realInputCount > 0 && (
+              {configurableInputSlots.length > 0 && (
                 <div className="indicator-generator__field">
                   <label className="indicator-generator__label">
-                    输入来源 {realInputCount > 1 ? '(多输入)' : ''}
+                    输入来源 {configurableInputSlots.length > 1 ? '(多输入)' : ''}
                   </label>
                   <div className="indicator-generator__input-list">
-                    {inputSelections.map((selection, index) => (
-                      <div key={`input-${index}`} className="indicator-generator__input-row">
-                        {realInputCount > 1 && (
+                    {configurableInputSlots.map((slot, index) => {
+                      const selection = inputSelections[index] || slot.fallback;
+                      return (
+                        <div key={slot.id} className="indicator-generator__input-row">
                           <div className="indicator-generator__input-label">
-                            输入 {index + 1}
+                            {slot.label}
                           </div>
-                        )}
-                        <div className="indicator-generator__option-list">
-                          {INPUT_OPTIONS.map((option) => (
-                            <button
-                              key={`${option.value}-${index}`}
-                              type="button"
-                              className={`indicator-generator__option-button ${
-                                selection === option.value ? 'is-active' : ''
-                              }`}
-                              onClick={() => handleInputChange(index, option.value)}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
+                          <div className="indicator-generator__option-list">
+                            {INPUT_OPTIONS.map((option) => (
+                              <button
+                                key={`${option.value}-${index}`}
+                                type="button"
+                                className={`indicator-generator__option-button ${
+                                  selection === option.value ? 'is-active' : ''
+                                }`}
+                                onClick={() => handleInputChange(index, option.value)}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {outputOptions.length > 0 && (
+                <div className="indicator-generator__field">
+                  <label className="indicator-generator__label">输出项</label>
+                  <div className="indicator-generator__option-list">
+                    {outputOptions.map((output, index) => {
+                      const outputKey = (output.key || '').trim() || `Output${index + 1}`;
+                      const outputLabel = output.hint ? `${output.hint} (${outputKey})` : outputKey;
+                      return (
+                        <button
+                          key={`${outputKey}-${index}`}
+                          type="button"
+                          className={`indicator-generator__option-button ${
+                            outputSelection === outputKey ? 'is-active' : ''
+                          }`}
+                          onClick={() => setOutputSelection(outputKey)}
+                        >
+                          {outputLabel}
+                        </button>
+                      );
+                    })}
+                    {!outputOptions.some(
+                      (output) => (output.key || '').trim() === outputSelection.trim()
+                    ) &&
+                      outputSelection.trim() && (
+                        <button
+                          type="button"
+                          className="indicator-generator__option-button is-active"
+                          onClick={() => setOutputSelection(outputSelection)}
+                        >
+                          {outputSelection}
+                        </button>
+                      )}
                   </div>
                 </div>
               )}
@@ -795,4 +1193,3 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
 };
 
 export default IndicatorGeneratorSelector;
-

@@ -1,0 +1,236 @@
+﻿.talib-random-parity-dialog {
+  width: min(96vw, 1320px) !important;
+  max-width: 1320px !important;
+  max-height: min(92vh, 980px) !important;
+}
+
+.talib-random-parity-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 520px;
+}
+
+.talib-random-parity-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.talib-random-parity-run-btn {
+  border: 1px solid var(--border-light);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.talib-random-parity-run-btn:hover:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.talib-random-parity-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.talib-random-parity-phase {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.talib-random-parity-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.talib-random-parity-meta-item {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.talib-random-parity-meta-item span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.talib-random-parity-meta-item strong {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.talib-random-parity-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.talib-random-parity-summary-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+}
+
+.talib-random-parity-summary-card-fail {
+  border-color: rgba(226, 74, 74, 0.35);
+  background: rgba(226, 74, 74, 0.08);
+}
+
+.talib-random-parity-summary-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.talib-random-parity-summary-value {
+  font-size: 16px;
+  color: var(--text-primary);
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.talib-random-parity-table-wrap {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 320px;
+}
+
+.talib-random-parity-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.talib-random-parity-table th,
+.talib-random-parity-table td {
+  border-bottom: 1px solid var(--border-color);
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.talib-random-parity-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-primary);
+  font-weight: 600;
+}
+
+.talib-random-parity-table tr {
+  cursor: pointer;
+}
+
+.talib-random-parity-table tr:hover {
+  background: var(--bg-hover);
+}
+
+.talib-random-parity-table tr.is-selected {
+  background: var(--bg-active);
+}
+
+.talib-random-parity-tag {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.talib-random-parity-tag.tag-pass {
+  color: #1f8f4d;
+  background: rgba(31, 143, 77, 0.16);
+}
+
+.talib-random-parity-tag.tag-fail {
+  color: #bf2f2f;
+  background: rgba(191, 47, 47, 0.16);
+}
+
+.talib-random-parity-detail {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.talib-random-parity-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.talib-random-parity-detail-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.talib-random-parity-detail-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #bf2f2f;
+  text-align: right;
+}
+
+.talib-random-parity-detail-table-wrap {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.talib-random-parity-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.talib-random-parity-detail-table th,
+.talib-random-parity-detail-table td {
+  border-bottom: 1px solid var(--border-color);
+  padding: 5px 8px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.talib-random-parity-detail-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  z-index: 1;
+}
+
+.talib-random-parity-detail-table tr.is-mismatch {
+  background: rgba(191, 47, 47, 0.1);
+}
+
+@media (max-width: 900px) {
+  .talib-random-parity-summary-grid,
+  .talib-random-parity-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .talib-random-parity-table-wrap {
+    max-height: 260px;
+  }
+}

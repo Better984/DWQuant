@@ -24,5 +24,10 @@ namespace ServerTest.Options
         /// 分享码字符集
         /// </summary>
         public string ShareCodeAlphabet { get; set; } = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+        /// <summary>
+        /// 是否启用超级管理员测试工具
+        /// </summary>
+        public bool EnableSuperAdminTestTools { get; set; } = false;
     }
 }

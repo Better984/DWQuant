@@ -207,6 +207,7 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<RedisKeyOptions>(configuration.GetSection("RedisKey"));
     services.Configure<BusinessRulesOptions>(configuration.GetSection("BusinessRules"));
     services.Configure<BacktestWorkerOptions>(configuration.GetSection("BacktestWorker"));
+    services.Configure<TalibCoreOptions>(configuration.GetSection("TalibCore"));
 
     services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
     services.AddSingleton<IValidateOptions<ConditionCacheOptions>, ConditionCacheOptionsValidator>();
@@ -352,6 +353,7 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<MarketDataEngine>();
     services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
     services.AddSingleton<ExchangePriceService>();
+    services.AddSingleton<TalibWasmNodeInvoker>();
     services.AddSingleton<IndicatorEngine>();
 
     services.AddSingleton<ConditionCacheService>();

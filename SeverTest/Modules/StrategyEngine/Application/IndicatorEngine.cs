@@ -23,7 +23,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
         public IndicatorEngine(
             IMarketDataProvider marketDataProvider,
             ILogger<IndicatorEngine> logger,
-            IOptions<RuntimeQueueOptions> queueOptions)
+            IOptions<RuntimeQueueOptions> queueOptions,
+            TalibWasmNodeInvoker? wasmInvoker = null)
         {
             _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -37,7 +38,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 singleWriter: false);
             _queueMonitor = new QueuePressureMonitor("IndicatorEngine", options.Indicator, logger);
             _catalog = TryLoadCatalog();
-            _calculator = new TalibIndicatorCalculator(_catalog);
+            _calculator = new TalibIndicatorCalculator(_catalog, wasmInvoker);
         }
 
         public void EnqueueTask(IndicatorTask task)

@@ -101,40 +101,50 @@ namespace ServerTest.Modules.Positions.Application
                     continue;
                 }
 
-                var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
-                {
-                    Uid = uid,
-                    ExchangeApiKeyId = group.Key.ExchangeApiKeyId,
-                    Exchange = group.Key.Exchange,
-                    Symbol = group.Key.Symbol,
-                    Side = orderSide,
-                    Qty = qty,
-                    ReduceOnly = true
-                }, ct).ConfigureAwait(false);
-
-                if (!orderResult.Success)
-                {
-                    failedGroups.Add(new StrategyCloseGroupResult
-                    {
-                        Exchange = group.Key.Exchange,
-                        Symbol = group.Key.Symbol,
-                        Side = group.Key.Side,
-                        ExchangeApiKeyId = group.Key.ExchangeApiKeyId,
-                        Qty = qty,
-                        Error = orderResult.ErrorMessage ?? "平仓失败"
-                    });
-                    continue;
-                }
-
                 // 批量平仓按同一成交口径写回：优先订单均价，其次实时价，最后组内加权开仓价
                 var weightedEntry = qty > 0
                     ? group.Sum(item => item.EntryPrice * item.Qty) / qty
                     : 0m;
-                var closePriceResult = ResolveClosePrice(orderResult, group.Key.Exchange, group.Key.Symbol, weightedEntry);
+                ClosePriceResolveResult closePriceResult;
+                var useLocalSimulation = !group.Key.ExchangeApiKeyId.HasValue;
+                if (useLocalSimulation)
+                {
+                    closePriceResult = ResolveLocalClosePrice(group.Key.Exchange, group.Key.Symbol, weightedEntry);
+                }
+                else
+                {
+                    var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+                    {
+                        Uid = uid,
+                        ExchangeApiKeyId = group.Key.ExchangeApiKeyId,
+                        Exchange = group.Key.Exchange,
+                        Symbol = group.Key.Symbol,
+                        Side = orderSide,
+                        Qty = qty,
+                        ReduceOnly = true
+                    }, ct).ConfigureAwait(false);
+
+                    if (!orderResult.Success)
+                    {
+                        failedGroups.Add(new StrategyCloseGroupResult
+                        {
+                            Exchange = group.Key.Exchange,
+                            Symbol = group.Key.Symbol,
+                            Side = group.Key.Side,
+                            ExchangeApiKeyId = group.Key.ExchangeApiKeyId,
+                            Qty = qty,
+                            Error = orderResult.ErrorMessage ?? "平仓失败"
+                        });
+                        continue;
+                    }
+
+                    closePriceResult = ResolveClosePrice(orderResult, group.Key.Exchange, group.Key.Symbol, weightedEntry);
+                }
+
                 if (closePriceResult.IsFallback)
                 {
                     _logger.LogWarning(
-                        "批量平仓未返回交易所均价，启用兜底价: uid={Uid} usId={UsId} exchange={Exchange} symbol={Symbol} side={Side} groupCount={GroupCount} qty={Qty} source={Source} closePrice={ClosePrice} orderAvg={OrderAvg}",
+                        "批量平仓使用兜底价: uid={Uid} usId={UsId} exchange={Exchange} symbol={Symbol} side={Side} groupCount={GroupCount} qty={Qty} source={Source} closePrice={ClosePrice} mode={Mode}",
                         uid,
                         usId,
                         group.Key.Exchange,
@@ -144,7 +154,7 @@ namespace ServerTest.Modules.Positions.Application
                         qty,
                         closePriceResult.Source,
                         closePriceResult.Price,
-                        orderResult.AveragePrice);
+                        useLocalSimulation ? "testing" : "live");
                 }
 
                 foreach (var position in group)
@@ -232,33 +242,43 @@ namespace ServerTest.Modules.Positions.Application
             _logger.LogInformation("手动平仓开始: uid={Uid} positionId={PositionId} {Exchange} {Symbol} {Side} qty={Qty}",
                 uid, position.PositionId, position.Exchange, position.Symbol, position.Side, position.Qty);
 
-            var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+            // 手动单仓平仓需要记录 close_reason=ManualSingle
+            ClosePriceResolveResult closePriceResult;
+            var useLocalSimulation = !position.ExchangeApiKeyId.HasValue;
+            if (useLocalSimulation)
             {
-                Uid = position.Uid,
-                ExchangeApiKeyId = position.ExchangeApiKeyId,
-                Exchange = position.Exchange,
-                Symbol = position.Symbol,
-                Side = orderSide,
-                Qty = position.Qty,
-                ReduceOnly = true
-            }, ct).ConfigureAwait(false);
-
-            if (!orderResult.Success)
+                closePriceResult = ResolveLocalClosePrice(position.Exchange, position.Symbol, position.EntryPrice);
+            }
+            else
             {
-                return new PositionCloseResult
+                var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
                 {
-                    PositionId = position.PositionId,
-                    Success = false,
-                    Error = orderResult.ErrorMessage ?? "平仓失败"
-                };
+                    Uid = position.Uid,
+                    ExchangeApiKeyId = position.ExchangeApiKeyId,
+                    Exchange = position.Exchange,
+                    Symbol = position.Symbol,
+                    Side = orderSide,
+                    Qty = position.Qty,
+                    ReduceOnly = true
+                }, ct).ConfigureAwait(false);
+
+                if (!orderResult.Success)
+                {
+                    return new PositionCloseResult
+                    {
+                        PositionId = position.PositionId,
+                        Success = false,
+                        Error = orderResult.ErrorMessage ?? "平仓失败"
+                    };
+                }
+
+                closePriceResult = ResolveClosePrice(orderResult, position.Exchange, position.Symbol, position.EntryPrice);
             }
 
-            // 手动单仓平仓需要记录 close_reason=ManualSingle
-            var closePriceResult = ResolveClosePrice(orderResult, position.Exchange, position.Symbol, position.EntryPrice);
             if (closePriceResult.IsFallback)
             {
                 _logger.LogWarning(
-                    "单仓平仓未返回交易所均价，启用兜底价: uid={Uid} positionId={PositionId} exchange={Exchange} symbol={Symbol} side={Side} qty={Qty} source={Source} closePrice={ClosePrice} orderAvg={OrderAvg}",
+                    "单仓平仓使用兜底价: uid={Uid} positionId={PositionId} exchange={Exchange} symbol={Symbol} side={Side} qty={Qty} source={Source} closePrice={ClosePrice} mode={Mode}",
                     uid,
                     position.PositionId,
                     position.Exchange,
@@ -267,7 +287,7 @@ namespace ServerTest.Modules.Positions.Application
                     position.Qty,
                     closePriceResult.Source,
                     closePriceResult.Price,
-                    orderResult.AveragePrice);
+                    useLocalSimulation ? "testing" : "live");
             }
             await _positionRepository.CloseAsync(
                     position.PositionId,
@@ -320,6 +340,14 @@ namespace ServerTest.Modules.Positions.Application
                 };
             }
 
+            return ResolveLocalClosePrice(exchange, symbol, fallbackPrice);
+        }
+
+        private ClosePriceResolveResult ResolveLocalClosePrice(
+            string exchange,
+            string symbol,
+            decimal fallbackPrice)
+        {
             var normalizedExchange = MarketDataKeyNormalizer.NormalizeExchange(exchange);
             var normalizedSymbol = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
             var kline = _marketDataEngine.GetLatestKline(normalizedExchange, "1m", normalizedSymbol);

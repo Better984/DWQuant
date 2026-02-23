@@ -1,0 +1,134 @@
+.super-admin-test-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+}
+
+.super-admin-test-dialog .ui-dialog__content {
+  padding: 16px 18px;
+}
+
+.super-admin-test-dialog__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 220px);
+  padding-right: 6px;
+}
+
+.super-admin-test-dialog__section {
+  border: 1px solid #d9e2ee;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.super-admin-test-dialog__section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.super-admin-test-dialog__grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.super-admin-test-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.super-admin-test-dialog__field input,
+.super-admin-test-dialog__field select,
+.super-admin-test-dialog__query-row input {
+  border: 1px solid #c9d7ea;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #1f2937;
+  background: #ffffff;
+}
+
+.super-admin-test-dialog__field input:focus,
+.super-admin-test-dialog__field select:focus,
+.super-admin-test-dialog__query-row input:focus {
+  outline: none;
+  border-color: #6aa7ff;
+  box-shadow: 0 0 0 2px rgba(106, 167, 255, 0.18);
+}
+
+.super-admin-test-dialog__query-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.super-admin-test-dialog__query-row input {
+  flex: 1;
+}
+
+.super-admin-test-dialog__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.super-admin-test-dialog__button {
+  border: none;
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(90deg, #1d4ed8, #2563eb);
+  cursor: pointer;
+}
+
+.super-admin-test-dialog__button--secondary {
+  background: #1f2937;
+}
+
+.super-admin-test-dialog__button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.super-admin-test-dialog__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.super-admin-test-dialog__user-card,
+.super-admin-test-dialog__result-card {
+  border: 1px solid #d7e2ef;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.super-admin-test-dialog__result-card.is-failed {
+  border-color: #f1b8b8;
+  background: #fff5f5;
+}
+
+@media (max-width: 768px) {
+  .super-admin-test-dialog__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .super-admin-test-dialog__query-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

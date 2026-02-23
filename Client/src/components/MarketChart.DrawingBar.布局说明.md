@@ -338,4 +338,5 @@ CSS 变量示例：`--klinecharts-pro-border-color`、`--klinecharts-pro-backgro
   - supports keyword search (`name/code`)
   - supports pane filter (`全部/主图/副图`)
   - supports category filter (grouped by TA indicator group)
+  - indicator display name prefers `name_cn`; category display prefers `indicator_type_cn/group_cn`, else falls back to built-in Chinese mapping
   - supports quick `关闭副图`

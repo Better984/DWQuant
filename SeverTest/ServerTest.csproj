@@ -15,6 +15,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 工具工程独立编译，避免被主项目误收录 -->
+    <Compile Remove="Tools\**\*.cs" />
+    <None Include="Tools\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ccxt" Version="4.5.32" />
     <PackageReference Include="Dapper" Version="2.1.35" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />

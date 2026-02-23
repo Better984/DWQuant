@@ -24,7 +24,7 @@
 - **CryptoMarketPanel**：行情面板布局与数据展示容器；行情推送更新采用帧内合并，降低高频 tick 导致的重渲染抖动。
 - **Dashboard**：主面板布局与各模块切换入口；左侧导航已包含 `星球` 入口并支持切换到社区页面。主内容模块改为 `React.lazy` 懒加载，并将行情页布局切换由 `:has` 选择器改为显式 class，减少样式重算。
 - **DiscoverModule**：发现模块入口页，展示市场资讯与快讯列表；支持通过 `focusNewsId` 从首页“新闻精选”跳转到对应新闻项。
-- **HomeModule**：首页模块入口，含近期总结、快捷入口、指标精选、新闻精选等；仓位事件使用 `assets/icons/crypto` 币种图标。
+- **HomeModule**：首页模块入口，含近期总结、快捷入口、指标精选、新闻精选等；仓位事件使用 `assets/icons/crypto` 币种图标。近期总结时间窗口切换支持“立即高亮 + 切换中提示 + 失败回退”，避免交互无反馈。
 - **IndicatorGeneratorSelector**：指标生成/选择弹窗，输出指标配置。
 - **IndicatorModule**：指标模块入口页容器。
 - **MarketChart**：行情图表视图封装；绘图工具栏图标使用 `assets/KLineCharts` 本地 SVG。

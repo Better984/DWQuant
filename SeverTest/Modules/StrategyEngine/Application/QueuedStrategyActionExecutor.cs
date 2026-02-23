@@ -35,6 +35,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 UsId = context.Strategy.Id,
                 StrategyVersionId = context.Strategy.VersionId,
                 StrategyVersionNo = context.Strategy.Version,
+                StrategyState = NormalizeStrategyState(context.Strategy.State),
                 ExchangeApiKeyId = context.Strategy.ExchangeApiKeyId,
                 Exchange = context.StrategyConfig?.Trade?.Exchange ?? string.Empty,
                 Symbol = context.StrategyConfig?.Trade?.Symbol ?? string.Empty,
@@ -62,6 +63,20 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
 
             return BuildResult(method.Method ?? "Unknown", true, "Action task enqueued");
+        }
+
+        private static string NormalizeStrategyState(StrategyState state)
+        {
+            return state switch
+            {
+                StrategyState.Running => "running",
+                StrategyState.Paused => "paused",
+                StrategyState.PausedOpenPosition => "paused_open_position",
+                StrategyState.Testing => "testing",
+                StrategyState.Completed => "completed",
+                StrategyState.Deleted => "deleted",
+                _ => "draft"
+            };
         }
 
         private static (bool Success, StringBuilder Message) BuildResult(string method, bool success, string message)

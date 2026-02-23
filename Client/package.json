@@ -7,6 +7,7 @@
     "ensure:klinecharts-local": "node ./scripts/ensure-local-klinecharts.mjs",
     "dev": "npm run ensure:klinecharts-local && vite",
     "build": "npm run ensure:klinecharts-local && tsc -b && vite build",
+    "talib:baseline": "node ./scripts/generate-talib-alignment-baseline.mjs",
     "postinstall": "patch-package",
     "lint": "eslint .",
     "preview": "vite preview"

@@ -846,10 +846,11 @@
   font-size: 12px;
 }
 
-/* 策略配置确认弹窗 */
+/* 策略配置确认弹窗：需要较宽空间，窄视口时提前切单列避免三列挤在 600px 内 */
 .ui-dialog.strategy-config-dialog {
   width: 1200px;
   max-width: 90vw;
+  min-width: min(600px, 90vw);
   max-height: 90vh;
   border-radius: 28px;
   padding: 24px;
@@ -1577,7 +1578,8 @@
   color: var(--text-primary);
 }
 
-@media (max-width: 900px) {
+/* 断点 1100px：弹窗被 90vw 压到约 990px 时即切单列，避免 600px 时仍三列导致布局挤崩 */
+@media (max-width: 1100px) {
   .ui-dialog.strategy-config-dialog {
     width: 95vw;
     padding: 20px;
@@ -1586,6 +1588,15 @@
 
   .strategy-config-dialog-body {
     grid-template-columns: 1fr;
+    /* 单列时：进度条固定、条件概览可滚动、交易表单完整露出且不被压扁 */
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  /* 单列时交易规则区域按内容高度显示，避免 height:100% 导致被挤出视口 */
+  .strategy-config-trade {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .trade-form-row {

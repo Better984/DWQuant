@@ -86,13 +86,15 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
+            var isTestingTask = IsTestingTask(task);
+
             if (isClose)
             {
-                await HandleCloseAsync(task, exchange, symbol, positionSide, orderSide, ct).ConfigureAwait(false);
+                await HandleCloseAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
                 return;
             }
 
-            await HandleOpenAsync(task, exchange, symbol, positionSide, orderSide, ct).ConfigureAwait(false);
+            await HandleOpenAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -111,6 +113,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             string symbol,
             string positionSide,
             string orderSide,
+            bool isTestingTask,
             CancellationToken ct)
         {
             // 1. 验证用户ID和策略ID是否存在
@@ -144,30 +147,32 @@ namespace ServerTest.Modules.TradingExecution.Application
                 _logger.LogWarning("入场价格缺失，跳过开仓: {Exchange} {Symbol}", exchange, symbol);
                 return;
             }
-
-            // 5. 提交市价单到交易所（开仓订单，非平仓）
-            var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+            if (!isTestingTask)
             {
-                Uid = task.Uid.Value,
-                ExchangeApiKeyId = task.ExchangeApiKeyId,
-                Exchange = exchange,
-                Symbol = symbol,
-                Side = orderSide,
-                Qty = task.OrderQty,
-                ReduceOnly = false  // 开仓订单，非平仓
-            }, ct).ConfigureAwait(false);
+                // 5. 非 testing 模式提交市价单到交易所（开仓订单，非平仓）
+                var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+                {
+                    Uid = task.Uid.Value,
+                    ExchangeApiKeyId = task.ExchangeApiKeyId,
+                    Exchange = exchange,
+                    Symbol = symbol,
+                    Side = orderSide,
+                    Qty = task.OrderQty,
+                    ReduceOnly = false  // 开仓订单，非平仓
+                }, ct).ConfigureAwait(false);
 
-            // 6. 检查订单是否成功提交
-            if (!orderResult.Success)
-            {
-                _logger.LogWarning("开仓订单失败: uid={Uid} usId={UsId} 错误={Error}", task.Uid, task.UsId, orderResult.ErrorMessage);
-                return;
-            }
+                // 6. 检查订单是否成功提交
+                if (!orderResult.Success)
+                {
+                    _logger.LogWarning("开仓订单失败: uid={Uid} usId={UsId} 错误={Error}", task.Uid, task.UsId, orderResult.ErrorMessage);
+                    return;
+                }
 
-            // 7. 如果订单返回了实际成交均价，使用实际成交价更新入场价格
-            if (orderResult.AveragePrice.HasValue && orderResult.AveragePrice.Value > 0)
-            {
-                entryPrice = orderResult.AveragePrice.Value;
+                // 7. 如果订单返回了实际成交均价，使用实际成交价更新入场价格
+                if (orderResult.AveragePrice.HasValue && orderResult.AveragePrice.Value > 0)
+                {
+                    entryPrice = orderResult.AveragePrice.Value;
+                }
             }
 
             // 8. 根据入场价格和风险参数计算止损价和止盈价
@@ -180,7 +185,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                 Uid = task.Uid.Value,
                 UsId = task.UsId.Value,
                 StrategyVersionId = task.StrategyVersionId,
-                ExchangeApiKeyId = task.ExchangeApiKeyId,
+                ExchangeApiKeyId = isTestingTask ? null : task.ExchangeApiKeyId,
                 Exchange = exchange,
                 Symbol = symbol,
                 Side = positionSide,
@@ -216,8 +221,8 @@ namespace ServerTest.Modules.TradingExecution.Application
             _riskIndexManager.UpsertPosition(entity, riskConfig);
 
             // 12. 记录开仓成功日志
-            _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} versionId={VersionId} {Exchange} {Symbol} {Side}",
-                positionId, task.Uid, task.UsId, task.StrategyVersionId, exchange, symbol, positionSide);
+            _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} versionId={VersionId} {Exchange} {Symbol} {Side} mode={Mode}",
+                positionId, task.Uid, task.UsId, task.StrategyVersionId, exchange, symbol, positionSide, isTestingTask ? "testing" : "live");
 
             var payload = JsonSerializer.Serialize(new
             {
@@ -247,6 +252,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             string symbol,
             string positionSide,
             string orderSide,
+            bool isTestingTask,
             CancellationToken ct)
         {
             if (!task.Uid.HasValue || !task.UsId.HasValue)
@@ -264,24 +270,34 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+            decimal? closePrice;
+            var useLocalSimulation = isTestingTask || !existing.ExchangeApiKeyId.HasValue;
+            if (useLocalSimulation)
             {
-                Uid = existing.Uid,
-                ExchangeApiKeyId = existing.ExchangeApiKeyId,
-                Exchange = exchange,
-                Symbol = symbol,
-                Side = orderSide,
-                Qty = existing.Qty,
-                ReduceOnly = true
-            }, ct).ConfigureAwait(false);
+                closePrice = ResolveLocalClosePrice(exchange, symbol, existing.EntryPrice);
+            }
+            else
+            {
+                var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+                {
+                    Uid = existing.Uid,
+                    ExchangeApiKeyId = existing.ExchangeApiKeyId,
+                    Exchange = exchange,
+                    Symbol = symbol,
+                    Side = orderSide,
+                    Qty = existing.Qty,
+                    ReduceOnly = true
+                }, ct).ConfigureAwait(false);
 
-            if (!orderResult.Success)
-            {
-                _logger.LogWarning("平仓订单失败: positionId={PositionId} 错误={Error}", existing.PositionId, orderResult.ErrorMessage);
-                return;
+                if (!orderResult.Success)
+                {
+                    _logger.LogWarning("平仓订单失败: positionId={PositionId} 错误={Error}", existing.PositionId, orderResult.ErrorMessage);
+                    return;
+                }
+
+                closePrice = ResolveClosePrice(orderResult, exchange, symbol);
             }
 
-            var closePrice = ResolveClosePrice(orderResult, exchange, symbol);
             await _positionRepository.CloseAsync(
                     existing.PositionId,
                     trailingTriggered: false,
@@ -293,7 +309,11 @@ namespace ServerTest.Modules.TradingExecution.Application
             _riskConfigStore.Remove(existing.PositionId);
             _riskIndexManager.RemovePosition(existing.PositionId);
 
-            _logger.LogInformation("仓位已平: id={PositionId} uid={Uid} usId={UsId}", existing.PositionId, existing.Uid, existing.UsId);
+            _logger.LogInformation("仓位已平: id={PositionId} uid={Uid} usId={UsId} mode={Mode}",
+                existing.PositionId,
+                existing.Uid,
+                existing.UsId,
+                useLocalSimulation ? "testing" : "live");
         }
 
         private decimal ResolveEntryPrice(string exchange, string symbol)
@@ -323,6 +343,17 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             var fallbackPrice = ResolveEntryPrice(exchange, symbol);
             return fallbackPrice > 0 ? fallbackPrice : null;
+        }
+
+        private decimal? ResolveLocalClosePrice(string exchange, string symbol, decimal fallbackEntryPrice)
+        {
+            var marketPrice = ResolveEntryPrice(exchange, symbol);
+            if (marketPrice > 0)
+            {
+                return marketPrice;
+            }
+
+            return fallbackEntryPrice > 0 ? fallbackEntryPrice : null;
         }
 
         private static decimal? BuildStopLossPrice(decimal entryPrice, decimal? stopLossPct, int leverage, string side)
@@ -403,6 +434,16 @@ namespace ServerTest.Modules.TradingExecution.Application
                 default:
                     return false;
             }
+        }
+
+        private static bool IsTestingTask(StrategyActionTask task)
+        {
+            if (task == null)
+            {
+                return false;
+            }
+
+            return string.Equals(task.StrategyState, "testing", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

@@ -337,6 +337,7 @@ const HomeModule: React.FC<HomeModuleProps> = ({
   const [activityError, setActivityError] = useState<string | null>(null);
   const [queryMode, setQueryMode] = useState<SummaryQueryMode>('auto');
   const [selectedWindowDays, setSelectedWindowDays] = useState<number>(1);
+  const [pendingWindowDays, setPendingWindowDays] = useState<number | null>(null);
   const [summaryLeftHeight, setSummaryLeftHeight] = useState(0);
   const [isDesktopSummaryLayout, setIsDesktopSummaryLayout] = useState(() =>
     typeof window === 'undefined' ? true : window.matchMedia('(min-width: 1181px)').matches,
@@ -351,6 +352,7 @@ const HomeModule: React.FC<HomeModuleProps> = ({
     options?: { selectedDays?: number; signal?: AbortSignal },
   ) => {
     const currentRequestId = ++requestIdRef.current;
+    const previousWindowDays = summary?.windowDays ?? selectedWindowDays;
     setSummaryLoading(true);
     setSummaryError(null);
 
@@ -372,10 +374,16 @@ const HomeModule: React.FC<HomeModuleProps> = ({
 
       setSummary(response);
       setQueryMode(mode);
+      setPendingWindowDays(null);
       setSelectedWindowDays(mode === 'manual' && selectedDays ? selectedDays : response.windowDays);
     } catch (error) {
       if (!mountedRef.current || currentRequestId !== requestIdRef.current) {
         return;
+      }
+
+      setPendingWindowDays(null);
+      if (mode === 'manual') {
+        setSelectedWindowDays(previousWindowDays);
       }
 
       if (error instanceof HttpError) {
@@ -493,6 +501,10 @@ const HomeModule: React.FC<HomeModuleProps> = ({
       return;
     }
 
+    // 点击后立即给用户反馈，避免“无响应”感。
+    setQueryMode('manual');
+    setPendingWindowDays(days);
+    setSelectedWindowDays(days);
     void loadRecentSummary('manual', { selectedDays: days });
   };
 
@@ -553,6 +565,9 @@ const HomeModule: React.FC<HomeModuleProps> = ({
             <span className="home-module-stat-hint">当前持仓 {summary.currentOpenCount} 笔</span>
           </div>
         </div>
+        {summaryLoading && pendingWindowDays ? (
+          <div className="home-module-summary-loading-inline">正在切换到近{pendingWindowDays}天...</div>
+        ) : null}
       </div>
     );
   };
@@ -606,6 +621,10 @@ const HomeModule: React.FC<HomeModuleProps> = ({
   };
 
   const renderSubtitle = () => {
+    if (summaryLoading && pendingWindowDays) {
+      return `正在切换：近${pendingWindowDays}天`;
+    }
+
     if (!summary) {
       return '默认展示最近有数据的时间段';
     }
@@ -871,4 +890,3 @@ function formatRelativeTime(targetDate: Date): string {
 }
 
 export default HomeModule;
-

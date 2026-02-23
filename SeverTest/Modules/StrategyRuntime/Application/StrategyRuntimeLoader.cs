@@ -53,51 +53,60 @@ namespace ServerTest.Modules.StrategyRuntime.Application
                 return null;
             }
 
+            var isTestingState = string.Equals(row.State?.Trim(), "testing", StringComparison.OrdinalIgnoreCase);
             var exchangeApiKeyId = row.ExchangeApiKeyId;
             UserExchangeApiKeyRecord? apiKey = null;
-            if (exchangeApiKeyId.HasValue && exchangeApiKeyId.Value > 0)
+            if (!isTestingState)
             {
-                apiKey = await _apiKeyRepository.GetByIdAsync(exchangeApiKeyId.Value, row.Uid, ct).ConfigureAwait(false);
+                if (exchangeApiKeyId.HasValue && exchangeApiKeyId.Value > 0)
+                {
+                    apiKey = await _apiKeyRepository.GetByIdAsync(exchangeApiKeyId.Value, row.Uid, ct).ConfigureAwait(false);
+                    if (apiKey == null)
+                    {
+                        exchangeApiKeyId = null;
+                    }
+                }
+
+                if (!exchangeApiKeyId.HasValue)
+                {
+                    apiKey = await _apiKeyRepository.GetLatestByUidAsync(row.Uid, normalizedExchange, ct).ConfigureAwait(false);
+                    if (apiKey != null)
+                    {
+                        exchangeApiKeyId = apiKey.Id;
+                        await _runtimeRepository.UpdateExchangeApiKeyAsync(row.UsId, row.Uid, exchangeApiKeyId.Value, ct)
+                            .ConfigureAwait(false);
+                    }
+                }
+
+                if (!exchangeApiKeyId.HasValue)
+                {
+                    _logger.LogWarning("策略 {UsId} 未绑定交易所 API Key，跳过加载", row.UsId);
+                    return null;
+                }
+
+                apiKey ??= await _apiKeyRepository.GetByIdAsync(exchangeApiKeyId.Value, row.Uid, ct).ConfigureAwait(false);
                 if (apiKey == null)
                 {
-                    exchangeApiKeyId = null;
+                    _logger.LogWarning("策略 {UsId} 绑定的 API Key 无效，跳过加载", row.UsId);
+                    return null;
                 }
-            }
 
-            if (!exchangeApiKeyId.HasValue)
-            {
-                apiKey = await _apiKeyRepository.GetLatestByUidAsync(row.Uid, normalizedExchange, ct).ConfigureAwait(false);
-                if (apiKey != null)
+                var apiExchange = MarketDataKeyNormalizer.NormalizeExchange(apiKey.ExchangeType);
+                if (!string.IsNullOrWhiteSpace(apiExchange)
+                    && !string.Equals(apiExchange, normalizedExchange, StringComparison.OrdinalIgnoreCase))
                 {
-                    exchangeApiKeyId = apiKey.Id;
-                    await _runtimeRepository.UpdateExchangeApiKeyAsync(row.UsId, row.Uid, exchangeApiKeyId.Value, ct)
-                        .ConfigureAwait(false);
+                    _logger.LogWarning(
+                        "策略 {UsId} API Key 交易所不匹配 strategy={StrategyExchange} api={ApiExchange}",
+                        row.UsId,
+                        normalizedExchange,
+                        apiExchange);
+                    return null;
                 }
             }
-
-            if (!exchangeApiKeyId.HasValue)
+            else
             {
-                _logger.LogWarning("策略 {UsId} 未绑定交易所 API Key，跳过加载", row.UsId);
-                return null;
-            }
-
-            apiKey ??= await _apiKeyRepository.GetByIdAsync(exchangeApiKeyId.Value, row.Uid, ct).ConfigureAwait(false);
-            if (apiKey == null)
-            {
-                _logger.LogWarning("策略 {UsId} 绑定的 API Key 无效，跳过加载", row.UsId);
-                return null;
-            }
-
-            var apiExchange = MarketDataKeyNormalizer.NormalizeExchange(apiKey.ExchangeType);
-            if (!string.IsNullOrWhiteSpace(apiExchange)
-                && !string.Equals(apiExchange, normalizedExchange, StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning(
-                    "策略 {UsId} API Key 交易所不匹配 strategy={StrategyExchange} api={ApiExchange}",
-                    row.UsId,
-                    normalizedExchange,
-                    apiExchange);
-                return null;
+                // testing 状态不依赖 API Key，重载时保持本地模拟执行路径。
+                exchangeApiKeyId = null;
             }
 
             row.ExchangeApiKeyId = exchangeApiKeyId;

@@ -232,13 +232,18 @@ type BacktestTradeFocusRange = {
   takeProfitPrice?: number;
 };
 
+type BacktestSupportedTimeRange = {
+  start: Date;
+  end: Date;
+};
+
 type StrategyDetailDialogProps = {
   strategy: StrategyDetailRecord | null;
   onClose: () => void;
   onCreateVersion: (usId: number) => void;
   onViewHistory: (usId: number) => Promise<StrategyHistoryVersion[]>;
   onCreateShare: (usId: number, payload: SharePolicyPayload) => Promise<string>;
-  onUpdateStatus: (usId: number, status: 'running' | 'paused' | 'paused_open_position' | 'completed') => Promise<void>;
+  onUpdateStatus: (usId: number, status: 'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed') => Promise<void>;
   onDelete: (usId: number) => void;
   onEditStrategy: (usId: number) => void;
   onFetchOpenPositionsCount: (usId: number) => Promise<number>;
@@ -602,12 +607,12 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 }) => {
   const { success, error } = useNotification();
   const [activeTab, setActiveTab] = useState<TabType>('info');
-  const [currentStatus, setCurrentStatus] = useState<'running' | 'paused' | 'paused_open_position' | 'completed'>('completed');
+  const [currentStatus, setCurrentStatus] = useState<'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed'>('completed');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [historyVersions, setHistoryVersions] = useState<StrategyHistoryVersion[]>([]);
   const [selectedHistoryVersionId, setSelectedHistoryVersionId] = useState<number | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [, setShareCode] = useState<string | null>(null);
   const [isShareLoading, setIsShareLoading] = useState(false);
   const [isBacktestFullscreen, setIsBacktestFullscreen] = useState(false);
   const [publishTarget, setPublishTarget] = useState<'official' | 'template' | null>(null);
@@ -652,7 +657,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     endTime: string;
     count: number;
   }>>([]);
-  const [isLoadingCache, setIsLoadingCache] = useState(false);
+  const [, setIsLoadingCache] = useState(false);
   const httpClient = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
 
   const profile = useMemo(() => getAuthProfile(), []);
@@ -708,6 +713,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         setCurrentStatus('paused');
       } else if (status === 'paused_open_position') {
         setCurrentStatus('paused_open_position');
+      } else if (status === 'testing') {
+        setCurrentStatus('testing');
       } else {
         setCurrentStatus('completed');
       }
@@ -850,7 +857,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   }, [cacheSnapshots, backtestForm.exchange, backtestForm.symbols]);
 
   // 获取支持的时间范围（取交集）
-  const supportedTimeRange = useMemo(() => {
+  const supportedTimeRange = useMemo<BacktestSupportedTimeRange | null>(() => {
     if (!backtestForm.exchange || !backtestForm.symbols || !backtestForm.timeframe) {
       return null;
     }
@@ -934,7 +941,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     setBacktestStreamingTrades([]);
   }, [defaultBacktestForm, strategy?.usId]);
 
-  const handleUpdateStatus = async (newStatus: 'running' | 'paused' | 'paused_open_position' | 'completed') => {
+  const handleUpdateStatus = async (newStatus: 'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed') => {
     if (!strategy || isUpdatingStatus) {
       return;
     }
@@ -1179,6 +1186,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         return '已暂停';
       case 'paused_open_position':
         return '暂停开新仓';
+      case 'testing':
+        return '测试中';
       case 'completed':
         return '完成';
       case 'error':
@@ -1196,6 +1205,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         return 'status-paused';
       case 'paused_open_position':
         return 'status-paused-open-position';
+      case 'testing':
+        return 'status-testing';
       case 'completed':
         return 'status-completed';
       case 'error':
@@ -2368,6 +2379,14 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                   disabled={isUpdatingStatus || currentStatus === 'paused_open_position'}
                 >
                   {isUpdatingStatus && currentStatus !== 'paused_open_position' ? '更新中...' : '暂停开新仓'}
+                </button>
+                <button
+                  type="button"
+                  className={`strategy-status-btn ${currentStatus === 'testing' ? 'is-active' : ''}`}
+                  onClick={() => handleUpdateStatus('testing')}
+                  disabled={isUpdatingStatus || currentStatus === 'testing'}
+                >
+                  {isUpdatingStatus && currentStatus !== 'testing' ? '更新中...' : '测试中'}
                 </button>
                 <button
                   type="button"

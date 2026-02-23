@@ -18,6 +18,16 @@ interface HistoricalDataCacheDialogProps {
   onClose: () => void;
 }
 
+interface CacheSummary {
+  exchanges: string[];
+  timeframes: string[];
+  symbols: string[];
+  totalCount: number;
+  earliestStart: Date | null;
+  latestEnd: Date | null;
+  totalSnapshots: number;
+}
+
 const HistoricalDataCacheDialog: React.FC<HistoricalDataCacheDialogProps> = ({ open, onClose }) => {
   const { error: showError } = useNotification();
   const [snapshots, setSnapshots] = useState<CacheSnapshot[]>([]);
@@ -108,7 +118,7 @@ const HistoricalDataCacheDialog: React.FC<HistoricalDataCacheDialogProps> = ({ o
   }, [snapshots, selectedExchanges, selectedSymbols]);
 
   // 汇总统计信息（基于筛选后的数据）
-  const summary = useMemo(() => {
+  const summary = useMemo<CacheSummary>(() => {
     const exchanges = new Set<string>();
     const timeframes = new Set<string>();
     const symbols = new Set<string>();

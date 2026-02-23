@@ -7,10 +7,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
     internal sealed class TalibIndicatorCalculator
     {
         private readonly TalibIndicatorCatalog? _catalog;
+        private readonly TalibWasmNodeInvoker? _wasmInvoker;
 
-        public TalibIndicatorCalculator(TalibIndicatorCatalog? catalog)
+        public TalibIndicatorCalculator(TalibIndicatorCatalog? catalog, TalibWasmNodeInvoker? wasmInvoker = null)
         {
             _catalog = catalog;
+            _wasmInvoker = wasmInvoker;
         }
 
         public Abstract.IndicatorFunction? ResolveFunction(string indicator)
@@ -33,7 +35,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var intOptions = new int[parameters.Length];
             for (var i = 0; i < parameters.Length; i++)
             {
-                intOptions[i] = (int)Math.Round(parameters[i], MidpointRounding.AwayFromZero);
+                intOptions[i] = TalibCalcRules.RoundToIntOption(parameters[i]);
             }
 
             return func.Lookback(intOptions);
@@ -65,6 +67,38 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
+            var outputIndex = ResolveOutputIndex(func, key);
+            if (outputIndex < 0)
+            {
+                outputIndex = 0;
+            }
+
+            // 优先走同核心（Node + talib-web + talib.wasm），确保与前端计算核心一致。
+            if (_wasmInvoker is { IsEnabled: true })
+            {
+                if (_wasmInvoker.TryCompute(
+                    key.Indicator,
+                    inputs,
+                    parameters,
+                    candles.Count,
+                    out var wasmOutputs,
+                    out var wasmError))
+                {
+                    return TryBuildPointsFromAlignedOutputs(
+                        candles,
+                        outputIndex,
+                        maxPoints,
+                        wasmOutputs,
+                        out points);
+                }
+
+                Console.WriteLine($"同核心计算失败，指标={key.Indicator}，错误={wasmError}");
+                if (_wasmInvoker.StrictWasmCore)
+                {
+                    return false;
+                }
+            }
+
             var outputs = new double[func.Outputs.Length][];
             for (var i = 0; i < outputs.Length; i++)
             {
@@ -84,7 +118,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
-            var outputIndex = ResolveOutputIndex(func, key);
             if (outputIndex < 0 || outputIndex >= outputs.Length)
             {
                 outputIndex = 0;
@@ -123,6 +156,54 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return points.Count > 0;
         }
 
+        private static bool TryBuildPointsFromAlignedOutputs(
+            List<OHLCV> candles,
+            int outputIndex,
+            int maxPoints,
+            List<double?[]> outputs,
+            out List<IndicatorPoint> points)
+        {
+            points = new List<IndicatorPoint>();
+            if (outputs.Count == 0 || outputIndex >= outputs.Count)
+            {
+                return false;
+            }
+
+            var targetOutput = outputs[outputIndex];
+            if (targetOutput == null || targetOutput.Length == 0)
+            {
+                return false;
+            }
+
+            var length = Math.Min(candles.Count, targetOutput.Length);
+            if (length <= 0)
+            {
+                return false;
+            }
+
+            var needed = Math.Min(length, Math.Max(1, maxPoints));
+            var startIndex = length - needed;
+
+            for (var i = startIndex; i < length; i++)
+            {
+                var maybeValue = targetOutput[i];
+                if (maybeValue is null || double.IsNaN(maybeValue.Value))
+                {
+                    continue;
+                }
+
+                var timestamp = candles[i].timestamp ?? 0;
+                if (timestamp <= 0)
+                {
+                    continue;
+                }
+
+                points.Add(new IndicatorPoint(timestamp, maybeValue.Value));
+            }
+
+            return points.Count > 0;
+        }
+
         private bool TryBuildInputs(
             Abstract.IndicatorFunction func,
             string input,
@@ -136,23 +217,44 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
+            var realCount = inputNames.Count(n => n.Equals("Real", StringComparison.OrdinalIgnoreCase));
+            var namedInputs = ParseNamedInputs(input);
             var realInputs = SplitRealInputs(
                 input,
-                inputNames.Count(n => n.Equals("Real", StringComparison.OrdinalIgnoreCase)));
-            if (realInputs == null)
+                realCount);
+            if (realCount > 0 && realInputs == null && namedInputs.Count == 0)
             {
                 return false;
             }
 
             inputs = new double[inputNames.Length][];
             var realIndex = 0;
+            var periodsIndex = 0;
 
             for (var i = 0; i < inputNames.Length; i++)
             {
                 var name = inputNames[i];
                 if (name.Equals("Real", StringComparison.OrdinalIgnoreCase))
                 {
-                    inputs[i] = BuildSeries(candles, realInputs[realIndex++]);
+                    realIndex++;
+                    var source = ResolveNamedInput(namedInputs, "REAL", realIndex);
+                    if (string.IsNullOrWhiteSpace(source))
+                    {
+                        source = realInputs != null && realInputs.Length >= realIndex
+                            ? realInputs[realIndex - 1]
+                            : "Close";
+                    }
+
+                    inputs[i] = BuildSeries(candles, source);
+                    continue;
+                }
+
+                if (name.Equals("Periods", StringComparison.OrdinalIgnoreCase))
+                {
+                    periodsIndex++;
+                    // MAVP 等指标的 Periods 输入支持单独配置，未配置时兼容回退 Close。
+                    var source = ResolveNamedInput(namedInputs, "PERIODS", periodsIndex) ?? "Close";
+                    inputs[i] = BuildSeries(candles, source);
                     continue;
                 }
 
@@ -160,6 +262,60 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
 
             return true;
+        }
+
+        private static Dictionary<string, string> ParseNamedInputs(string input)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(input) || !input.Contains('='))
+            {
+                return map;
+            }
+
+            var separator = input.Contains(';') ? ';' : ',';
+            var pairs = input.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var pair in pairs)
+            {
+                var equalIndex = pair.IndexOf('=');
+                if (equalIndex <= 0 || equalIndex >= pair.Length - 1)
+                {
+                    continue;
+                }
+
+                var rawKey = pair[..equalIndex].Trim();
+                var rawValue = pair[(equalIndex + 1)..].Trim();
+                if (string.IsNullOrWhiteSpace(rawKey) || string.IsNullOrWhiteSpace(rawValue))
+                {
+                    continue;
+                }
+
+                var key = rawKey.ToUpperInvariant();
+                var value = TalibCalcRules.NormalizeInputSource(rawValue);
+                map[key] = value;
+            }
+
+            return map;
+        }
+
+        private static string? ResolveNamedInput(
+            IReadOnlyDictionary<string, string> namedInputs,
+            string baseName,
+            int index)
+        {
+            var indexedKey = $"{baseName}{index}";
+            if (namedInputs.TryGetValue(indexedKey, out var indexedValue) &&
+                !string.IsNullOrWhiteSpace(indexedValue))
+            {
+                return indexedValue;
+            }
+
+            if (namedInputs.TryGetValue(baseName, out var baseValue) &&
+                !string.IsNullOrWhiteSpace(baseValue))
+            {
+                return baseValue;
+            }
+
+            return null;
         }
 
         private static string[]? SplitRealInputs(string input, int count)
@@ -172,6 +328,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (count == 1)
             {
                 var selected = string.IsNullOrWhiteSpace(input) ? "Close" : input.Trim();
+                selected = TalibCalcRules.NormalizeInputSource(selected);
                 return new[] { selected };
             }
 
@@ -186,13 +343,18 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return null;
             }
 
+            for (var i = 0; i < parts.Length; i++)
+            {
+                parts[i] = TalibCalcRules.NormalizeInputSource(parts[i]);
+            }
+
             return parts;
         }
 
         private static double[] BuildSeries(List<OHLCV> candles, string input)
         {
             var result = new double[candles.Count];
-            var key = input?.Trim() ?? string.Empty;
+            var key = TalibCalcRules.NormalizeInputSource(input);
 
             for (var i = 0; i < candles.Count; i++)
             {
@@ -204,27 +366,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         internal static double ResolveValue(OHLCV candle, string input)
         {
-            var key = input.ToUpperInvariant();
-            var open = candle.open ?? double.NaN;
-            var high = candle.high ?? double.NaN;
-            var low = candle.low ?? double.NaN;
-            var close = candle.close ?? double.NaN;
-            var volume = candle.volume ?? double.NaN;
-
-            return key switch
-            {
-                "OPEN" => open,
-                "HIGH" => high,
-                "LOW" => low,
-                "CLOSE" => close,
-                "VOLUME" => volume,
-                "HL2" => (high + low) / 2.0,
-                "HLC3" => (high + low + close) / 3.0,
-                "OHLC4" => (open + high + low + close) / 4.0,
-                "OC2" => (open + close) / 2.0,
-                "HLCC4" => (high + low + close + close) / 4.0,
-                _ => close
-            };
+            return TalibCalcRules.ResolveSourceValue(candle, input);
         }
 
         private int ResolveOutputIndex(Abstract.IndicatorFunction func, IndicatorKey key)

@@ -47,12 +47,14 @@ namespace ServerTest.Modules.Backtest.Application
         private readonly BacktestProgressPushService _progressPushService;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger<BacktestMainLoop> _logger;
+        private readonly TalibWasmNodeInvoker? _wasmInvoker;
 
         public BacktestMainLoop(
             IOptions<RuntimeQueueOptions> queueOptions,
             ServerConfigStore configStore,
             BacktestObjectPoolManager objectPoolManager,
             BacktestProgressPushService progressPushService,
+            TalibWasmNodeInvoker? wasmInvoker,
             ILoggerFactory loggerFactory,
             ILogger<BacktestMainLoop> logger)
         {
@@ -60,6 +62,7 @@ namespace ServerTest.Modules.Backtest.Application
             _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
             _objectPoolManager = objectPoolManager ?? throw new ArgumentNullException(nameof(objectPoolManager));
             _progressPushService = progressPushService ?? throw new ArgumentNullException(nameof(progressPushService));
+            _wasmInvoker = wasmInvoker;
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -87,7 +90,8 @@ namespace ServerTest.Modules.Backtest.Application
             var indicatorEngine = new IndicatorEngine(
                 provider,
                 _loggerFactory.CreateLogger<IndicatorEngine>(),
-                new OptionsWrapper<RuntimeQueueOptions>(_queueOptions));
+                new OptionsWrapper<RuntimeQueueOptions>(_queueOptions),
+                _wasmInvoker);
             var valueResolver = new IndicatorValueResolver(
                 provider,
                 indicatorEngine,
@@ -954,7 +958,8 @@ namespace ServerTest.Modules.Backtest.Application
             var indicatorEngine = new IndicatorEngine(
                 indicatorProvider,
                 _loggerFactory.CreateLogger<IndicatorEngine>(),
-                new OptionsWrapper<RuntimeQueueOptions>(_queueOptions));
+                new OptionsWrapper<RuntimeQueueOptions>(_queueOptions),
+                _wasmInvoker);
             var valueResolver = new IndicatorValueResolver(
                 indicatorProvider,
                 indicatorEngine,

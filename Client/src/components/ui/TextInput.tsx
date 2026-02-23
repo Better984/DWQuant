@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import './TextInput.css';
 
 export type TextInputType = 'single' | 'textarea' | 'with-label-horizontal' | 'with-label-vertical';

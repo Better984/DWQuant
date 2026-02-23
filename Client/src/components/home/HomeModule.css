@@ -199,6 +199,13 @@
   color: #dc2626;
 }
 
+.home-module-summary-loading-inline {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #6b7280);
+}
+
 .home-module-pnl-positive {
   color: #059669;
 }

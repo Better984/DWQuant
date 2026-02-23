@@ -39,7 +39,8 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             "completed",
             "running",
             "paused",
-            "paused_open_position"
+            "paused_open_position",
+            "testing"
         };
         private static readonly JsonSerializerOptions CamelCaseSerializerOptions = new()
         {
@@ -1632,8 +1633,9 @@ LIMIT 1
                     configJson = reader.IsDBNull(reader.GetOrdinal("config_json")) ? null : reader.GetString("config_json");
                 }
 
-                var ensureApiKey = request.ExchangeApiKeyId.HasValue || RequiresExchangeApiKey(runtimeState);
-                var effectiveExchangeApiKeyId = exchangeApiKeyId;
+                var isTestingState = runtimeState == StrategyState.Testing;
+                var ensureApiKey = !isTestingState && (request.ExchangeApiKeyId.HasValue || RequiresExchangeApiKey(runtimeState));
+                var effectiveExchangeApiKeyId = isTestingState ? null : exchangeApiKeyId;
                 StrategyConfig? config = null;
                 var normalizedStrategyExchange = string.Empty;
 
@@ -2063,6 +2065,8 @@ LIMIT 1
                     return StrategyState.PausedOpenPosition;
                 case "completed":
                     return StrategyState.Completed;
+                case "testing":
+                    return StrategyState.Testing;
                 default:
                     return StrategyState.Draft;
             }

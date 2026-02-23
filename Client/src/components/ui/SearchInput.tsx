@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import './SearchInput.css';
 
 export type SearchInputType = 'gray' | 'glass' | 'outline' | 'typing';
@@ -33,7 +33,6 @@ const SearchInput: React.FC<SearchInputProps> = ({
   const isControlled = value !== undefined;
   const currentValue = isControlled ? value : internalValue;
   const hasValue = currentValue !== undefined && currentValue !== null && String(currentValue).length > 0;
-  const isTyping = hasValue && (type === 'typing' || hasValue);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isControlled) {
@@ -52,9 +51,11 @@ const SearchInput: React.FC<SearchInputProps> = ({
     onBlur?.(e);
   };
 
-  const handleClear = (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleClear = (
+    e?: React.MouseEvent<HTMLButtonElement> | React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     if (!isControlled) {
       setInternalValue('');
     }
@@ -75,7 +76,7 @@ const SearchInput: React.FC<SearchInputProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape' && hasValue) {
-      handleClear();
+      handleClear(e);
     }
     props.onKeyDown?.(e);
   };

@@ -5,7 +5,7 @@ export type ButtonSize = 'small' | 'medium' | 'large';
 export type ButtonStyle = 'borderless' | 'gray' | 'outline' | 'filled';
 export type ButtonState = 'default' | 'hover' | 'disabled';
 
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'style'> {
   size?: ButtonSize;
   style?: ButtonStyle;
   children: React.ReactNode;

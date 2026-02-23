@@ -159,23 +159,34 @@ namespace ServerTest.Modules.Positions.Application
                 : stopLossHit
                     ? "StopLoss"
                     : "TakeProfit";
-
-            var orderSide = side.Equals("Long", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy";
-            var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+            decimal? closePrice;
+            var useLocalSimulation = !entry.ExchangeApiKeyId.HasValue;
+            if (useLocalSimulation)
             {
-                Uid = entry.Uid,
-                ExchangeApiKeyId = entry.ExchangeApiKeyId,
-                Exchange = entry.Exchange,
-                Symbol = entry.Symbol,
-                Side = orderSide,
-                Qty = entry.Qty,
-                ReduceOnly = true
-            }, ct).ConfigureAwait(false);
-
-            if (!orderResult.Success)
+                // testing 模式不调用交易所，直接按行情价本地落平仓。
+                closePrice = ResolveLocalClosePrice(entry.Exchange, entry.Symbol, entry.EntryPrice);
+            }
+            else
             {
-                _logger.LogWarning("风险平仓订单失败: positionId={PositionId} 错误={Error}", entry.PositionId, orderResult.ErrorMessage);
-                return;
+                var orderSide = side.Equals("Long", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy";
+                var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
+                {
+                    Uid = entry.Uid,
+                    ExchangeApiKeyId = entry.ExchangeApiKeyId,
+                    Exchange = entry.Exchange,
+                    Symbol = entry.Symbol,
+                    Side = orderSide,
+                    Qty = entry.Qty,
+                    ReduceOnly = true
+                }, ct).ConfigureAwait(false);
+
+                if (!orderResult.Success)
+                {
+                    _logger.LogWarning("风险平仓订单失败: positionId={PositionId} 错误={Error}", entry.PositionId, orderResult.ErrorMessage);
+                    return;
+                }
+
+                closePrice = orderResult.AveragePrice;
             }
 
             await _positionRepository.CloseAsync(
@@ -183,13 +194,17 @@ namespace ServerTest.Modules.Positions.Application
                     trailingTriggered: trailingHit,
                     closedAt: DateTime.UtcNow,
                     closeReason,
-                    orderResult.AveragePrice,
+                    closePrice,
                     ct)
                 .ConfigureAwait(false);
             _riskConfigStore.Remove(entry.PositionId);
             _riskIndexManager.RemovePosition(entry.PositionId);
 
-            _logger.LogInformation("仓位因风险平仓: id={PositionId} uid={Uid} usId={UsId}", entry.PositionId, entry.Uid, entry.UsId);
+            _logger.LogInformation("仓位因风险平仓: id={PositionId} uid={Uid} usId={UsId} mode={Mode}",
+                entry.PositionId,
+                entry.Uid,
+                entry.UsId,
+                useLocalSimulation ? "testing" : "live");
         }
 
         private static bool CheckStopLoss(PositionRiskEntry entry, decimal high, decimal low, string side)
@@ -312,6 +327,35 @@ namespace ServerTest.Modules.Positions.Application
             return entry.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
                 ? rangeLow <= entry.TrailingStopPrice.Value
                 : rangeHigh >= entry.TrailingStopPrice.Value;
+        }
+
+        private decimal? ResolveLocalClosePrice(string exchange, string symbol, decimal fallbackEntryPrice)
+        {
+            var normalizedExchange = MarketDataKeyNormalizer.NormalizeExchange(exchange);
+            var normalizedSymbol = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
+            var kline = _marketDataEngine.GetLatestKline(normalizedExchange, "1m", normalizedSymbol);
+            if (kline.HasValue)
+            {
+                if (kline.Value.close.HasValue)
+                {
+                    var close = Convert.ToDecimal(kline.Value.close.Value);
+                    if (close > 0)
+                    {
+                        return close;
+                    }
+                }
+
+                if (kline.Value.open.HasValue)
+                {
+                    var open = Convert.ToDecimal(kline.Value.open.Value);
+                    if (open > 0)
+                    {
+                        return open;
+                    }
+                }
+            }
+
+            return fallbackEntryPrice > 0 ? fallbackEntryPrice : null;
         }
     }
 }
