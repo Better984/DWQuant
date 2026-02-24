@@ -85,8 +85,8 @@ logger.LogInformation("服务器角色: {Role}({RoleValue}), 来源={Source}, �
     roleRuntime.Source,
     roleRuntime.RoleFilePath);
 
-var monitorHost = app.Services.GetService<StartupMonitorHost>();
-monitorHost?.Start(startupManager);
+var monitorHost = app.Services.GetRequiredService<IStartupMonitorHost>();
+monitorHost.Start(startupManager);
 
 await RunStartupWorkflowAsync(app, selectedRole, enableHttpApi, enableUserWebSocket || enableWorkerGateway, logger);
 
@@ -285,12 +285,22 @@ static void RegisterCommonServices(
         });
     });
 
+    var monitoringOptions = configuration.GetSection("Monitoring").Get<MonitoringOptions>() ?? new MonitoringOptions();
+    var enableDesktopHost = monitoringOptions.EnableDesktopHost && OperatingSystem.IsWindows();
+
     services.AddSingleton<SystemStartupManager>();
 
-    if (role != ServerRole.BacktestWorker)
+    if (enableDesktopHost)
     {
-        services.AddSingleton<StartupMonitorHost>();
-        services.AddSingleton<ILoggerProvider, StartupMonitorLoggerProvider>();
+        services.AddSingleton<IStartupMonitorHost, WinFormsStartupMonitorHost>();
+        if (role != ServerRole.BacktestWorker)
+        {
+            services.AddSingleton<ILoggerProvider, StartupMonitorLoggerProvider>();
+        }
+    }
+    else
+    {
+        services.AddSingleton<IStartupMonitorHost, NoopStartupMonitorHost>();
     }
 
     services.AddScoped<DatabaseService>();
@@ -402,13 +412,18 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
     services.AddSingleton<StrategyEngineRunLogQueue>();
     services.AddSingleton<StrategyEngineRunLogRepository>();
+    services.AddSingleton<StrategySystemLogRepository>();
     services.AddSingleton<RealTimeStrategyEngine>();
 
     services.AddSingleton<StrategyPositionRepository>();
     services.AddSingleton<UserExchangeApiKeyRepository>();
     services.AddSingleton<PositionRiskConfigStore>();
     services.AddSingleton<PositionRiskIndexManager>();
-    services.AddSingleton<TradeRecoveryTaskRepository>();
+    services.AddSingleton<PositionRiskLeaseService>();
+    services.AddSingleton<TrailingRecoveryService>();
+    services.AddScoped<TradeRecoveryTaskRepository>();
+    services.AddSingleton<OrderOpenAttemptRepository>();
+    services.AddSingleton<TradeRecoveryEnqueueService>();
     services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();
     services.AddScoped<StrategyPositionCloseService>();
     services.AddSingleton<PositionOverviewService>();

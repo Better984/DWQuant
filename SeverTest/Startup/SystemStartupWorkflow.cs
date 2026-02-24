@@ -17,7 +17,7 @@ namespace ServerTest.Startup
     public sealed class SystemStartupWorkflow
     {
         private readonly SystemStartupManager _startupManager;
-        private readonly StartupMonitorHost _startupMonitorHost;
+        private readonly IStartupMonitorHost _startupMonitorHost;
         private readonly IConnectionMultiplexer _redis;
         private readonly MarketDataEngine _marketDataEngine;
         private readonly IndicatorEngine _indicatorEngine;
@@ -27,7 +27,7 @@ namespace ServerTest.Startup
 
         public SystemStartupWorkflow(
             SystemStartupManager startupManager,
-            StartupMonitorHost startupMonitorHost,
+            IStartupMonitorHost startupMonitorHost,
             IConnectionMultiplexer redis,
             MarketDataEngine marketDataEngine,
             IndicatorEngine indicatorEngine,

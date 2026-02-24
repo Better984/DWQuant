@@ -6,9 +6,9 @@ namespace ServerTest.Modules.Monitoring.Infrastructure
 {
     public sealed class StartupMonitorLoggerProvider : ILoggerProvider
     {
-        private readonly StartupMonitorHost _host;
+        private readonly IStartupMonitorHost _host;
 
-        public StartupMonitorLoggerProvider(StartupMonitorHost host)
+        public StartupMonitorLoggerProvider(IStartupMonitorHost host)
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
         }
@@ -24,10 +24,10 @@ namespace ServerTest.Modules.Monitoring.Infrastructure
 
         private sealed class StartupMonitorLogger : ILogger
         {
-            private readonly StartupMonitorHost _host;
+            private readonly IStartupMonitorHost _host;
             private readonly string _categoryName;
 
-            public StartupMonitorLogger(StartupMonitorHost host, string categoryName)
+            public StartupMonitorLogger(IStartupMonitorHost host, string categoryName)
             {
                 _host = host;
                 _categoryName = categoryName;
