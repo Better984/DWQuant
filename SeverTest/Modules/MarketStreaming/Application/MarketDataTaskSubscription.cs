@@ -39,6 +39,31 @@ namespace ServerTest.Modules.MarketStreaming.Application
             return true;
         }
 
+        /// <summary>
+        /// 关键收线任务补写：当快速入队失败时，允许等待队列空位，避免收线任务在高压下直接丢失。
+        /// </summary>
+        internal async ValueTask<bool> EnqueueCriticalAsync(
+            MarketDataTask task,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await _channel.Writer.WriteAsync(task, cancellationToken).ConfigureAwait(false);
+                _queueMonitor.OnEnqueueSuccess();
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _queueMonitor.OnEnqueueFailed();
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                _queueMonitor.OnEnqueueFailed();
+                return false;
+            }
+        }
+
         internal void Complete()
         {
             _channel.Writer.TryComplete();

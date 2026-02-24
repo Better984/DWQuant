@@ -16,6 +16,30 @@ namespace ServerTest.Modules.Positions.Infrastructure
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// 确保 trailing_activation_pct、trailing_drawdown_pct 列存在（幂等）。
+        /// </summary>
+        public async Task EnsureTrailingColumnsAsync(CancellationToken ct = default)
+        {
+            const string checkSql = @"
+SELECT COUNT(*) FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'strategy_position' AND COLUMN_NAME = 'trailing_activation_pct';";
+            var exists = await _db.ExecuteScalarAsync<int>(checkSql, null, null, ct).ConfigureAwait(false);
+            if (exists > 0)
+            {
+                return;
+            }
+
+            const string addActivation = @"
+ALTER TABLE strategy_position ADD COLUMN trailing_activation_pct DECIMAL(10,6) NULL COMMENT '追踪止损激活百分比' AFTER trailing_triggered;";
+            const string addDrawdown = @"
+ALTER TABLE strategy_position ADD COLUMN trailing_drawdown_pct DECIMAL(10,6) NULL COMMENT '追踪止损回撤百分比' AFTER trailing_activation_pct;";
+
+            await _db.ExecuteAsync(addActivation, null, null, ct).ConfigureAwait(false);
+            await _db.ExecuteAsync(addDrawdown, null, null, ct).ConfigureAwait(false);
+            _logger.LogInformation("strategy_position 已添加 trailing_activation_pct、trailing_drawdown_pct 列");
+        }
+
         public Task<long> InsertAsync(StrategyPosition entity, CancellationToken ct = default)
         {
             var sql = @"
@@ -36,6 +60,8 @@ INSERT INTO strategy_position
     trailing_enabled,
     trailing_stop_price,
     trailing_triggered,
+    trailing_activation_pct,
+    trailing_drawdown_pct,
     opened_at,
     closed_at,
     close_price,
@@ -58,6 +84,8 @@ VALUES
     @TrailingEnabled,
     @TrailingStopPrice,
     @TrailingTriggered,
+    @TrailingActivationPct,
+    @TrailingDrawdownPct,
     @OpenedAt,
     @ClosedAt,
     @ClosePrice,
@@ -89,6 +117,35 @@ ORDER BY opened_at DESC
 LIMIT 1;";
 
             return _db.QuerySingleOrDefaultAsync<StrategyPosition>(sql, new { uid, usId, exchange, symbol, side }, null, ct);
+        }
+
+        public async Task<PositionOpenExposureRecord> GetOpenExposureAsync(
+            long uid,
+            long usId,
+            string exchange,
+            string symbol,
+            string side,
+            CancellationToken ct = default)
+        {
+            const string sql = @"
+SELECT
+  COUNT(*) AS open_count,
+  COALESCE(SUM(qty), 0) AS open_qty
+FROM strategy_position
+WHERE uid = @uid
+  AND us_id = @usId
+  AND exchange = @exchange
+  AND symbol = @symbol
+  AND side = @side
+  AND status = 'Open';";
+
+            var row = await _db.QuerySingleOrDefaultAsync<PositionOpenExposureRecord>(
+                    sql,
+                    new { uid, usId, exchange, symbol, side },
+                    null,
+                    ct)
+                .ConfigureAwait(false);
+            return row ?? new PositionOpenExposureRecord();
         }
 
         public Task<StrategyPosition?> GetByIdAsync(long positionId, long uid, CancellationToken ct = default)
@@ -753,6 +810,12 @@ LIMIT @take;";
         public int ClosedCount { get; set; }
         public int WinCount { get; set; }
         public decimal RealizedPnl { get; set; }
+    }
+
+    public sealed class PositionOpenExposureRecord
+    {
+        public int OpenCount { get; set; }
+        public decimal OpenQty { get; set; }
     }
 
     public sealed class PositionOpenLiteRecord

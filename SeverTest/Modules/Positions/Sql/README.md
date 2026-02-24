@@ -1,5 +1,5 @@
-# SQL
-
+# SQL
+
 本目录用于存放仓位与风控相关的 SQL 脚本，统一按模块管理。
 
 ## 脚本清单
@@ -16,3 +16,6 @@
   - 新增 `strategy_position.close_price`、`strategy_position.realized_pnl` 字段。
   - 统一平仓链路写入平仓价与已实现盈亏，支持近期总结胜率/盈亏统计。
   - 脚本为幂等执行：可重复运行。
+- `20260223_trailing_params_persist.md`
+  - 新增 `strategy_position.trailing_activation_pct`、`trailing_drawdown_pct` 字段。
+  - 支持重启后从 DB 恢复 trailing 参数，配合 K 线回放重算未激活的追踪止损状态。

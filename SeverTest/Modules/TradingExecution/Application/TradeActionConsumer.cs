@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ServerTest.Domain.Entities;
 using ServerTest.Modules.Positions.Infrastructure;
@@ -11,6 +12,8 @@ using ServerTest.Modules.Notifications.Domain;
 using System.Text.Json;
 using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Modules.StrategyEngine.Application;
+using ServerTest.Modules.StrategyEngine.Infrastructure;
+using ServerTest.Modules.StrategyRuntime.Infrastructure;
 using ServerTest.Modules.TradingExecution.Domain;
 using ServerTest.Modules.TradingExecution.Infrastructure;
 
@@ -21,11 +24,14 @@ namespace ServerTest.Modules.TradingExecution.Application
         private readonly StrategyActionTaskQueue _queue;
         private readonly RealTimeStrategyEngine _strategyEngine;
         private readonly StrategyPositionRepository _positionRepository;
+        private readonly OrderOpenAttemptRepository _orderOpenAttemptRepository;
+        private readonly StrategyRuntimeRepository _runtimeRepository;
+        private readonly StrategySystemLogRepository _systemLogRepository;
         private readonly MarketDataEngine _marketDataEngine;
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
         private readonly PositionRiskIndexManager _riskIndexManager;
-        private readonly TradeRecoveryTaskRepository _recoveryTaskRepository;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly INotificationPublisher _notificationPublisher;
         private readonly ILogger<TradeActionConsumer> _logger;
         private readonly string _recoveryWorkerToken;
@@ -63,22 +69,28 @@ namespace ServerTest.Modules.TradingExecution.Application
             StrategyActionTaskQueue queue,
             RealTimeStrategyEngine strategyEngine,
             StrategyPositionRepository positionRepository,
+            OrderOpenAttemptRepository orderOpenAttemptRepository,
+            StrategyRuntimeRepository runtimeRepository,
+            StrategySystemLogRepository systemLogRepository,
             MarketDataEngine marketDataEngine,
             IOrderExecutor orderExecutor,
             PositionRiskConfigStore riskConfigStore,
             PositionRiskIndexManager riskIndexManager,
-            TradeRecoveryTaskRepository recoveryTaskRepository,
+            IServiceScopeFactory serviceScopeFactory,
             INotificationPublisher notificationPublisher,
             ILogger<TradeActionConsumer> logger)
         {
             _queue = queue ?? throw new ArgumentNullException(nameof(queue));
             _strategyEngine = strategyEngine ?? throw new ArgumentNullException(nameof(strategyEngine));
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
+            _orderOpenAttemptRepository = orderOpenAttemptRepository ?? throw new ArgumentNullException(nameof(orderOpenAttemptRepository));
+            _runtimeRepository = runtimeRepository ?? throw new ArgumentNullException(nameof(runtimeRepository));
+            _systemLogRepository = systemLogRepository ?? throw new ArgumentNullException(nameof(systemLogRepository));
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
             _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
-            _recoveryTaskRepository = recoveryTaskRepository ?? throw new ArgumentNullException(nameof(recoveryTaskRepository));
+            _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
             _notificationPublisher = notificationPublisher ?? throw new ArgumentNullException(nameof(notificationPublisher));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _recoveryWorkerToken = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -87,8 +99,16 @@ namespace ServerTest.Modules.TradingExecution.Application
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await _marketDataEngine.WaitForInitializationAsync();
-            await _recoveryTaskRepository.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
-            var recoveredCount = await _recoveryTaskRepository.RecoverStaleProcessingAsync(90, stoppingToken).ConfigureAwait(false);
+            await ExecuteWithRecoveryRepositoryAsync(
+                    (repository, ct) => repository.EnsureSchemaAsync(ct),
+                    stoppingToken)
+                .ConfigureAwait(false);
+            await _orderOpenAttemptRepository.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
+            await _systemLogRepository.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
+            var recoveredCount = await ExecuteWithRecoveryRepositoryAsync(
+                    (repository, ct) => repository.RecoverStaleProcessingAsync(90, ct),
+                    stoppingToken)
+                .ConfigureAwait(false);
             if (recoveredCount > 0)
             {
                 _logger.LogWarning("交易恢复任务已回收遗留processing任务: count={Count}", recoveredCount);
@@ -121,7 +141,9 @@ namespace ServerTest.Modules.TradingExecution.Application
                 List<TradeRecoveryTaskEntity> tasks;
                 try
                 {
-                    tasks = await _recoveryTaskRepository.AcquireDueTasksAsync(8, _recoveryWorkerToken, stoppingToken)
+                    tasks = await ExecuteWithRecoveryRepositoryAsync(
+                            (repository, ct) => repository.AcquireDueTasksAsync(8, _recoveryWorkerToken, ct),
+                            stoppingToken)
                         .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
@@ -256,7 +278,7 @@ namespace ServerTest.Modules.TradingExecution.Application
 
         /// <summary>
         /// 处理开仓任务。
-        /// 执行流程：1. 参数校验 2. 检查是否已有仓位 3. 获取入场价格 4. 提交市价单 5. 创建仓位记录 6. 配置风险参数
+        /// 执行流程：1. 参数校验 2. 获取入场价格 3. 下单前持仓上限校验 4. 提交市价单 5. 创建仓位记录 6. 配置风险参数
         /// </summary>
         /// <param name="task">策略动作任务，包含策略ID、交易参数、风险参数等信息</param>
         /// <param name="exchange">交易所名称（已标准化）</param>
@@ -287,23 +309,67 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            // 3. 检查是否已存在相同方向的未平仓位（防止重复开仓）
-            var existing = await _positionRepository.FindOpenAsync(task.Uid.Value, task.UsId.Value, exchange, symbol, positionSide, ct)
-                .ConfigureAwait(false);
-            if (existing != null)
-            {
-                _logger.LogInformation("开仓已忽略（已有仓位）: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
-                    task.Uid, task.UsId, exchange, symbol, positionSide);
-                return;
-            }
+            var effectiveMaxPositionQty = ResolveEffectiveMaxPositionQty(task);
+            var signalTimeUtc = ResolveSignalTimeUtc(task);
 
-            // 4. 从市场数据引擎获取当前价格作为预估入场价格
+            // 3. 从市场数据引擎获取当前价格作为预估入场价格
             var entryPrice = ResolveEntryPrice(exchange, symbol);
             if (entryPrice <= 0)
             {
                 _logger.LogWarning("入场价格缺失，跳过开仓: {Exchange} {Symbol}", exchange, symbol);
                 return;
             }
+
+            // 4. 下单前做同向持仓上限校验：允许信号照常触发，但在执行阶段阻断超限开仓。
+            var openExposure = await _positionRepository.GetOpenExposureAsync(
+                    task.Uid.Value,
+                    task.UsId.Value,
+                    exchange,
+                    symbol,
+                    positionSide,
+                    ct)
+                .ConfigureAwait(false);
+            var currentOpenQty = Math.Max(0m, openExposure.OpenQty);
+            var requestedOrderQty = task.OrderQty;
+            if (currentOpenQty + requestedOrderQty > effectiveMaxPositionQty)
+            {
+                var blockedMessage = $"开仓被最大持仓限制阻断：当前同向持仓{currentOpenQty} + 本次开仓{requestedOrderQty} > 上限{effectiveMaxPositionQty}";
+                _logger.LogInformation(
+                    "开仓被上限阻断: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} signalTime={SignalTimeUtc:O} signalPrice={SignalPrice} openCount={OpenCount} currentOpenQty={CurrentOpenQty} requestQty={RequestQty} maxQty={MaxQty}",
+                    task.Uid,
+                    task.UsId,
+                    exchange,
+                    symbol,
+                    positionSide,
+                    signalTimeUtc,
+                    entryPrice,
+                    openExposure.OpenCount,
+                    currentOpenQty,
+                    requestedOrderQty,
+                    effectiveMaxPositionQty);
+
+                if (!isTestingTask)
+                {
+                    await _orderOpenAttemptRepository.InsertAsync(
+                            task.Uid.Value,
+                            task.UsId.Value,
+                            exchange,
+                            symbol,
+                            positionSide,
+                            success: false,
+                            errorMessage: blockedMessage,
+                            attemptType: OrderOpenAttemptTypes.BlockedByMaxPosition,
+                            signalTimeUtc: signalTimeUtc,
+                            signalPrice: entryPrice,
+                            maxPositionQty: effectiveMaxPositionQty,
+                            currentOpenQty: currentOpenQty,
+                            requestOrderQty: requestedOrderQty,
+                            ct: ct)
+                        .ConfigureAwait(false);
+                }
+                return;
+            }
+
             OrderExecutionResult? openOrderResult = null;
             if (!isTestingTask)
             {
@@ -323,6 +389,40 @@ namespace ServerTest.Modules.TradingExecution.Application
                 if (!openOrderResult.Success)
                 {
                     _logger.LogWarning("开仓订单失败: uid={Uid} usId={UsId} 错误={Error}", task.Uid, task.UsId, openOrderResult.ErrorMessage);
+                    await _orderOpenAttemptRepository.InsertAsync(
+                            task.Uid.Value,
+                            task.UsId.Value,
+                            exchange,
+                            symbol,
+                            positionSide,
+                            success: false,
+                            errorMessage: openOrderResult.ErrorMessage,
+                            attemptType: OrderOpenAttemptTypes.OrderResult,
+                            signalTimeUtc: signalTimeUtc,
+                            signalPrice: entryPrice,
+                            maxPositionQty: effectiveMaxPositionQty,
+                            currentOpenQty: currentOpenQty,
+                            requestOrderQty: requestedOrderQty,
+                            ct: ct)
+                        .ConfigureAwait(false);
+
+                    // 6.1 连续失败3次则自动暂停策略
+                    var consecutiveFailures = await _orderOpenAttemptRepository.GetConsecutiveFailuresAsync(task.UsId.Value, 50, ct).ConfigureAwait(false);
+                    if (consecutiveFailures >= 3)
+                    {
+                        const string pauseState = "paused_open_fail";
+                        var updated = await _runtimeRepository.UpdateStateAsync(task.UsId.Value, task.Uid.Value, pauseState, ct).ConfigureAwait(false);
+                        if (updated > 0)
+                        {
+                            _strategyEngine.RemoveStrategy(task.UsId.Value.ToString());
+                            await _systemLogRepository.InsertAsync(
+                                task.UsId.Value, task.Uid.Value,
+                                "paused_open_fail",
+                                $"连续开仓失败{consecutiveFailures}次，已自动暂停策略",
+                                ct).ConfigureAwait(false);
+                            _logger.LogWarning("策略已因连续开仓失败{Count}次自动暂停: uid={Uid} usId={UsId}", consecutiveFailures, task.Uid, task.UsId);
+                        }
+                    }
                     return;
                 }
 
@@ -355,6 +455,8 @@ namespace ServerTest.Modules.TradingExecution.Application
                 TrailingEnabled = task.TrailingEnabled,
                 TrailingStopPrice = null,  // 初始时追踪止损价格为空
                 TrailingTriggered = false,  // 追踪止损尚未触发
+                TrailingActivationPct = task.TrailingEnabled ? task.TrailingActivationPct : null,
+                TrailingDrawdownPct = task.TrailingEnabled ? task.TrailingDrawdownPct : null,
                 OpenedAt = DateTime.UtcNow,
                 ClosedAt = null
             };
@@ -387,6 +489,27 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
             entity.PositionId = positionId;
+
+            // 10.1 非 testing 模式下记录开仓成功（用于连续失败统计）
+            if (!isTestingTask)
+            {
+                await _orderOpenAttemptRepository.InsertAsync(
+                        task.Uid.Value,
+                        task.UsId.Value,
+                        exchange,
+                        symbol,
+                        positionSide,
+                        success: true,
+                        errorMessage: null,
+                        attemptType: OrderOpenAttemptTypes.OrderResult,
+                        signalTimeUtc: signalTimeUtc,
+                        signalPrice: entryPrice,
+                        maxPositionQty: effectiveMaxPositionQty,
+                        currentOpenQty: currentOpenQty,
+                        requestOrderQty: requestedOrderQty,
+                        ct: ct)
+                    .ConfigureAwait(false);
+            }
 
             // 11. 如果启用了追踪止损，保存追踪止损配置到风险配置存储
             PositionRiskConfig? riskConfig = null;
@@ -570,6 +693,36 @@ namespace ServerTest.Modules.TradingExecution.Application
                 existing.UsId,
                 useLocalSimulation ? "testing" : "live");
             return true;
+        }
+
+        private static decimal ResolveEffectiveMaxPositionQty(StrategyActionTask task)
+        {
+            if (task.MaxPositionQty > 0)
+            {
+                return task.MaxPositionQty;
+            }
+
+            // 兼容历史配置：未配置上限时按“单次开仓量”退化，保持至少单仓可开。
+            return task.OrderQty > 0 ? task.OrderQty : 0m;
+        }
+
+        private static DateTime ResolveSignalTimeUtc(StrategyActionTask task)
+        {
+            if (task.MarketTask.CandleTimestamp > 0)
+            {
+                try
+                {
+                    return DateTimeOffset.FromUnixTimeMilliseconds(task.MarketTask.CandleTimestamp).UtcDateTime;
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    // 回退到任务创建时间，避免异常时间戳导致执行链路中断。
+                }
+            }
+
+            return task.CreatedAt == default
+                ? DateTime.UtcNow
+                : task.CreatedAt.UtcDateTime;
         }
 
         private decimal ResolveEntryPrice(string exchange, string symbol)
@@ -771,7 +924,10 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             try
             {
-                var taskId = await _recoveryTaskRepository.InsertPendingAsync(entity, ct).ConfigureAwait(false);
+                var taskId = await ExecuteWithRecoveryRepositoryAsync(
+                        (repository, token) => repository.InsertPendingAsync(entity, token),
+                        ct)
+                    .ConfigureAwait(false);
                 _logger.LogWarning("已持久化交易恢复任务: taskId={TaskId} scene={Scene} type={Type} uid={Uid} usId={UsId} attempt={Attempt}",
                     taskId, scene, task.Type, task.Uid, task.UsId, task.Attempt);
             }
@@ -917,12 +1073,14 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             var nextAttempt = task.Attempt + 1;
             var nextRetryAtUtc = DateTime.UtcNow.Add(BuildRecoveryDelay(nextAttempt));
-            var affected = await _recoveryTaskRepository.RequeueAsync(
-                    task.TaskId,
-                    task.ProcessingToken,
-                    nextAttempt,
-                    nextRetryAtUtc,
-                    task.LastError,
+            var affected = await ExecuteWithRecoveryRepositoryAsync(
+                    (repository, token) => repository.RequeueAsync(
+                        task.TaskId,
+                        task.ProcessingToken,
+                        nextAttempt,
+                        nextRetryAtUtc,
+                        task.LastError,
+                        token),
                     ct)
                 .ConfigureAwait(false);
             if (affected <= 0)
@@ -948,7 +1106,9 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            var affected = await _recoveryTaskRepository.MarkSucceededAsync(task.TaskId, task.ProcessingToken, ct)
+            var affected = await ExecuteWithRecoveryRepositoryAsync(
+                    (repository, token) => repository.MarkSucceededAsync(task.TaskId, task.ProcessingToken, token),
+                    ct)
                 .ConfigureAwait(false);
             if (affected <= 0)
             {
@@ -960,11 +1120,13 @@ namespace ServerTest.Modules.TradingExecution.Application
         {
             if (task.TaskId > 0 && !string.IsNullOrWhiteSpace(task.ProcessingToken))
             {
-                var affected = await _recoveryTaskRepository.MarkFailedAsync(
-                        task.TaskId,
-                        task.ProcessingToken,
-                        task.Attempt,
-                        $"{reason}; {task.LastError}".Trim(';', ' '),
+                var affected = await ExecuteWithRecoveryRepositoryAsync(
+                        (repository, token) => repository.MarkFailedAsync(
+                            task.TaskId,
+                            task.ProcessingToken,
+                            task.Attempt,
+                            $"{reason}; {task.LastError}".Trim(';', ' '),
+                            token),
                         ct)
                     .ConfigureAwait(false);
                 if (affected <= 0)
@@ -1170,6 +1332,40 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
 
             throw new InvalidOperationException($"{operationName}连续重试失败", lastException);
+        }
+
+        /// <summary>
+        /// 在后台服务中按次创建作用域，安全获取 Scoped 仓储。
+        /// </summary>
+        private async Task ExecuteWithRecoveryRepositoryAsync(
+            Func<TradeRecoveryTaskRepository, CancellationToken, Task> action,
+            CancellationToken ct)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            using var scope = _serviceScopeFactory.CreateScope();
+            var repository = scope.ServiceProvider.GetRequiredService<TradeRecoveryTaskRepository>();
+            await action(repository, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 在后台服务中按次创建作用域，安全获取 Scoped 仓储并返回结果。
+        /// </summary>
+        private async Task<T> ExecuteWithRecoveryRepositoryAsync<T>(
+            Func<TradeRecoveryTaskRepository, CancellationToken, Task<T>> action,
+            CancellationToken ct)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            using var scope = _serviceScopeFactory.CreateScope();
+            var repository = scope.ServiceProvider.GetRequiredService<TradeRecoveryTaskRepository>();
+            return await action(repository, ct).ConfigureAwait(false);
         }
 
         private static decimal? BuildStopLossPrice(decimal entryPrice, decimal? stopLossPct, int leverage, string side)

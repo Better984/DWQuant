@@ -185,6 +185,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     return StrategyState.Paused;
                 case "paused_open_position":
                     return StrategyState.PausedOpenPosition;
+                case "paused_open_fail":
+                    return StrategyState.PausedOpenFail;
                 case "draft":
                     return StrategyState.Draft;
                 case "ready":

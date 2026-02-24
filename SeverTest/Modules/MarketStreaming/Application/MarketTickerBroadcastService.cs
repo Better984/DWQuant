@@ -12,6 +12,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
     public sealed class MarketTickerBroadcastService : BackgroundService
     {
         private static readonly TimeSpan BroadcastInterval = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan LastSentCleanupInterval = TimeSpan.FromMinutes(1);
 
         private readonly ExchangePriceService _priceService;
         private readonly IMarketSubscriptionStore _subscriptionStore;
@@ -19,6 +20,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
         private readonly ILogger<MarketTickerBroadcastService> _logger;
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, decimal>> _lastSent =
             new(StringComparer.Ordinal);
+        private DateTime _nextLastSentCleanupAtUtc = DateTime.UtcNow.Add(LastSentCleanupInterval);
 
         public MarketTickerBroadcastService(
             ExchangePriceService priceService,
@@ -63,9 +65,11 @@ namespace ServerTest.Modules.MarketStreaming.Application
             var subscriptions = _subscriptionStore.GetAllSubscriptions();
             if (subscriptions.Count == 0)
             {
+                ClearAllLastSentCacheIfNeeded();
                 return Task.CompletedTask;
             }
 
+            var activeUsers = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in subscriptions)
             {
                 var userId = entry.Key;
@@ -84,8 +88,11 @@ namespace ServerTest.Modules.MarketStreaming.Application
                 var connections = _connectionManager.GetConnections(userId);
                 if (connections.Count == 0)
                 {
+                    // 用户无在线连接时立即释放该用户缓存，避免长期累积。
+                    _lastSent.TryRemove(userId, out _);
                     continue;
                 }
+                activeUsers.Add(userId);
 
                 var envelope = ProtocolEnvelopeFactory.Ok("mkt.tick", null, updates);
                 var json = ProtocolJson.Serialize(envelope);
@@ -96,6 +103,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
                     _ = SendAsync(connection, bytes, ct);
                 }
             }
+            CleanupInactiveUserCache(activeUsers);
 
             return Task.CompletedTask;
         }
@@ -107,6 +115,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
         {
             var updates = new List<object[]>();
             var sentMap = _lastSent.GetOrAdd(userId, _ => new ConcurrentDictionary<string, decimal>(StringComparer.OrdinalIgnoreCase));
+            var activeSymbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var symbol in symbols)
             {
@@ -115,23 +124,102 @@ namespace ServerTest.Modules.MarketStreaming.Application
                     continue;
                 }
 
-                if (!TryResolvePrice(symbol.Trim(), prices, out var priceData))
+                var trimmedSymbol = symbol.Trim();
+                if (trimmedSymbol.Length == 0)
+                {
+                    continue;
+                }
+                activeSymbols.Add(trimmedSymbol);
+
+                if (!TryResolvePrice(trimmedSymbol, prices, out var priceData))
                 {
                     continue;
                 }
 
                 var lastPrice = priceData.Price;
-                if (sentMap.TryGetValue(symbol, out var previous) && previous == lastPrice)
+                if (sentMap.TryGetValue(trimmedSymbol, out var previous) && previous == lastPrice)
                 {
                     continue;
                 }
 
-                sentMap[symbol] = lastPrice;
+                sentMap[trimmedSymbol] = lastPrice;
                 var ts = new DateTimeOffset(priceData.Timestamp).ToUnixTimeMilliseconds();
-                updates.Add(new object[] { symbol, lastPrice, ts });
+                updates.Add(new object[] { trimmedSymbol, lastPrice, ts });
             }
+            CleanupStaleSymbolCache(sentMap, activeSymbols);
 
             return updates;
+        }
+
+        /// <summary>
+        /// 按当前订阅符号清理已取消订阅的历史价格缓存，防止 key 只增不减。
+        /// </summary>
+        private static void CleanupStaleSymbolCache(
+            ConcurrentDictionary<string, decimal> sentMap,
+            HashSet<string> activeSymbols)
+        {
+            if (sentMap.IsEmpty)
+            {
+                return;
+            }
+
+            if (activeSymbols.Count == 0)
+            {
+                sentMap.Clear();
+                return;
+            }
+
+            foreach (var cachedSymbol in sentMap.Keys)
+            {
+                if (!activeSymbols.Contains(cachedSymbol))
+                {
+                    sentMap.TryRemove(cachedSymbol, out _);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 周期清理不再活跃的用户缓存，避免用户离线后缓存长期驻留。
+        /// </summary>
+        private void CleanupInactiveUserCache(HashSet<string> activeUsers)
+        {
+            var now = DateTime.UtcNow;
+            if (now < _nextLastSentCleanupAtUtc)
+            {
+                return;
+            }
+            _nextLastSentCleanupAtUtc = now.Add(LastSentCleanupInterval);
+
+            var removedUsers = 0;
+            foreach (var cachedUserId in _lastSent.Keys)
+            {
+                if (activeUsers.Contains(cachedUserId))
+                {
+                    continue;
+                }
+
+                if (_lastSent.TryRemove(cachedUserId, out _))
+                {
+                    removedUsers++;
+                }
+            }
+
+            if (removedUsers > 0)
+            {
+                _logger.LogDebug("行情广播缓存已清理离线用户: count={Count}", removedUsers);
+            }
+        }
+
+        private void ClearAllLastSentCacheIfNeeded()
+        {
+            if (_lastSent.IsEmpty)
+            {
+                return;
+            }
+
+            var removedUsers = _lastSent.Count;
+            _lastSent.Clear();
+            _logger.LogInformation("行情广播缓存已清空: removedUsers={Count}", removedUsers);
         }
 
         private static bool TryResolvePrice(

@@ -41,6 +41,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 Symbol = context.StrategyConfig?.Trade?.Symbol ?? string.Empty,
                 TimeframeSec = context.StrategyConfig?.Trade?.TimeframeSec ?? 0,
                 OrderQty = context.StrategyConfig?.Trade?.Sizing?.OrderQty ?? 0m,
+                MaxPositionQty = context.StrategyConfig?.Trade?.Sizing?.MaxPositionQty ?? 0m,
                 Leverage = context.StrategyConfig?.Trade?.Sizing?.Leverage ?? 1,
                 TakeProfitPct = context.StrategyConfig?.Trade?.Risk?.TakeProfitPct,
                 StopLossPct = context.StrategyConfig?.Trade?.Risk?.StopLossPct,
@@ -56,10 +57,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     .ToList()
             };
 
-            if (!_queue.TryEnqueue(task))
+            // 使用 EnqueueAsync + WriteAsync，队列满时按 FullMode=Wait 等待，避免高压下丢单
+            var enqueued = _queue.EnqueueAsync(task, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            if (!enqueued)
             {
-                _logger.LogWarning("动作任务入队失败: {Uid} 方法={Method}", context.Strategy.UidCode, method.Method);
-                return BuildResult(method.Method ?? "Unknown", false, "Action task enqueue failed");
+                _logger.LogWarning("动作任务入队失败（已取消）: {Uid} 方法={Method}", context.Strategy.UidCode, method.Method);
+                return BuildResult(method.Method ?? "Unknown", false, "Action task enqueue cancelled");
             }
 
             return BuildResult(method.Method ?? "Unknown", true, "Action task enqueued");
@@ -72,6 +75,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 StrategyState.Running => "running",
                 StrategyState.Paused => "paused",
                 StrategyState.PausedOpenPosition => "paused_open_position",
+                StrategyState.PausedOpenFail => "paused_open_fail",
                 StrategyState.Testing => "testing",
                 StrategyState.Completed => "completed",
                 StrategyState.Deleted => "deleted",

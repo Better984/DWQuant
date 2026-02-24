@@ -36,9 +36,12 @@ namespace ServerTest.Modules.StrategyRuntime.Application
 
             //LoadTestStrategy(); //早期测试不必理会!!!
 
-            var workerCount = Math.Max(1, Environment.ProcessorCount);
-            var indicatorTask = _indicatorEngine.RunAsync(workerCount, stoppingToken);
-            var strategyTask = _strategyEngine.RunWorkersAsync(workerCount, stoppingToken);
+            // 外层多 worker + 引擎内层 Parallel.ForEach 会造成并行叠加。
+            // 这里固定为单 worker 消费行情任务，保留引擎内部并行即可，降低高压下线程竞争。
+            const int strategyWorkerCount = 1;
+            var indicatorWorkerCount = Math.Max(1, Environment.ProcessorCount / 2);
+            var indicatorTask = _indicatorEngine.RunAsync(indicatorWorkerCount, stoppingToken);
+            var strategyTask = _strategyEngine.RunWorkersAsync(strategyWorkerCount, stoppingToken);
 
             await Task.WhenAll(indicatorTask, strategyTask);
         }

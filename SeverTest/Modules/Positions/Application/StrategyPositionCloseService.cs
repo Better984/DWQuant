@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using ServerTest.Modules.Positions.Domain;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Models.Trading;
+using ServerTest.Modules.TradingExecution.Application;
 using ServerTest.Modules.TradingExecution.Domain;
 using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Models;
@@ -18,6 +19,7 @@ namespace ServerTest.Modules.Positions.Application
         private readonly MarketDataEngine _marketDataEngine;
         private readonly PositionRiskConfigStore _riskConfigStore;
         private readonly PositionRiskIndexManager _riskIndexManager;
+        private readonly TradeRecoveryEnqueueService _recoveryEnqueue;
         private readonly ILogger<StrategyPositionCloseService> _logger;
 
         public StrategyPositionCloseService(
@@ -26,6 +28,7 @@ namespace ServerTest.Modules.Positions.Application
             MarketDataEngine marketDataEngine,
             PositionRiskConfigStore riskConfigStore,
             PositionRiskIndexManager riskIndexManager,
+            TradeRecoveryEnqueueService recoveryEnqueue,
             ILogger<StrategyPositionCloseService> logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
@@ -33,6 +36,7 @@ namespace ServerTest.Modules.Positions.Application
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
             _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
+            _recoveryEnqueue = recoveryEnqueue ?? throw new ArgumentNullException(nameof(recoveryEnqueue));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -157,17 +161,66 @@ namespace ServerTest.Modules.Positions.Application
                         useLocalSimulation ? "testing" : "live");
                 }
 
+                var closedAt = DateTime.UtcNow;
                 foreach (var position in group)
                 {
-                    // 手动批量平仓需要记录 close_reason=ManualBatch
-                    await _positionRepository.CloseAsync(
+                    try
+                    {
+                        var closeAffected = await _positionRepository.CloseAsync(
+                                position.PositionId,
+                                trailingTriggered: false,
+                                closedAt: closedAt,
+                                "ManualBatch",
+                                closePriceResult.Price,
+                                ct)
+                            .ConfigureAwait(false);
+
+                        if (closeAffected <= 0)
+                        {
+                            var latest = await _positionRepository.GetByIdAsync(position.PositionId, position.Uid, ct).ConfigureAwait(false);
+                            if (latest == null || !string.Equals(latest.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _logger.LogError(
+                                    "一键平仓写库未生效: positionId={PositionId} uid={Uid} usId={UsId}",
+                                    position.PositionId, position.Uid, position.UsId);
+                                await _recoveryEnqueue.EnqueueCloseWriteRecoveryAsync(
+                                    position.Uid,
+                                    position.UsId,
+                                    position.PositionId,
+                                    position.ExchangeApiKeyId,
+                                    position.Exchange ?? string.Empty,
+                                    position.Symbol ?? string.Empty,
+                                    position.Side ?? string.Empty,
+                                    position.Qty,
+                                    closePriceResult.Price,
+                                    closedAt,
+                                    "一键平仓写库返回0且仓位仍为Open",
+                                    ct).ConfigureAwait(false);
+                            }
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "一键平仓订单已提交但本地写库异常，已转入恢复队列: positionId={PositionId} uid={Uid} usId={UsId}",
+                            position.PositionId, position.Uid, position.UsId);
+                        await _recoveryEnqueue.EnqueueCloseWriteRecoveryAsync(
+                            position.Uid,
+                            position.UsId,
                             position.PositionId,
-                            trailingTriggered: false,
-                            closedAt: DateTime.UtcNow,
-                            "ManualBatch",
+                            position.ExchangeApiKeyId,
+                            position.Exchange ?? string.Empty,
+                            position.Symbol ?? string.Empty,
+                            position.Side ?? string.Empty,
+                            position.Qty,
                             closePriceResult.Price,
-                            ct)
-                        .ConfigureAwait(false);
+                            closedAt,
+                            ex.Message,
+                            ct).ConfigureAwait(false);
+                        continue;
+                    }
+
                     _riskConfigStore.Remove(position.PositionId);
                     _riskIndexManager.RemovePosition(position.PositionId);
                     closedPositions++;
@@ -289,14 +342,75 @@ namespace ServerTest.Modules.Positions.Application
                     closePriceResult.Price,
                     useLocalSimulation ? "testing" : "live");
             }
-            await _positionRepository.CloseAsync(
+
+            var closedAt = DateTime.UtcNow;
+            try
+            {
+                var closeAffected = await _positionRepository.CloseAsync(
+                        position.PositionId,
+                        trailingTriggered: false,
+                        closedAt: closedAt,
+                        "ManualSingle",
+                        closePriceResult.Price,
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (closeAffected <= 0)
+                {
+                    var latest = await _positionRepository.GetByIdAsync(position.PositionId, position.Uid, ct).ConfigureAwait(false);
+                    if (latest == null || !string.Equals(latest.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogError(
+                            "手动平仓写库未生效: positionId={PositionId} uid={Uid} usId={UsId}",
+                            position.PositionId, position.Uid, position.UsId);
+                        await _recoveryEnqueue.EnqueueCloseWriteRecoveryAsync(
+                            position.Uid,
+                            position.UsId,
+                            position.PositionId,
+                            position.ExchangeApiKeyId,
+                            position.Exchange ?? string.Empty,
+                            position.Symbol ?? string.Empty,
+                            position.Side ?? string.Empty,
+                            position.Qty,
+                            closePriceResult.Price,
+                            closedAt,
+                            "手动平仓写库返回0且仓位仍为Open",
+                            ct).ConfigureAwait(false);
+                        return new PositionCloseResult
+                        {
+                            PositionId = position.PositionId,
+                            Success = false,
+                            Error = "平仓写库失败，已转入恢复队列"
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "手动平仓订单已提交但本地写库异常，已转入恢复队列: positionId={PositionId} uid={Uid} usId={UsId}",
+                    position.PositionId, position.Uid, position.UsId);
+                await _recoveryEnqueue.EnqueueCloseWriteRecoveryAsync(
+                    position.Uid,
+                    position.UsId,
                     position.PositionId,
-                    trailingTriggered: false,
-                    closedAt: DateTime.UtcNow,
-                    "ManualSingle",
+                    position.ExchangeApiKeyId,
+                    position.Exchange ?? string.Empty,
+                    position.Symbol ?? string.Empty,
+                    position.Side ?? string.Empty,
+                    position.Qty,
                     closePriceResult.Price,
-                    ct)
-                .ConfigureAwait(false);
+                    closedAt,
+                    ex.Message,
+                    ct).ConfigureAwait(false);
+                return new PositionCloseResult
+                {
+                    PositionId = position.PositionId,
+                    Success = false,
+                    Error = "平仓写库失败，已转入恢复队列"
+                };
+            }
+
             _riskConfigStore.Remove(position.PositionId);
             _riskIndexManager.RemovePosition(position.PositionId);
 

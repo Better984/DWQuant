@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using ServerTest.Modules.MarketData.Infrastructure;
 using ServerTest.Models;
 using ServerTest.Modules.StrategyEngine.Application;
@@ -1636,6 +1636,7 @@ private Panel BuildNetworkPanel()
                 "running" => "运行中",
                 "paused" => "已暂停",
                 "paused_open_position" => "暂停开新仓",
+                "paused_open_fail" => "连续开仓失败已暂停",
                 "completed" => "完成",
                 "testing" => "测试",
                 "error" => "错误",

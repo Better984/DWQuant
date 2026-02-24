@@ -8,7 +8,7 @@ export type StrategyItemProps = {
   totalPosition: string;
   profitLossRatio: string;
   ownerAvatar: string;
-  status: 'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed' | 'error';
+  status: 'running' | 'paused' | 'paused_open_position' | 'paused_open_fail' | 'testing' | 'completed' | 'error';
   version?: string | number;
   catalogTag?: 'official' | 'template' | 'both';
   onViewDetail?: (usId: number) => void;

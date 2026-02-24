@@ -45,7 +45,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
         private readonly QueuePressureMonitor _queueMonitor;
         private readonly RuntimeQueueOptions _queueOptions;
         private readonly ConcurrentDictionary<string, MarketDataTaskSubscription> _subscriptions = new();
+        private readonly ConcurrentDictionary<string, int> _pendingCriticalSubscriptionWrites = new(StringComparer.Ordinal);
+        private readonly Channel<MarketDataTask> _criticalMainWriteChannel;
+        private readonly Channel<CriticalSubscriptionWriteTask> _criticalSubscriptionWriteChannel;
+        private readonly Task _criticalMainWriteWorker;
+        private readonly Task _criticalSubscriptionWriteWorker;
         private readonly MarketDataQueryOptions _queryOptions;
+        private int _pendingCriticalMainChannelWrites;
+        private const int MaxPendingCriticalMainChannelWrites = 128;
+        private const int MaxPendingCriticalSubscriptionWrites = 1024;
+        private const int MaxPendingCriticalSubscriptionWritesPerSubscriber = 64;
 
         // 限流信号量：限制并发请求数，避免触发交易所API限流
         private readonly SemaphoreSlim _rateLimiter = new SemaphoreSlim(5, 5); // 最多5个并发请求
@@ -67,13 +76,29 @@ namespace ServerTest.Modules.MarketStreaming.Application
             // 初始化队列，启用有界通道与背压策略
             var options = queueOptions?.Value ?? new RuntimeQueueOptions();
             _queueOptions = options;
+            var mainQueueOptions = NormalizeMainQueueOptions(options.MarketData, logger);
             _marketTaskChannel = ChannelFactory.Create<MarketDataTask>(
-                options.MarketData,
+                mainQueueOptions,
                 "MarketDataEngine",
                 logger,
                 singleReader: false,
                 singleWriter: false);
-            _queueMonitor = new QueuePressureMonitor("MarketDataEngine", options.MarketData, logger);
+            _queueMonitor = new QueuePressureMonitor("MarketDataEngine", mainQueueOptions, logger);
+            _criticalMainWriteChannel = Channel.CreateBounded<MarketDataTask>(new BoundedChannelOptions(MaxPendingCriticalMainChannelWrites)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropWrite
+            });
+            _criticalSubscriptionWriteChannel = Channel.CreateBounded<CriticalSubscriptionWriteTask>(new BoundedChannelOptions(MaxPendingCriticalSubscriptionWrites)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropWrite
+            });
+            // 关键补写改为固定后台 worker，避免高压下每次失败都创建 Task.Run 产生额外调度抖动。
+            _criticalMainWriteWorker = Task.Run(() => ConsumeCriticalMainWritesAsync(_cancellationTokenSource.Token));
+            _criticalSubscriptionWriteWorker = Task.Run(() => ConsumeCriticalSubscriptionWritesAsync(_cancellationTokenSource.Token));
             _queryOptions = queryOptions?.Value ?? new MarketDataQueryOptions();
 
             // 初始化时生成周期列表
@@ -184,17 +209,53 @@ namespace ServerTest.Modules.MarketStreaming.Application
             }
 
             var queueName = $"MarketDataEngine:{name}";
+            var subscriptionQueueOptions = BuildSubscriptionQueueOptions();
             var channel = ChannelFactory.Create<MarketDataTask>(
-                _queueOptions.MarketData,
+                subscriptionQueueOptions,
                 queueName,
                 Logger,
                 singleReader: false,
                 singleWriter: false);
-            var monitor = new QueuePressureMonitor(queueName, _queueOptions.MarketData, Logger);
+            var monitor = new QueuePressureMonitor(queueName, subscriptionQueueOptions, Logger);
             var subscription = new MarketDataTaskSubscription(name, channel, monitor, onlyBarClose);
             _subscriptions[name] = subscription;
             Logger.LogInformation("创建行情任务订阅: {Subscriber} onlyBarClose={OnlyBarClose}", name, onlyBarClose);
             return subscription;
+        }
+
+        private QueueOptions BuildSubscriptionQueueOptions()
+        {
+            var source = _queueOptions.MarketData ?? new QueueOptions();
+            return new QueueOptions
+            {
+                Capacity = Math.Max(1, source.Capacity),
+                // 订阅队列改为 DropWrite，避免 DropOldest 在满载时静默挤掉旧任务。
+                FullMode = "DropWrite",
+                WarningThresholdPercent = source.WarningThresholdPercent,
+                WarningIntervalSeconds = source.WarningIntervalSeconds
+            };
+        }
+
+        private static QueueOptions NormalizeMainQueueOptions(QueueOptions? source, ILogger logger)
+        {
+            source ??= new QueueOptions();
+            var fullMode = source.FullMode?.Trim();
+            if (string.Equals(fullMode, "dropoldest", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fullMode, "dropnewest", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "行情主队列 FullMode={FullMode} 可能导致关键任务静默覆盖，已自动调整为 DropWrite",
+                    source.FullMode);
+                fullMode = "DropWrite";
+            }
+
+            return new QueueOptions
+            {
+                Capacity = Math.Max(1, source.Capacity),
+                FullMode = string.IsNullOrWhiteSpace(fullMode) ? "DropWrite" : fullMode,
+                WarningThresholdPercent = source.WarningThresholdPercent,
+                WarningIntervalSeconds = source.WarningIntervalSeconds
+            };
         }
 
         /// <summary>
@@ -1233,6 +1294,8 @@ namespace ServerTest.Modules.MarketStreaming.Application
         {
             Logger.LogInformation("开始释放 MarketDataEngine 资源...");
 
+            _criticalMainWriteChannel.Writer.TryComplete();
+            _criticalSubscriptionWriteChannel.Writer.TryComplete();
             // 取消所有任务
             _cancellationTokenSource.Cancel();
 
@@ -1297,14 +1360,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
             }
 
             var task = new MarketDataTask(exchangeId, symbol, timeframe, candleTimestamp, isBarClose);
-            if (!_marketTaskChannel.Writer.TryWrite(task))
-            {
-                Logger.LogWarning($"[{exchangeId}] {symbol} {timeframe} 任务入队失败");
-                _queueMonitor.OnEnqueueFailed();
-                return;
-            }
-
-            _queueMonitor.OnEnqueueSuccess();
+            TryWriteMainChannel(task);
 
             foreach (var subscription in _subscriptions.Values)
             {
@@ -1321,12 +1377,40 @@ namespace ServerTest.Modules.MarketStreaming.Application
                         exchangeId,
                         symbol,
                         timeframe);
+
+                    if (isBarClose)
+                    {
+                        TryScheduleCriticalSubscriptionWrite(subscription, task);
+                    }
                 }
             }
 
             // var modeText = isBarClose ? "收线" : "更新";
             // Logger.LogInformation(
             //     $"[{exchangeId}] {symbol} {timeframe} 实时行情任务入队({modeText}): time={FormatTimestamp(candleTimestamp)}");
+        }
+
+        private void TryWriteMainChannel(MarketDataTask task)
+        {
+            if (_marketTaskChannel.Writer.TryWrite(task))
+            {
+                _queueMonitor.OnEnqueueSuccess();
+                return;
+            }
+
+            _queueMonitor.OnEnqueueFailed();
+            Logger.LogWarning("行情主队列写入失败: {Exchange} {Symbol} {Timeframe} isBarClose={IsBarClose}",
+                task.Exchange,
+                task.Symbol,
+                task.Timeframe,
+                task.IsBarClose);
+
+            if (!task.IsBarClose)
+            {
+                return;
+            }
+
+            TryScheduleCriticalMainChannelWrite(task);
         }
 
         private void EnqueueOnBarUpdateTasks(
@@ -1352,6 +1436,156 @@ namespace ServerTest.Modules.MarketStreaming.Application
             }
         }
 
+        private void TryScheduleCriticalSubscriptionWrite(MarketDataTaskSubscription subscription, MarketDataTask task)
+        {
+            var pending = _pendingCriticalSubscriptionWrites.AddOrUpdate(subscription.Name, 1, static (_, value) => value + 1);
+            if (pending > MaxPendingCriticalSubscriptionWritesPerSubscriber)
+            {
+                DecrementPendingCriticalSubscriptionWrite(subscription.Name);
+                Logger.LogError(
+                    "关键收线补写队列已满，丢弃补写任务: subscriber={Subscriber} exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                    subscription.Name,
+                    task.Exchange,
+                    task.Symbol,
+                    task.Timeframe);
+                return;
+            }
+
+            if (!_criticalSubscriptionWriteChannel.Writer.TryWrite(new CriticalSubscriptionWriteTask(subscription, task)))
+            {
+                DecrementPendingCriticalSubscriptionWrite(subscription.Name);
+                Logger.LogError(
+                    "关键收线补写总队列已满，丢弃补写任务: subscriber={Subscriber} exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                    subscription.Name,
+                    task.Exchange,
+                    task.Symbol,
+                    task.Timeframe);
+            }
+        }
+
+        private void TryScheduleCriticalMainChannelWrite(MarketDataTask task)
+        {
+            var pending = Interlocked.Increment(ref _pendingCriticalMainChannelWrites);
+            if (pending > MaxPendingCriticalMainChannelWrites)
+            {
+                Interlocked.Decrement(ref _pendingCriticalMainChannelWrites);
+                Logger.LogError(
+                    "行情主队列关键补写队列已满，丢弃任务: exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                    task.Exchange,
+                    task.Symbol,
+                    task.Timeframe);
+                return;
+            }
+
+            if (!_criticalMainWriteChannel.Writer.TryWrite(task))
+            {
+                Interlocked.Decrement(ref _pendingCriticalMainChannelWrites);
+                Logger.LogError(
+                    "行情主队列关键补写总队列已满，丢弃任务: exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                    task.Exchange,
+                    task.Symbol,
+                    task.Timeframe);
+            }
+        }
+
+        private async Task ConsumeCriticalMainWritesAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await foreach (var task in _criticalMainWriteChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        await _marketTaskChannel.Writer.WriteAsync(task, cancellationToken).ConfigureAwait(false);
+                        _queueMonitor.OnEnqueueSuccess();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _queueMonitor.OnEnqueueFailed();
+                    }
+                    catch (Exception ex)
+                    {
+                        _queueMonitor.OnEnqueueFailed();
+                        Logger.LogWarning(ex,
+                            "行情主队列关键补写异常: exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                            task.Exchange,
+                            task.Symbol,
+                            task.Timeframe);
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _pendingCriticalMainChannelWrites);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 停机阶段取消消费，忽略即可。
+            }
+        }
+
+        private async Task ConsumeCriticalSubscriptionWritesAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await foreach (var writeTask in _criticalSubscriptionWriteChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        var written = await writeTask.Subscription
+                            .EnqueueCriticalAsync(writeTask.Task, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (!written)
+                        {
+                            Logger.LogWarning(
+                                "关键收线补写失败: subscriber={Subscriber} exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                                writeTask.Subscription.Name,
+                                writeTask.Task.Exchange,
+                                writeTask.Task.Symbol,
+                                writeTask.Task.Timeframe);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex,
+                            "关键收线补写异常: subscriber={Subscriber} exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
+                            writeTask.Subscription.Name,
+                            writeTask.Task.Exchange,
+                            writeTask.Task.Symbol,
+                            writeTask.Task.Timeframe);
+                    }
+                    finally
+                    {
+                        DecrementPendingCriticalSubscriptionWrite(writeTask.Subscription.Name);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 停机阶段取消消费，忽略即可。
+            }
+        }
+
+        private void DecrementPendingCriticalSubscriptionWrite(string subscriberName)
+        {
+            var current = _pendingCriticalSubscriptionWrites.AddOrUpdate(
+                subscriberName,
+                0,
+                static (_, value) => value > 0 ? value - 1 : 0);
+            if (current == 0)
+            {
+                _pendingCriticalSubscriptionWrites.TryRemove(subscriberName, out _);
+            }
+        }
+
         public static string FormatTimestamp(long timestamp)
         {
             if (timestamp <= 0)
@@ -1362,6 +1596,19 @@ namespace ServerTest.Modules.MarketStreaming.Application
             return DateTimeOffset.FromUnixTimeMilliseconds(timestamp)
                 .ToLocalTime()
                 .ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private readonly struct CriticalSubscriptionWriteTask
+        {
+            public CriticalSubscriptionWriteTask(MarketDataTaskSubscription subscription, MarketDataTask task)
+            {
+                Subscription = subscription;
+                Task = task;
+            }
+
+            public MarketDataTaskSubscription Subscription { get; }
+
+            public MarketDataTask Task { get; }
         }
     }
 }

@@ -25,6 +25,8 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
         return '已暂停';
       case 'paused_open_position':
         return '暂停开新仓';
+      case 'paused_open_fail':
+        return '连续开仓失败已暂停';
       case 'testing':
         return '测试中';
       case 'completed':
@@ -43,6 +45,8 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
       case 'paused':
         return 'status-paused';
       case 'paused_open_position':
+        return 'status-paused-open-position';
+      case 'paused_open_fail':
         return 'status-paused-open-position';
       case 'testing':
         return 'status-testing';

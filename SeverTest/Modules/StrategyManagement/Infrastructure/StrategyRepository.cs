@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -31,6 +31,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             "running",
             "paused",
             "paused_open_position",
+            "paused_open_fail",
             "completed",
             "archived"
         };
@@ -40,6 +41,7 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             "running",
             "paused",
             "paused_open_position",
+            "paused_open_fail",
             "testing"
         };
         private static readonly JsonSerializerOptions CamelCaseSerializerOptions = new()
@@ -1510,6 +1512,7 @@ ORDER BY version_no ASC
 
         public async Task<IActionResult> Delete(long uid, StrategyDeleteRequest request)
         {
+            var strategyBlocked = false;
 
             if (request.UsId <= 0)
             {
@@ -1535,6 +1538,7 @@ LIMIT 1
 
                 // 先封禁动作队列，防止删除期间残留任务继续消费。
                 _strategyActionTaskQueue.BlockStrategy(request.UsId);
+                strategyBlocked = true;
 
                 var runtimeUidCode = request.UsId.ToString();
                 try
@@ -1544,6 +1548,7 @@ LIMIT 1
                 catch (Exception ex)
                 {
                     _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    strategyBlocked = false;
                     Logger.LogError(ex, "删除策略后卸载运行时失败并已回滚封禁: uid={Uid} usId={UsId}", uid, request.UsId);
                     return StatusCode(500, ApiResponse<object>.Error("删除失败：运行时卸载异常，请重试"));
                 }
@@ -1555,6 +1560,7 @@ LIMIT 1
                 catch (Exception ex)
                 {
                     _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    strategyBlocked = false;
                     Logger.LogError(ex, "删除策略后释放租约失败并已回滚封禁: uid={Uid} usId={UsId}", uid, request.UsId);
                     return StatusCode(500, ApiResponse<object>.Error("删除失败：租约释放异常，请重试"));
                 }
@@ -1569,6 +1575,7 @@ WHERE us_id = @us_id AND uid = @uid
                 if (affected == 0)
                 {
                     _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    strategyBlocked = false;
                     Logger.LogWarning("策略删除时记录消失，已回滚动作封禁: uid={Uid} usId={UsId}", uid, request.UsId);
                     return NotFound(ApiResponse<object>.Error("未找到策略实例"));
                 }
@@ -1579,6 +1586,11 @@ WHERE us_id = @us_id AND uid = @uid
             }
             catch (Exception ex)
             {
+                if (strategyBlocked)
+                {
+                    _strategyActionTaskQueue.UnblockStrategy(request.UsId);
+                    Logger.LogWarning("删除策略异常触发兜底回滚动作封禁: uid={Uid} usId={UsId}", uid, request.UsId);
+                }
                 Logger.LogError(ex, "删除策略失败: uid={Uid} usId={UsId}", uid, request.UsId);
                 return StatusCode(500, ApiResponse<object>.Error("删除失败，请稍后重试"));
             }
@@ -2109,6 +2121,8 @@ LIMIT 1
                     return StrategyState.Paused;
                 case "paused_open_position":
                     return StrategyState.PausedOpenPosition;
+                case "paused_open_fail":
+                    return StrategyState.PausedOpenFail;
                 case "completed":
                     return StrategyState.Completed;
                 case "testing":

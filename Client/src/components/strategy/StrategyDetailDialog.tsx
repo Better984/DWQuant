@@ -607,7 +607,7 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
 }) => {
   const { success, error } = useNotification();
   const [activeTab, setActiveTab] = useState<TabType>('info');
-  const [currentStatus, setCurrentStatus] = useState<'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed'>('completed');
+  const [currentStatus, setCurrentStatus] = useState<'running' | 'paused' | 'paused_open_position' | 'paused_open_fail' | 'testing' | 'completed'>('completed');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [historyVersions, setHistoryVersions] = useState<StrategyHistoryVersion[]>([]);
   const [selectedHistoryVersionId, setSelectedHistoryVersionId] = useState<number | null>(null);
@@ -713,6 +713,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         setCurrentStatus('paused');
       } else if (status === 'paused_open_position') {
         setCurrentStatus('paused_open_position');
+      } else if (status === 'paused_open_fail') {
+        setCurrentStatus('paused_open_fail');
       } else if (status === 'testing') {
         setCurrentStatus('testing');
       } else {
@@ -1186,6 +1188,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
         return '已暂停';
       case 'paused_open_position':
         return '暂停开新仓';
+      case 'paused_open_fail':
+        return '连续开仓失败已暂停';
       case 'testing':
         return '测试中';
       case 'completed':
@@ -1204,6 +1208,8 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
       case 'paused':
         return 'status-paused';
       case 'paused_open_position':
+        return 'status-paused-open-position';
+      case 'paused_open_fail':
         return 'status-paused-open-position';
       case 'testing':
         return 'status-testing';
@@ -2379,6 +2385,14 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                   disabled={isUpdatingStatus || currentStatus === 'paused_open_position'}
                 >
                   {isUpdatingStatus && currentStatus !== 'paused_open_position' ? '更新中...' : '暂停开新仓'}
+                </button>
+                <button
+                  type="button"
+                  className={`strategy-status-btn ${currentStatus === 'paused_open_fail' ? 'is-active' : ''}`}
+                  disabled
+                  title="连续开仓失败导致自动暂停，点击「运行中」可恢复"
+                >
+                  连续开仓失败已暂停
                 </button>
                 <button
                   type="button"

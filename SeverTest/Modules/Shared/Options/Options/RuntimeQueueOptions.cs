@@ -8,7 +8,7 @@ namespace ServerTest.Options
         public QueueOptions MarketData { get; set; } = new QueueOptions
         {
             Capacity = 20000,
-            FullMode = "DropOldest",
+            FullMode = "DropWrite",
             WarningThresholdPercent = 80,
             WarningIntervalSeconds = 10
         };
@@ -16,7 +16,7 @@ namespace ServerTest.Options
         public QueueOptions Indicator { get; set; } = new QueueOptions
         {
             Capacity = 20000,
-            FullMode = "DropOldest",
+            FullMode = "DropWrite",
             WarningThresholdPercent = 80,
             WarningIntervalSeconds = 10
         };

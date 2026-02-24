@@ -9,10 +9,9 @@ namespace ServerTest.Modules.MarketStreaming.Application
 {
     public class ExchangePriceService : BaseService
     {
-        private const int ExpectedExchangeCount = 3;
-
         private readonly ConcurrentDictionary<string, PriceData> _priceCache = new();
         private readonly Dictionary<string, Exchange> _exchanges = new();
+        private readonly Dictionary<string, string> _exchangeInitErrors = new(StringComparer.OrdinalIgnoreCase);
         private readonly CancellationTokenSource _cancellationTokenSource = new();
         private readonly Task _initializationTask;
         private readonly Task _subscriptionTask;
@@ -100,36 +99,38 @@ namespace ServerTest.Modules.MarketStreaming.Application
         {
             try
             {
-                // 创建币安合约 WebSocket 连接
-                var binanceFutures = new ccxt.pro.binanceusdm(new Dictionary<string, object>() { });
-                _exchanges["Binance"] = binanceFutures;
+                await TryInitializeBinanceAsync().ConfigureAwait(false);
+                await TryInitializeOkxAsync().ConfigureAwait(false);
+                await TryInitializeBitgetAsync().ConfigureAwait(false);
 
-                // 创建 OKX WebSocket 连接
-                var okx = new ccxt.pro.okx(new Dictionary<string, object>() {
-                    { "options", new Dictionary<string, object>() {
-                        { "defaultType", "swap" }  // OKX 需要指定合约类型
-                    } }
-                });
-                _exchanges["OKX"] = okx;
+                if (_exchanges.Count == 0)
+                {
+                    var failed = _exchangeInitErrors.Count == 0
+                        ? "无详细错误"
+                        : string.Join("; ", _exchangeInitErrors.Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+                    var message = $"交易所初始化全部失败，价格服务不可用: {failed}";
+                    _initializationError = new InvalidOperationException(message);
+                    Logger.LogError(message);
+                    throw _initializationError;
+                }
 
-                // 创建 Bitget WebSocket 连接
-                var bitget = new ccxt.pro.bitget(new Dictionary<string, object>() {
-                    { "options", new Dictionary<string, object>() {
-                        { "defaultType", "swap" }  // Bitget 需要指定合约类型
-                    } }
-                });
-                _exchanges["Bitget"] = bitget;
+                if (_exchangeInitErrors.Count > 0)
+                {
+                    Logger.LogWarning(
+                        "交易所初始化部分失败，已降级继续: ready={ReadyCount} failed={FailedCount} failedList={FailedList}",
+                        _exchanges.Count,
+                        _exchangeInitErrors.Count,
+                        string.Join(", ", _exchangeInitErrors.Keys));
+                }
 
-                // 加载市场数据
-                await binanceFutures.LoadMarkets();
-                await okx.LoadMarkets();
-                await bitget.LoadMarkets();
-
-                Logger.LogInformation("交易所初始化完成，市场数据加载完成 (使用 WebSocket)");
+                Logger.LogInformation(
+                    "交易所初始化完成: ready={ReadyCount} readyList={ReadyList}",
+                    _exchanges.Count,
+                    string.Join(", ", _exchanges.Keys));
             }
             catch (Exception ex)
             {
-                _initializationError = ex;
+                _initializationError ??= ex;
                 Logger.LogError(ex, "交易所初始化失败");
                 throw;
             }
@@ -155,45 +156,144 @@ namespace ServerTest.Modules.MarketStreaming.Application
                 return;
             }
 
-            if (_exchanges.Count != ExpectedExchangeCount)
-            {
-                var message = $"交易所初始化数量异常，期望 {ExpectedExchangeCount} 个，实际 {_exchanges.Count} 个";
-                Logger.LogError(message);
-                var ex = new InvalidOperationException(message);
-                _subscriptionReadyTcs.TrySetException(ex);
-                throw ex;
-            }
-
             var tasks = new List<Task>();
+            var enabledExchanges = new List<string>();
+            var symbols = GetAllowedSymbols().ToArray();
 
-            // 并行订阅 Binance 多币种（其他交易所暂不启用）
-            if (_exchanges.ContainsKey("Binance") && _exchanges["Binance"] is ccxt.pro.binanceusdm binanceEx)
+            // 按“可用交易所”降级启动，避免单点初始化失败导致整体订阅不可用。
+            if (_exchanges.TryGetValue("Binance", out var binance) && binance is ccxt.pro.binanceusdm binanceEx)
             {
-                foreach (var symbol in GetAllowedSymbols())
+                enabledExchanges.Add("Binance");
+                foreach (var symbol in symbols)
                 {
                     tasks.Add(WatchBinanceFutures(binanceEx, symbol, cancellationToken));
                 }
             }
-            //if (_exchanges.ContainsKey("OKX") && _exchanges["OKX"] is ccxt.pro.okx okxEx)
-            //{
-            //    tasks.Add(WatchOKX(okxEx, cancellationToken));
-            //}
-            //if (_exchanges.ContainsKey("Bitget") && _exchanges["Bitget"] is ccxt.pro.bitget bitgetEx)
-            //{
-            //    tasks.Add(WatchBitget(bitgetEx, cancellationToken));
-            //}
+            if (_exchanges.TryGetValue("OKX", out var okx) && okx is ccxt.pro.okx okxEx)
+            {
+                enabledExchanges.Add("OKX");
+                foreach (var symbol in symbols)
+                {
+                    tasks.Add(WatchOKX(okxEx, symbol, cancellationToken));
+                }
+            }
+            if (_exchanges.TryGetValue("Bitget", out var bitget) && bitget is ccxt.pro.bitget bitgetEx)
+            {
+                enabledExchanges.Add("Bitget");
+                foreach (var symbol in symbols)
+                {
+                    tasks.Add(WatchBitget(bitgetEx, symbol, cancellationToken));
+                }
+            }
 
             if (tasks.Count == 0)
             {
-                const string message = "价格订阅任务为空，无法启动价格推送";
+                var ready = _exchanges.Count == 0 ? "无" : string.Join(", ", _exchanges.Keys);
+                var failed = _exchangeInitErrors.Count == 0
+                    ? "无"
+                    : string.Join("; ", _exchangeInitErrors.Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+                var message = $"价格订阅任务为空，无法启动价格推送: ready={ready}; failed={failed}";
                 Logger.LogError(message);
                 var ex = new InvalidOperationException(message);
                 _subscriptionReadyTcs.TrySetException(ex);
                 throw ex;
             }
 
+            Logger.LogInformation(
+                "价格订阅任务已启动: exchangeCount={ExchangeCount} taskCount={TaskCount} exchanges={Exchanges}",
+                enabledExchanges.Count,
+                tasks.Count,
+                string.Join(", ", enabledExchanges));
+
             _subscriptionReadyTcs.TrySetResult(true);
             await Task.WhenAll(tasks);
+        }
+
+        private async Task TryInitializeBinanceAsync()
+        {
+            ccxt.pro.binanceusdm? exchange = null;
+            try
+            {
+                exchange = new ccxt.pro.binanceusdm(new Dictionary<string, object>());
+                await exchange.LoadMarkets().ConfigureAwait(false);
+                _exchanges["Binance"] = exchange;
+                Logger.LogInformation("交易所初始化成功: Binance");
+            }
+            catch (Exception ex)
+            {
+                RecordExchangeInitFailure("Binance", ex);
+                DisposeExchangeSafely(exchange, "Binance");
+            }
+        }
+
+        private async Task TryInitializeOkxAsync()
+        {
+            ccxt.pro.okx? exchange = null;
+            try
+            {
+                exchange = new ccxt.pro.okx(new Dictionary<string, object>()
+                {
+                    { "options", new Dictionary<string, object>()
+                        {
+                            { "defaultType", "swap" }  // OKX 需要指定合约类型
+                        } }
+                });
+                await exchange.LoadMarkets().ConfigureAwait(false);
+                _exchanges["OKX"] = exchange;
+                Logger.LogInformation("交易所初始化成功: OKX");
+            }
+            catch (Exception ex)
+            {
+                RecordExchangeInitFailure("OKX", ex);
+                DisposeExchangeSafely(exchange, "OKX");
+            }
+        }
+
+        private async Task TryInitializeBitgetAsync()
+        {
+            ccxt.pro.bitget? exchange = null;
+            try
+            {
+                exchange = new ccxt.pro.bitget(new Dictionary<string, object>()
+                {
+                    { "options", new Dictionary<string, object>()
+                        {
+                            { "defaultType", "swap" }  // Bitget 需要指定合约类型
+                        } }
+                });
+                await exchange.LoadMarkets().ConfigureAwait(false);
+                _exchanges["Bitget"] = exchange;
+                Logger.LogInformation("交易所初始化成功: Bitget");
+            }
+            catch (Exception ex)
+            {
+                RecordExchangeInitFailure("Bitget", ex);
+                DisposeExchangeSafely(exchange, "Bitget");
+            }
+        }
+
+        private void RecordExchangeInitFailure(string exchangeName, Exception ex)
+        {
+            var error = ex.Message;
+            _exchangeInitErrors[exchangeName] = error;
+            Logger.LogWarning(ex, "交易所初始化失败，已降级继续: exchange={Exchange} error={Error}", exchangeName, error);
+        }
+
+        private void DisposeExchangeSafely(Exchange? exchange, string exchangeName)
+        {
+            if (exchange is not IDisposable disposable)
+            {
+                return;
+            }
+
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "释放交易所资源失败: exchange={Exchange}", exchangeName);
+            }
         }
 
         // 查找合约符号
@@ -351,10 +451,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)last.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Console.WriteLine(
-                        $"[OKX合约] {symbol} {timeframe} " +
-                        $"时间: {ts:yyyy-MM-dd HH:mm:ss} " +
-                        $"开: {last.open} 高: {last.high} 低: {last.low} 收: {last.close} 量: {last.volume}");
+                    Logger.LogDebug(
+                        "[OKX合约] {Symbol} {Timeframe} 时间:{Timestamp:yyyy-MM-dd HH:mm:ss} 开:{Open} 高:{High} 低:{Low} 收:{Close} 量:{Volume}",
+                        symbol,
+                        timeframe,
+                        ts,
+                        last.open,
+                        last.high,
+                        last.low,
+                        last.close,
+                        last.volume);
 
                     var priceData = new PriceData
                     {
@@ -400,10 +506,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)last.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Console.WriteLine(
-                        $"[Bitget合约] {symbol} {timeframe} " +
-                        $"时间: {ts:yyyy-MM-dd HH:mm:ss} " +
-                        $"开: {last.open} 高: {last.high} 低: {last.low} 收: {last.close} 量: {last.volume}");
+                    Logger.LogDebug(
+                        "[Bitget合约] {Symbol} {Timeframe} 时间:{Timestamp:yyyy-MM-dd HH:mm:ss} 开:{Open} 高:{High} 低:{Low} 收:{Close} 量:{Volume}",
+                        symbol,
+                        timeframe,
+                        ts,
+                        last.open,
+                        last.high,
+                        last.low,
+                        last.close,
+                        last.volume);
 
                     var priceData = new PriceData
                     {

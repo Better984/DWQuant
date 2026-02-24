@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ServerTest.Domain.Entities;
 using ServerTest.Models;
+using ServerTest.Modules.Positions.Domain;
 using ServerTest.Modules.Positions.Infrastructure;
+using ServerTest.Modules.TradingExecution.Application;
 using ServerTest.Modules.TradingExecution.Domain;
 using ServerTest.Modules.MarketStreaming.Application;
 
@@ -14,6 +17,9 @@ namespace ServerTest.Modules.Positions.Application
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
         private readonly PositionRiskIndexManager _riskIndexManager;
+        private readonly TradeRecoveryEnqueueService _recoveryEnqueue;
+        private readonly TrailingRecoveryService _trailingRecovery;
+        private readonly PositionRiskLeaseService _lease;
         private readonly ILogger<PositionRiskEngine> _logger;
 
         private static readonly TimeSpan LoopDelay = TimeSpan.FromSeconds(1);
@@ -24,6 +30,9 @@ namespace ServerTest.Modules.Positions.Application
             IOrderExecutor orderExecutor,
             PositionRiskConfigStore riskConfigStore,
             PositionRiskIndexManager riskIndexManager,
+            TradeRecoveryEnqueueService recoveryEnqueue,
+            TrailingRecoveryService trailingRecovery,
+            PositionRiskLeaseService lease,
             ILogger<PositionRiskEngine> logger)
         {
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
@@ -31,19 +40,50 @@ namespace ServerTest.Modules.Positions.Application
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
             _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
+            _recoveryEnqueue = recoveryEnqueue ?? throw new ArgumentNullException(nameof(recoveryEnqueue));
+            _trailingRecovery = trailingRecovery ?? throw new ArgumentNullException(nameof(trailingRecovery));
+            _lease = lease ?? throw new ArgumentNullException(nameof(lease));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await _marketDataEngine.WaitForInitializationAsync();
-            await InitializeIndexAsync(stoppingToken).ConfigureAwait(false);
+            await _positionRepository.EnsureTrailingColumnsAsync(stoppingToken).ConfigureAwait(false);
+
+            if (!_lease.IsEnabled)
+            {
+                _logger.LogInformation("仓位风控租约未启用，本节点直接执行全量风控");
+                await InitializeIndexAsync(stoppingToken).ConfigureAwait(false);
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken).ConfigureAwait(false);
+                    if (_lease.IsEnabled)
+                    {
+                        if (!_lease.IsOwned)
+                        {
+                            if (!await _lease.TryAcquireAsync(stoppingToken).ConfigureAwait(false))
+                            {
+                                await Task.Delay(LoopDelay, stoppingToken).ConfigureAwait(false);
+                                continue;
+                            }
+                            await InitializeIndexAsync(stoppingToken).ConfigureAwait(false);
+                        }
+
+                        await RunOnceAsync(stoppingToken).ConfigureAwait(false);
+
+                        if (!await _lease.TryRenewAsync(stoppingToken).ConfigureAwait(false))
+                        {
+                            _logger.LogWarning("仓位风控租约续租失败，下一轮将重新竞争");
+                        }
+                    }
+                    else
+                    {
+                        await RunOnceAsync(stoppingToken).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -54,14 +94,60 @@ namespace ServerTest.Modules.Positions.Application
             }
         }
 
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            if (_lease.IsEnabled && _lease.IsOwned)
+            {
+                await _lease.ReleaseAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         private async Task InitializeIndexAsync(CancellationToken ct)
         {
             var openPositions = await _positionRepository.ListOpenAsync(ct).ConfigureAwait(false);
+
+            foreach (var position in openPositions)
+            {
+                if (position.TrailingEnabled && !position.TrailingStopPrice.HasValue
+                    && position.TrailingActivationPct.HasValue && position.TrailingDrawdownPct.HasValue)
+                {
+                    var computedStop = await _trailingRecovery.ReplayAndUpdateAsync(position, ct).ConfigureAwait(false);
+                    if (computedStop.HasValue)
+                    {
+                        position.TrailingStopPrice = computedStop;
+                    }
+                }
+            }
+
             _riskIndexManager.RebuildFromPositions(
                 openPositions,
-                positionId => _riskConfigStore.TryGet(positionId, out var config) ? config : null);
+                position => ResolvePositionRiskConfig(position));
 
             _logger.LogInformation("风控索引初始化完成: 仓位数={Count}", openPositions.Count);
+        }
+
+        private PositionRiskConfig? ResolvePositionRiskConfig(StrategyPosition position)
+        {
+            if (_riskConfigStore.TryGet(position.PositionId, out var fromStore) && fromStore != null)
+            {
+                return fromStore;
+            }
+
+            var activationPct = position.TrailingActivationPct ?? 0m;
+            var drawdownPct = position.TrailingDrawdownPct ?? 0m;
+            if (activationPct <= 0 || drawdownPct <= 0 || drawdownPct >= 1)
+            {
+                return null;
+            }
+
+            return new PositionRiskConfig
+            {
+                Side = position.Side ?? "Long",
+                ActivationPct = activationPct,
+                DrawdownPct = drawdownPct
+            };
         }
 
         private async Task RunOnceAsync(CancellationToken ct)
@@ -189,14 +275,64 @@ namespace ServerTest.Modules.Positions.Application
                 closePrice = orderResult.AveragePrice;
             }
 
-            await _positionRepository.CloseAsync(
+            var closedAt = DateTime.UtcNow;
+            try
+            {
+                var closeAffected = await _positionRepository.CloseAsync(
+                        entry.PositionId,
+                        trailingTriggered: trailingHit,
+                        closedAt: closedAt,
+                        closeReason,
+                        closePrice,
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (closeAffected <= 0)
+                {
+                    var latest = await _positionRepository.GetByIdAsync(entry.PositionId, entry.Uid, ct).ConfigureAwait(false);
+                    if (latest == null || !string.Equals(latest.Status, "Closed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogError(
+                            "风控平仓写库未生效: positionId={PositionId} uid={Uid} usId={UsId}",
+                            entry.PositionId, entry.Uid, entry.UsId);
+                        await _recoveryEnqueue.EnqueueCloseWriteRecoveryAsync(
+                            entry.Uid,
+                            entry.UsId,
+                            entry.PositionId,
+                            entry.ExchangeApiKeyId,
+                            entry.Exchange ?? string.Empty,
+                            entry.Symbol ?? string.Empty,
+                            entry.Side ?? string.Empty,
+                            entry.Qty,
+                            closePrice,
+                            closedAt,
+                            "风控平仓写库返回0且仓位仍为Open",
+                            ct).ConfigureAwait(false);
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "风控平仓订单已提交但本地写库异常，已转入恢复队列: positionId={PositionId} uid={Uid} usId={UsId}",
+                    entry.PositionId, entry.Uid, entry.UsId);
+                await _recoveryEnqueue.EnqueueCloseWriteRecoveryAsync(
+                    entry.Uid,
+                    entry.UsId,
                     entry.PositionId,
-                    trailingTriggered: trailingHit,
-                    closedAt: DateTime.UtcNow,
-                    closeReason,
+                    entry.ExchangeApiKeyId,
+                    entry.Exchange ?? string.Empty,
+                    entry.Symbol ?? string.Empty,
+                    entry.Side ?? string.Empty,
+                    entry.Qty,
                     closePrice,
-                    ct)
-                .ConfigureAwait(false);
+                    closedAt,
+                    ex.Message,
+                    ct).ConfigureAwait(false);
+                return;
+            }
+
             _riskConfigStore.Remove(entry.PositionId);
             _riskIndexManager.RemovePosition(entry.PositionId);
 

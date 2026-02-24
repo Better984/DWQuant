@@ -16,7 +16,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private readonly TalibIndicatorCatalog? _catalog;
         private readonly TalibIndicatorCalculator _calculator;
         private readonly Channel<IndicatorTask> _taskChannel;
+        private readonly Channel<IndicatorTask> _criticalWriteChannel;
         private readonly QueuePressureMonitor _queueMonitor;
+        private int _pendingCriticalWrites;
+        private Task? _criticalWriteWorker;
+        private readonly object _criticalWriteWorkerLock = new();
+        private const int MaxPendingCriticalWrites = 128;
 
         private readonly ConcurrentDictionary<IndicatorKey, IndicatorHandle> _handles = new();
 
@@ -29,14 +34,21 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var options = queueOptions?.Value ?? new RuntimeQueueOptions();
+            var indicatorQueueOptions = NormalizeQueueOptions(options.Indicator, _logger);
             // 初始化队列，启用有界通道与背压策略
             _taskChannel = ChannelFactory.Create<IndicatorTask>(
-                options.Indicator,
+                indicatorQueueOptions,
                 "IndicatorEngine",
                 logger,
                 singleReader: false,
                 singleWriter: false);
-            _queueMonitor = new QueuePressureMonitor("IndicatorEngine", options.Indicator, logger);
+            _criticalWriteChannel = Channel.CreateBounded<IndicatorTask>(new BoundedChannelOptions(MaxPendingCriticalWrites)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropWrite
+            });
+            _queueMonitor = new QueuePressureMonitor("IndicatorEngine", indicatorQueueOptions, logger);
             _catalog = TryLoadCatalog();
             _calculator = new TalibIndicatorCalculator(_catalog, wasmInvoker);
         }
@@ -58,6 +70,10 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     task.MarketTask.Timeframe,
                     FormatTimestamp(task.MarketTask.CandleTimestamp));
                 _queueMonitor.OnEnqueueFailed();
+                if (task.MarketTask.IsBarClose)
+                {
+                    TryScheduleCriticalWrite(task);
+                }
                 return;
             }
 
@@ -72,20 +88,52 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 task.Requests.Count);
         }
 
-        public Task RunAsync(int workerCount, CancellationToken cancellationToken)
+        /// <summary>
+        /// 收线场景下的关键补写：队列满时异步等待空位，降低关键指标刷新任务丢失概率。
+        /// </summary>
+        private void TryScheduleCriticalWrite(IndicatorTask task)
+        {
+            var pending = Interlocked.Increment(ref _pendingCriticalWrites);
+            if (pending > MaxPendingCriticalWrites)
+            {
+                Interlocked.Decrement(ref _pendingCriticalWrites);
+                _logger.LogError(
+                    "指标关键补写队列已满，丢弃任务: {Exchange} {Symbol} {Timeframe} time={Time}",
+                    task.MarketTask.Exchange,
+                    task.MarketTask.Symbol,
+                    task.MarketTask.Timeframe,
+                    FormatTimestamp(task.MarketTask.CandleTimestamp));
+                return;
+            }
+
+            if (!_criticalWriteChannel.Writer.TryWrite(task))
+            {
+                Interlocked.Decrement(ref _pendingCriticalWrites);
+                _logger.LogError(
+                    "指标关键补写总队列已满，丢弃任务: {Exchange} {Symbol} {Timeframe} time={Time}",
+                    task.MarketTask.Exchange,
+                    task.MarketTask.Symbol,
+                    task.MarketTask.Timeframe,
+                    FormatTimestamp(task.MarketTask.CandleTimestamp));
+            }
+        }
+
+        public async Task RunAsync(int workerCount, CancellationToken cancellationToken)
         {
             if (workerCount <= 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(workerCount));
             }
 
-            var workers = new Task[workerCount];
+            var workers = new Task[workerCount + 1];
             for (var i = 0; i < workerCount; i++)
             {
                 workers[i] = ConsumeAsync(cancellationToken);
             }
 
-            return Task.WhenAll(workers);
+            // 关键补写消费 worker 固定单线程，避免高压下每次失败都创建 Task.Run。
+            workers[workerCount] = EnsureCriticalWriteWorker(cancellationToken);
+            await Task.WhenAll(workers).ConfigureAwait(false);
         }
 
         public bool TryGetValue(
@@ -238,6 +286,82 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return DateTimeOffset.FromUnixTimeMilliseconds(timestamp)
                 .ToLocalTime()
                 .ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private static QueueOptions NormalizeQueueOptions(QueueOptions? source, ILogger logger)
+        {
+            source ??= new QueueOptions();
+            var fullMode = source.FullMode?.Trim();
+            if (string.Equals(fullMode, "dropoldest", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fullMode, "dropnewest", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "指标队列 FullMode={FullMode} 可能导致关键任务静默覆盖，已自动调整为 DropWrite",
+                    source.FullMode);
+                fullMode = "DropWrite";
+            }
+
+            return new QueueOptions
+            {
+                Capacity = Math.Max(1, source.Capacity),
+                FullMode = string.IsNullOrWhiteSpace(fullMode) ? "DropWrite" : fullMode,
+                WarningThresholdPercent = source.WarningThresholdPercent,
+                WarningIntervalSeconds = source.WarningIntervalSeconds
+            };
+        }
+
+        private Task EnsureCriticalWriteWorker(CancellationToken cancellationToken)
+        {
+            lock (_criticalWriteWorkerLock)
+            {
+                if (_criticalWriteWorker == null || _criticalWriteWorker.IsCompleted)
+                {
+                    _criticalWriteWorker = Task.Run(() => ConsumeCriticalWritesAsync(cancellationToken), cancellationToken);
+                }
+
+                return _criticalWriteWorker;
+            }
+        }
+
+        private async Task ConsumeCriticalWritesAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await foreach (var task in _criticalWriteChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        await _taskChannel.Writer.WriteAsync(task, cancellationToken).ConfigureAwait(false);
+                        _queueMonitor.OnEnqueueSuccess();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _queueMonitor.OnEnqueueFailed();
+                    }
+                    catch (Exception ex)
+                    {
+                        _queueMonitor.OnEnqueueFailed();
+                        _logger.LogWarning(ex,
+                            "指标关键补写异常: {Exchange} {Symbol} {Timeframe} time={Time}",
+                            task.MarketTask.Exchange,
+                            task.MarketTask.Symbol,
+                            task.MarketTask.Timeframe,
+                            FormatTimestamp(task.MarketTask.CandleTimestamp));
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _pendingCriticalWrites);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 停机阶段取消消费，忽略即可。
+            }
         }
 
         private TalibIndicatorCatalog? TryLoadCatalog()

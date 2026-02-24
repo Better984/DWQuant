@@ -120,6 +120,18 @@ WHERE us_id = @usId AND uid = @uid
 
             return _db.ExecuteAsync(sql, new { exchangeApiKeyId, usId, uid }, null, ct);
         }
-    }
 
+        /// <summary>
+        /// 系统触发的状态更新（如连续开仓失败自动暂停）。不校验状态流转规则。
+        /// </summary>
+        public Task<int> UpdateStateAsync(long usId, long uid, string newState, CancellationToken ct = default)
+        {
+            const string sql = @"
+UPDATE user_strategy
+SET state = @newState, updated_at = UTC_TIMESTAMP()
+WHERE us_id = @usId AND uid = @uid
+";
+            return _db.ExecuteAsync(sql, new { newState, usId, uid }, null, ct);
+        }
+    }
 }

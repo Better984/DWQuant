@@ -28,6 +28,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private readonly IStrategyRuntimeTemplateProvider? _templateProvider;
         private readonly TestStrategyCheckLogRepository? _testCheckLogRepository; // 测试用：策略检查日志仓储（后续会删除）
         private readonly string _engineInstanceId;
+        private readonly ParallelOptions _parallelOptions;
+        private const int ParallelExecutionThreshold = 8;
 
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, StrategyModel>> _strategiesByKey = new();
         private readonly ConcurrentDictionary<string, string> _strategyKeyByUid = new();
@@ -58,7 +60,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _conditionUsageTracker = conditionUsageTracker ?? throw new ArgumentNullException(nameof(conditionUsageTracker));
             _templateProvider = templateProvider;
             _testCheckLogRepository = testCheckLogRepository; // 测试用：可选依赖，避免非测试环境报错
-            _maxParallelism = maxParallelism ?? Environment.ProcessorCount;
+            _maxParallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount);
+            _parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism };
             _engineInstanceId = $"{Environment.MachineName}:{Environment.ProcessId}";
         }
 
@@ -298,31 +301,47 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             UpdateIndicatorsBeforeExecute(strategies.Values, task);
 
-            var options = new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism };
-            Parallel.ForEach(strategies.Values, options, strategy =>
+            // 小批策略直接串行，避免 Parallel.ForEach 的调度开销反噬吞吐；
+            // 大批策略保留并行执行，兼顾吞吐与延迟稳定性。
+            if (_maxParallelism <= 1 || matchedCount < ParallelExecutionThreshold)
             {
-                if (!IsRunnableState(strategy.State))
+                foreach (var strategy in strategies.Values)
                 {
-                    Interlocked.Increment(ref metrics.SkippedCount);
-                    return;
+                    ExecuteStrategyTask(strategy, task, metrics);
                 }
-
-                var context = new StrategyExecutionContext(strategy, task, _valueResolver, _actionExecutor);
-                // 运行时间门禁：禁止时段按策略策略处理入口/出口
-                var runtimeGate = ResolveRuntimeGate(strategy, context.CurrentTime);
-                if (!runtimeGate.AllowEntry && !runtimeGate.AllowExit)
+            }
+            else
+            {
+                Parallel.ForEach(strategies.Values, _parallelOptions, strategy =>
                 {
-                    Interlocked.Increment(ref metrics.SkippedCount);
-                    return;
-                }
-
-                ExecuteLogic(context, runtimeGate, metrics);
-                metrics.AddExecutedStrategy(strategy.UidCode);
-                Interlocked.Increment(ref metrics.ExecutedCount);
-            });
+                    ExecuteStrategyTask(strategy, task, metrics);
+                });
+            }
 
             stopwatch.Stop();
             LogStrategyRun(task, matchedCount, metrics, stopwatch.ElapsedMilliseconds);
+        }
+
+        private void ExecuteStrategyTask(StrategyModel strategy, MarketDataTask task, StrategyRunMetrics metrics)
+        {
+            if (!IsRunnableState(strategy.State))
+            {
+                Interlocked.Increment(ref metrics.SkippedCount);
+                return;
+            }
+
+            var context = new StrategyExecutionContext(strategy, task, _valueResolver, _actionExecutor);
+            // 运行时间门禁：禁止时段按策略策略处理入口/出口
+            var runtimeGate = ResolveRuntimeGate(strategy, context.CurrentTime);
+            if (!runtimeGate.AllowEntry && !runtimeGate.AllowExit)
+            {
+                Interlocked.Increment(ref metrics.SkippedCount);
+                return;
+            }
+
+            ExecuteLogic(context, runtimeGate, metrics);
+            metrics.AddExecutedStrategy(strategy.UidCode);
+            Interlocked.Increment(ref metrics.ExecutedCount);
         }
 
         private void ExecuteLogic(
@@ -639,18 +658,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         result.Success,
                         result.Message);
 
-                    // 测试用：记录检查过程（后续会删除）
-                    _ = Task.Run(async () =>
+                    if (context.Strategy.State == StrategyState.Testing && _testCheckLogRepository != null)
                     {
-                        try
-                        {
-                            await LogCheckResultAsync(context, stage, groupIndex, condition, result, isRequired, ct: default).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "记录测试检查日志失败（忽略）");
-                        }
-                    });
+                        // 仅 testing 状态保留测试检查日志，避免实盘高压场景下产生大量 Task.Run 调度开销。
+                        _ = LogCheckResultAsync(context, stage, groupIndex, condition, result, isRequired, ct: default);
+                    }
 
                     if (isRequired && !result.Success)
                     {

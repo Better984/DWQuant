@@ -143,7 +143,7 @@ namespace ServerTest.Modules.Positions.Application
             return index.TryUpdateTrailingStop(positionId, newStopPrice);
         }
 
-        public void RebuildFromPositions(IEnumerable<StrategyPosition> positions, Func<long, PositionRiskConfig?> configResolver)
+        public void RebuildFromPositions(IEnumerable<StrategyPosition> positions, Func<StrategyPosition, PositionRiskConfig?> configResolver)
         {
             if (positions == null)
             {
@@ -157,12 +157,7 @@ namespace ServerTest.Modules.Positions.Application
                     continue;
                 }
 
-                PositionRiskConfig? config = null;
-                if (configResolver != null)
-                {
-                    config = configResolver(position.PositionId);
-                }
-
+                PositionRiskConfig? config = configResolver?.Invoke(position);
                 UpsertPosition(position, config);
             }
         }

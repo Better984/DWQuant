@@ -43,6 +43,29 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return true;
         }
 
+        /// <summary>
+        /// 异步入队，队列满时按 FullMode=Wait 等待直到有空位。用于策略动作队列，避免高压下丢单。
+        /// </summary>
+        public async ValueTask<bool> EnqueueAsync(StrategyActionTask task, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await _channel.Writer.WriteAsync(task, cancellationToken).ConfigureAwait(false);
+                _queueMonitor.OnEnqueueSuccess();
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                _queueMonitor.OnEnqueueFailed();
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                _queueMonitor.OnEnqueueFailed();
+                return false;
+            }
+        }
+
         public bool TryDequeue(out StrategyActionTask task)
         {
             if (_channel.Reader.TryRead(out var dequeued) && dequeued != null)

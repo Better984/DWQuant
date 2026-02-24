@@ -83,6 +83,9 @@ const resolveStatus = (state: string | undefined): StrategyItemProps['status'] =
   if (normalized === 'paused_open_position') {
     return 'paused_open_position';
   }
+  if (normalized === 'paused_open_fail') {
+    return 'paused_open_fail';
+  }
   if (normalized === 'testing') {
     return 'testing';
   }
@@ -335,7 +338,7 @@ const StrategyList: React.FC<StrategyListProps> = ({ autoOpenImport, onAutoOpenH
 
   const handleUpdateStatus = async (
     usId: number,
-    status: 'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed',
+    status: 'running' | 'paused' | 'paused_open_position' | 'paused_open_fail' | 'testing' | 'completed',
   ) => {
     const data = await client.postProtocol<StrategyStateUpdateResponse>('/api/strategy/instances/state', 'strategy.instance.state.update', {
       id: usId,

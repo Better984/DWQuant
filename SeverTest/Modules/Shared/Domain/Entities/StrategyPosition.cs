@@ -18,6 +18,8 @@ namespace ServerTest.Domain.Entities
         public bool TrailingEnabled { get; set; }
         public decimal? TrailingStopPrice { get; set; }
         public bool TrailingTriggered { get; set; }
+        public decimal? TrailingActivationPct { get; set; }
+        public decimal? TrailingDrawdownPct { get; set; }
         public string? CloseReason { get; set; }
         public decimal? ClosePrice { get; set; }
         public decimal? RealizedPnl { get; set; }

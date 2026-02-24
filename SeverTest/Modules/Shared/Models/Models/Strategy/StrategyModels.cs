@@ -7,6 +7,8 @@ namespace ServerTest.Models.Strategy
         Running,
         Paused,
         PausedOpenPosition,
+        /// <summary>连续开仓失败导致自动暂停（由系统设置，非用户操作）</summary>
+        PausedOpenFail,
         Deleted,
         Testing
     }

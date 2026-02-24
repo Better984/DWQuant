@@ -18,6 +18,7 @@ namespace ServerTest.Models.Strategy
         public string Symbol { get; init; } = string.Empty;
         public int TimeframeSec { get; init; }
         public decimal OrderQty { get; init; }
+        public decimal MaxPositionQty { get; init; }
         public int Leverage { get; init; }
         public decimal? TakeProfitPct { get; init; }
         public decimal? StopLossPct { get; init; }
