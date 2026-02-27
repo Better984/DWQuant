@@ -7,6 +7,8 @@ namespace ServerTest.Models.Strategy
 
     public sealed class StrategyActionTask
     {
+        public string TraceId { get; init; } = string.Empty;
+        public string RootTraceId { get; init; } = string.Empty;
         public string StrategyUid { get; init; } = string.Empty;
         public long? Uid { get; init; }
         public long? UsId { get; init; }

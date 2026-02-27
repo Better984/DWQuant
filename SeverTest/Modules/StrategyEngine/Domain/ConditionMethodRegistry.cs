@@ -50,7 +50,7 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             StrategyExecutionContext context,
             StrategyMethod method,
             IReadOnlyList<ConditionEvaluationResult> triggerResults)
-        {
+         {
             var action = Get(method.Method);
             if (action == null)
             {

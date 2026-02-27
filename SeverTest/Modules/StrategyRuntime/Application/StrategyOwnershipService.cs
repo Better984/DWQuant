@@ -88,21 +88,67 @@ return 0
             return acquired;
         }
 
-        public async Task<bool> TryRenewAsync(long usId, CancellationToken ct)
+        /// <summary>
+        /// 尝试续租，返回 (成功, 失败原因)。失败时 failureReason 说明具体原因。
+        /// </summary>
+        public async Task<(bool Success, string? FailureReason)> TryRenewWithReasonAsync(long usId, CancellationToken ct)
         {
             if (!IsEnabled)
             {
-                return true;
+                return (true, null);
             }
 
             var key = BuildKey(usId);
-            var result = await _db.ScriptEvaluateAsync(
-                    ScriptRenew,
-                    new RedisKey[] { key },
-                    new RedisValue[] { InstanceId, _options.LeaseSeconds })
-                .ConfigureAwait(false);
+            RedisResult result;
+            try
+            {
+                result = await _db.ScriptEvaluateAsync(
+                        ScriptRenew,
+                        new RedisKey[] { key },
+                        new RedisValue[] { InstanceId, _options.LeaseSeconds })
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Redis 续租请求异常: {ex.Message}");
+            }
 
-            return (int)result == 1;
+            if ((int)result == 1)
+            {
+                return (true, null);
+            }
+
+            var reason = await GetRenewFailureReasonAsync(key, ct).ConfigureAwait(false);
+            return (false, reason);
+        }
+
+        /// <summary>
+        /// 诊断续租失败原因：检查 Redis 中当前租约状态。
+        /// </summary>
+        private async Task<string> GetRenewFailureReasonAsync(RedisKey key, CancellationToken ct)
+        {
+            try
+            {
+                var current = await _db.StringGetAsync(key).ConfigureAwait(false);
+                if (current.IsNullOrEmpty)
+                {
+                    return "租约已过期或不存在（可能续租间隔过长、Redis 重启或 key 被删除）";
+                }
+                var holder = current.ToString();
+                return string.IsNullOrEmpty(holder)
+                    ? "租约已过期或不存在"
+                    : $"租约已被其他节点持有: {holder}";
+            }
+            catch (Exception ex)
+            {
+                return $"无法诊断 Redis 状态: {ex.Message}";
+            }
+        }
+
+        public async Task<bool> TryRenewAsync(long usId, CancellationToken ct)
+        {
+            var (success, _) = await TryRenewWithReasonAsync(usId, ct).ConfigureAwait(false);
+            return success;
         }
 
         public async Task<bool> ReleaseAsync(long usId, CancellationToken ct)

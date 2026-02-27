@@ -8,6 +8,25 @@ namespace ServerTest.Modules.Backtest.Domain
     /// </summary>
     public sealed class BacktestRunRequest
     {
+        /// <summary>
+        /// 多策略组合字段：
+        /// - 空：沿用现有单策略请求字段。
+        /// - 1 条：按单策略路径执行（向后兼容）。
+        /// - 大于 1 条：按组合回测路径执行，共享同一资金池。
+        /// </summary>
+        public List<BacktestStrategyRequestItem>? Strategies { get; set; }
+
+        /// <summary>
+        /// 预留的策略作用域键（多策略共享资金池时用于区分策略腿）。
+        /// 单策略默认使用 `single:primary`。
+        /// </summary>
+        public string? StrategyScopeKey { get; set; }
+
+        /// <summary>
+        /// 多策略组合时的策略序号（从 1 开始，主要用于内部链路透传）。
+        /// </summary>
+        public int? StrategyIndex { get; set; }
+
                 /// <summary>
         /// 策略实例ID（可选）
         /// </summary>
@@ -117,6 +136,32 @@ namespace ServerTest.Modules.Backtest.Domain
     }
 
     /// <summary>
+    /// 多策略组合回测的策略项定义。
+    /// </summary>
+    public sealed class BacktestStrategyRequestItem
+    {
+        /// <summary>策略实例ID（可选）</summary>
+        public long? UsId { get; set; }
+
+        /// <summary>策略配置JSON（优先于 UsId）</summary>
+        public string? ConfigJson { get; set; }
+
+        /// <summary>交易所（可选，未传则沿用外层）</summary>
+        public string? Exchange { get; set; }
+
+        /// <summary>标的列表（可选，未传则沿用外层）</summary>
+        public List<string>? Symbols { get; set; }
+
+        /// <summary>周期（可选，未传则沿用外层）</summary>
+        public string? Timeframe { get; set; }
+
+        /// <summary>
+        /// 预留策略作用域键（用于多策略资金合并时区分不同策略腿）。
+        /// </summary>
+        public string? StrategyScopeKey { get; set; }
+    }
+
+    /// <summary>
     /// 回测执行模式常量
     /// </summary>
     public static class BacktestExecutionModes
@@ -151,6 +196,14 @@ namespace ServerTest.Modules.Backtest.Domain
         /// 回测耗时（毫秒）
         /// </summary>
         public long DurationMs { get; set; }
+        /// <summary>
+        /// 组合总资金曲线（原始 JSON 串，前端按需解析）。
+        /// </summary>
+        public List<string> TotalEquityCurveRaw { get; set; } = new();
+        /// <summary>
+        /// 组合总资金曲线汇总指标。
+        /// </summary>
+        public BacktestEquitySummary TotalEquitySummary { get; set; } = new();
         public BacktestStats TotalStats { get; set; } = new();
         public List<BacktestSymbolResult> Symbols { get; set; } = new();
     }
@@ -161,6 +214,14 @@ namespace ServerTest.Modules.Backtest.Domain
     public sealed class BacktestSymbolResult
     {
         public string Symbol { get; set; } = string.Empty;
+        /// <summary>
+        /// 多策略组合时的策略作用域键。
+        /// </summary>
+        public string? StrategyScopeKey { get; set; }
+        /// <summary>
+        /// 多策略组合时的策略序号（从 1 开始）。
+        /// </summary>
+        public int? StrategyIndex { get; set; }
         public int Bars { get; set; }
         public decimal InitialCapital { get; set; }
         public BacktestStats Stats { get; set; } = new();
@@ -196,6 +257,14 @@ namespace ServerTest.Modules.Backtest.Domain
     public sealed class BacktestTrade
     {
         public string Symbol { get; set; } = string.Empty;
+        /// <summary>
+        /// 多策略组合时的策略作用域键。
+        /// </summary>
+        public string? StrategyScopeKey { get; set; }
+        /// <summary>
+        /// 多策略组合时的策略序号（从 1 开始）。
+        /// </summary>
+        public int? StrategyIndex { get; set; }
         public string Side { get; set; } = string.Empty; // Long/Short
         public long EntryTime { get; set; }
         public long ExitTime { get; set; }
@@ -378,6 +447,11 @@ namespace ServerTest.Modules.Backtest.Domain
         /// 预计总仓位/交易数量
         /// </summary>
         public int? TotalPositions { get; set; }
+
+        /// <summary>
+        /// 当前阶段被过滤/阻断的仓位数量（例如 MaxPositionQty 阻断）
+        /// </summary>
+        public int? BlockedPositions { get; set; }
 
         /// <summary>
         /// 本次增量仓位数量

@@ -56,11 +56,24 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return _series.TryGetValue(offset, out value);
         }
 
-        public bool Update(
-            MarketDataTask task,
-            IMarketDataProvider marketDataProvider,
-            TalibIndicatorCalculator calculator,
-            ILogger logger)
+        /// <summary>
+        /// 带新鲜度校验的读取：当缓存序列最后时间戳落后于目标任务时间戳时，不允许命中旧值。
+        /// </summary>
+        public bool TryGetValueFresh(int offset, long requiredTimestamp, out double value)
+        {
+            value = double.NaN;
+            if (requiredTimestamp > 0 && _series.GetLatestTimestamp() < requiredTimestamp)
+            {
+                return false;
+            }
+
+            return _series.TryGetValue(offset, out value);
+        }
+
+        /// <summary>
+        /// 判断当前句柄在本次行情任务下是否需要更新。
+        /// </summary>
+        internal bool IsUpdateRequired(MarketDataTask task)
         {
             if (!IsMatchingTask(task))
             {
@@ -72,18 +85,48 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
+            return true;
+        }
+
+        public bool Update(
+            MarketDataTask task,
+            IMarketDataProvider marketDataProvider,
+            TalibIndicatorCalculator calculator,
+            ILogger logger)
+        {
+            return Update(task, marketDataProvider, calculator, logger, out _);
+        }
+
+        public bool Update(
+            MarketDataTask task,
+            IMarketDataProvider marketDataProvider,
+            TalibIndicatorCalculator calculator,
+            ILogger logger,
+            out string computeCore)
+        {
+            computeCore = "未执行";
+            if (!IsUpdateRequired(task))
+            {
+                computeCore = "任务不匹配";
+                return false;
+            }
+
             lock (_sync)
             {
                 var targetTimestamp = task.CandleTimestamp;
-                var skipWhenSame = string.Equals(Key.CalcMode, "OnBarClose", StringComparison.OrdinalIgnoreCase);
+                // 收线任务同一时间戳的K线已封闭，不需要重复重算，避免预计算与同步刷新并发时双算。
+                var skipWhenSame = task.IsBarClose
+                    || string.Equals(Key.CalcMode, "OnBarClose", StringComparison.OrdinalIgnoreCase);
                 if (skipWhenSame && targetTimestamp > 0 && targetTimestamp <= _lastComputedTimestamp)
                 {
+                    computeCore = "缓存复用";
                     return true;
                 }
 
                 _function ??= calculator.ResolveFunction(Key.Indicator);
                 if (_function == null)
                 {
+                    computeCore = "指标函数不存在";
                     logger.LogWarning("指标未找到: {Indicator}", Key.Indicator);
                     return false;
                 }
@@ -105,16 +148,17 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     requiredBars);
 
                 // 输出周期 和最新的5根K线
-                logger.LogInformation($"指标计算 ：[{Key.Exchange}] {Key.Symbol} {Key.Timeframe} 最新的5根K线: \n" +
-                    $"{string.Join("\n", candles.TakeLast(5).Select(c => $"time={MarketDataEngine.FormatTimestamp(c.timestamp ?? 0)}, close={c.close}"))}\n");
+                //logger.LogInformation($"指标计算 ：[{Key.Exchange}] {Key.Symbol} {Key.Timeframe} 最新的5根K线: \n" +
+                //    $"{string.Join("\n", candles.TakeLast(5).Select(c => $"time={MarketDataEngine.FormatTimestamp(c.timestamp ?? 0)}, close={c.close}"))}\n");
                 if (candles.Count == 0)
                 {
+                    computeCore = "无K线";
                     return false;
                 }
 
-                if (!calculator.TryCompute(Key, _function, _parameters, candles, _series.Capacity, out var points))
+                if (!calculator.TryCompute(Key, _function, _parameters, candles, _series.Capacity, out var points, out computeCore, logger))
                 {
-                    logger.LogDebug("指标计算已跳过: {Key}", Key.ToString());
+                    logger.LogDebug("指标计算已跳过: {Key}, Core={Core}", Key.ToString(), computeCore);
                     return false;
                 }
 
@@ -128,7 +172,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
         }
 
-        private bool IsMatchingTask(MarketDataTask task)
+        internal bool IsMatchingTask(MarketDataTask task)
         {
             return Key.Exchange == task.Exchange &&
                    Key.Symbol == task.Symbol &&

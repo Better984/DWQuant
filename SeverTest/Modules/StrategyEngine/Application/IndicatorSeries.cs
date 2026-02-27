@@ -72,6 +72,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
         }
 
+        public long GetLatestTimestamp()
+        {
+            lock (_lock)
+            {
+                if (_points.Count == 0)
+                {
+                    return 0;
+                }
+
+                return _points[^1].Timestamp;
+            }
+        }
+
         private void TrimExcess()
         {
             var overflow = _points.Count - Capacity;

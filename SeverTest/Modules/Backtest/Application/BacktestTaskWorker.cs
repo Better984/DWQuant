@@ -37,6 +37,11 @@ namespace ServerTest.Modules.Backtest.Application
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("本地回测任务 Worker 启动");
+            _logger.LogInformation(
+                "回测并行基线信息：CPU核心数={CpuCount} 配置并发上限={MaxConcurrent} 单任务并行度={InnerParallelism}",
+                Environment.ProcessorCount,
+                _configStore.GetInt("Backtest:MaxConcurrentTasks", 3),
+                _configStore.GetInt("Backtest:InnerParallelism", 4));
 
             // 等待其他启动流程基本完成
             await Task.Delay(3000, stoppingToken).ConfigureAwait(false);

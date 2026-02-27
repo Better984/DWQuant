@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Modules.StrategyEngine.Application;
+using ServerTest.Modules.StrategyRuntime.Domain;
 using ServerTest.Modules.StrategyRuntime.Infrastructure;
 using ServerTest.Options;
 using System.Collections.Concurrent;
@@ -17,6 +18,9 @@ namespace ServerTest.Modules.StrategyRuntime.Application
         private static readonly string[] RunnableStates = { "running", "paused_open_position", "testing" };
         // 多节点下优先安全：租约协调首轮异常即触发安全降级，缩短重复执行窗口。
         private const int LeaseFailureSafeModeThreshold = 1;
+        // 续租并行度上限，避免大量策略时续租串行超时。
+        private const int RenewParallelismMax = 64;
+        private const int RenewParallelismMin = 8;
 
         private readonly StrategyOwnershipService _ownership;
         private readonly StrategyRuntimeRepository _runtimeRepository;
@@ -25,9 +29,9 @@ namespace ServerTest.Modules.StrategyRuntime.Application
         private readonly StrategyOwnershipOptions _options;
         private readonly ILogger<StrategyRuntimeLeaseHostedService> _logger;
         private readonly ConcurrentDictionary<long, DateTime> _lastUpdated = new();
-        private DateTime _lastSyncUtc = DateTime.MinValue;
+        private DateTime _lastSafeModeSyncSkipLogUtc = DateTime.MinValue;
         private int _consecutiveLeaseFailures;
-        private bool _safeModeActive;
+        private volatile bool _safeModeActive;
 
         public StrategyRuntimeLeaseHostedService(
             StrategyOwnershipService ownership,
@@ -57,55 +61,9 @@ namespace ServerTest.Modules.StrategyRuntime.Application
 
             var renewInterval = TimeSpan.FromSeconds(Math.Max(1, _options.RenewIntervalSeconds));
             var syncInterval = TimeSpan.FromSeconds(Math.Max(1, _options.SyncIntervalSeconds));
-
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                try
-                {
-                    await RenewOwnedAsync(stoppingToken).ConfigureAwait(false);
-
-                    if (DateTime.UtcNow - _lastSyncUtc >= syncInterval)
-                    {
-                        await SyncStrategiesAsync(stoppingToken).ConfigureAwait(false);
-                        _lastSyncUtc = DateTime.UtcNow;
-                    }
-
-                    if (_consecutiveLeaseFailures > 0)
-                    {
-                        _logger.LogInformation("策略租约协调恢复: 连续失败次数已清零，之前失败次数={FailureCount}", _consecutiveLeaseFailures);
-                        _consecutiveLeaseFailures = 0;
-                    }
-
-                    if (_safeModeActive)
-                    {
-                        _safeModeActive = false;
-                        _logger.LogInformation("策略租约安全降级已解除");
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _consecutiveLeaseFailures++;
-                    _logger.LogError(ex, "策略租约周期执行失败: 连续失败次数={FailureCount}", _consecutiveLeaseFailures);
-
-                    if (_consecutiveLeaseFailures >= LeaseFailureSafeModeThreshold)
-                    {
-                        await EnterSafeModeAsync(stoppingToken).ConfigureAwait(false);
-                    }
-                }
-
-                try
-                {
-                    await Task.Delay(renewInterval, stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
+            var renewLoop = RunRenewLoopAsync(renewInterval, stoppingToken);
+            var syncLoop = RunSyncLoopAsync(syncInterval, stoppingToken);
+            await Task.WhenAll(renewLoop, syncLoop).ConfigureAwait(false);
         }
 
         public override async Task StopAsync(CancellationToken cancellationToken)
@@ -117,12 +75,33 @@ namespace ServerTest.Modules.StrategyRuntime.Application
         private async Task RenewOwnedAsync(CancellationToken ct)
         {
             var ownedIds = _ownership.GetOwnedIdsSnapshot();
-            foreach (var usId in ownedIds)
+            if (ownedIds.Count == 0)
             {
-                if (!await _ownership.TryRenewAsync(usId, ct).ConfigureAwait(false))
+                return;
+            }
+
+            var lostLeaseQueue = new ConcurrentQueue<(long UsId, string? FailureReason)>();
+            var parallelOptions = new ParallelOptions
+            {
+                CancellationToken = ct,
+                MaxDegreeOfParallelism = ResolveRenewParallelism()
+            };
+
+            await Parallel.ForEachAsync(ownedIds, parallelOptions, async (usId, token) =>
+            {
+                var (success, failureReason) = await _ownership.TryRenewWithReasonAsync(usId, token).ConfigureAwait(false);
+                if (!success)
                 {
-                    await ReleaseAndRemoveAsync(usId, "租约已丢失", ct).ConfigureAwait(false);
+                    lostLeaseQueue.Enqueue((usId, failureReason));
                 }
+            }).ConfigureAwait(false);
+
+            while (lostLeaseQueue.TryDequeue(out var lost))
+            {
+                var reason = string.IsNullOrEmpty(lost.FailureReason)
+                    ? "租约已丢失"
+                    : $"租约已丢失: {lost.FailureReason}";
+                await ReleaseAndRemoveAsync(lost.UsId, reason, ct).ConfigureAwait(false);
             }
         }
 
@@ -133,7 +112,7 @@ namespace ServerTest.Modules.StrategyRuntime.Application
 
             if (ownedSet.Count > 0)
             {
-                var ownedRows = await _runtimeRepository.GetByIdsAsync(ownedSet, ct).ConfigureAwait(false);
+                var ownedRows = await _runtimeRepository.GetByIdsHeadersAsync(ownedSet, ct).ConfigureAwait(false);
                 var ownedMap = ownedRows.ToDictionary(row => row.UsId);
 
                 foreach (var usId in ownedSet)
@@ -154,7 +133,7 @@ namespace ServerTest.Modules.StrategyRuntime.Application
                 }
             }
 
-            var runnableRows = await _runtimeRepository.GetRunnableAsync(RunnableStates, ct).ConfigureAwait(false);
+            var runnableRows = await _runtimeRepository.GetRunnableHeadersAsync(RunnableStates, ct).ConfigureAwait(false);
             foreach (var row in runnableRows)
             {
                 if (ownedSet.Contains(row.UsId))
@@ -169,28 +148,65 @@ namespace ServerTest.Modules.StrategyRuntime.Application
 
                 ownedSet.Add(row.UsId);
 
-                var runtimeStrategy = await _loader.TryLoadAsync(row, ct).ConfigureAwait(false);
-                if (runtimeStrategy == null)
+                var fullRow = await _runtimeRepository.GetByIdAsync(row.UsId, ct).ConfigureAwait(false);
+                if (fullRow == null)
                 {
                     await _ownership.ReleaseAsync(row.UsId, ct).ConfigureAwait(false);
                     continue;
                 }
 
+                if (!IsRunnableState(fullRow.State))
+                {
+                    await _ownership.ReleaseAsync(fullRow.UsId, ct).ConfigureAwait(false);
+                    continue;
+                }
+
+                var runtimeStrategy = await _loader.TryLoadAsync(fullRow, ct).ConfigureAwait(false);
+                if (runtimeStrategy == null)
+                {
+                    await _ownership.ReleaseAsync(fullRow.UsId, ct).ConfigureAwait(false);
+                    continue;
+                }
+
                 _strategyEngine.UpsertStrategy(runtimeStrategy);
-                TrackUpdateTime(row);
-                _logger.LogInformation("已接管策略 {UsId}", row.UsId);
+                TrackUpdateTime(fullRow);
+                _logger.LogInformation("已接管策略 {UsId}", fullRow.UsId);
             }
         }
 
-        private async Task UpsertIfChangedAsync(Modules.StrategyRuntime.Domain.StrategyRuntimeRow row, CancellationToken ct)
+        private async Task UpsertIfChangedAsync(StrategyRuntimeRow row, CancellationToken ct)
         {
             var updatedAt = row.UpdatedAt?.ToUniversalTime() ?? DateTime.MinValue;
-            if (_lastUpdated.TryGetValue(row.UsId, out var last) && last >= updatedAt)
+            var uidCode = row.UsId.ToString();
+
+            if (!_lastUpdated.TryGetValue(row.UsId, out var last))
+            {
+                // 启动首轮同步先建立水位，避免引导完成后再次全量重载。
+                _lastUpdated[row.UsId] = updatedAt;
+                if (_strategyEngine.HasStrategy(uidCode))
+                {
+                    return;
+                }
+            }
+            else if (last >= updatedAt && _strategyEngine.HasStrategy(uidCode))
             {
                 return;
             }
 
-            var runtimeStrategy = await _loader.TryLoadAsync(row, ct).ConfigureAwait(false);
+            var fullRow = await _runtimeRepository.GetByIdAsync(row.UsId, ct).ConfigureAwait(false);
+            if (fullRow == null)
+            {
+                _logger.LogWarning("策略 {UsId} 刷新失败：策略不存在，保持当前租约", row.UsId);
+                return;
+            }
+
+            if (!IsRunnableState(fullRow.State))
+            {
+                await ReleaseAndRemoveAsync(fullRow.UsId, $"策略状态不可运行: {fullRow.State}", ct).ConfigureAwait(false);
+                return;
+            }
+
+            var runtimeStrategy = await _loader.TryLoadAsync(fullRow, ct).ConfigureAwait(false);
             if (runtimeStrategy == null)
             {
                 _logger.LogWarning("策略 {UsId} 刷新失败，保持当前租约", row.UsId);
@@ -198,8 +214,91 @@ namespace ServerTest.Modules.StrategyRuntime.Application
             }
 
             _strategyEngine.UpsertStrategy(runtimeStrategy);
-            TrackUpdateTime(row);
+            TrackUpdateTime(fullRow);
             _logger.LogInformation("策略 {UsId} 已刷新", row.UsId);
+        }
+
+        private async Task RunRenewLoopAsync(TimeSpan renewInterval, CancellationToken ct)
+        {
+            await RunRenewCycleAsync(ct).ConfigureAwait(false);
+
+            using var timer = new PeriodicTimer(renewInterval);
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                await RunRenewCycleAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        private async Task RunRenewCycleAsync(CancellationToken ct)
+        {
+            try
+            {
+                await RenewOwnedAsync(ct).ConfigureAwait(false);
+
+                if (_consecutiveLeaseFailures > 0)
+                {
+                    _logger.LogInformation("策略租约协调恢复: 连续失败次数已清零，之前失败次数={FailureCount}", _consecutiveLeaseFailures);
+                    _consecutiveLeaseFailures = 0;
+                }
+
+                if (_safeModeActive)
+                {
+                    _safeModeActive = false;
+                    _logger.LogInformation("策略租约安全降级已解除");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _consecutiveLeaseFailures++;
+                _logger.LogError(ex, "策略租约续租周期执行失败: 连续失败次数={FailureCount}", _consecutiveLeaseFailures);
+
+                if (_consecutiveLeaseFailures >= LeaseFailureSafeModeThreshold)
+                {
+                    await EnterSafeModeAsync(ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private async Task RunSyncLoopAsync(TimeSpan syncInterval, CancellationToken ct)
+        {
+            await RunSyncCycleAsync(ct).ConfigureAwait(false);
+
+            using var timer = new PeriodicTimer(syncInterval);
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                await RunSyncCycleAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        private async Task RunSyncCycleAsync(CancellationToken ct)
+        {
+            if (_safeModeActive)
+            {
+                var now = DateTime.UtcNow;
+                if (now - _lastSafeModeSyncSkipLogUtc >= TimeSpan.FromSeconds(30))
+                {
+                    _lastSafeModeSyncSkipLogUtc = now;
+                    _logger.LogWarning("策略租约处于安全降级状态，暂不执行接管同步");
+                }
+                return;
+            }
+
+            try
+            {
+                await SyncStrategiesAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "策略租约同步周期执行失败");
+            }
         }
 
         private async Task ReleaseAndRemoveAsync(long usId, string reason, CancellationToken ct)
@@ -259,10 +358,16 @@ namespace ServerTest.Modules.StrategyRuntime.Application
                 || normalized == "testing";
         }
 
-        private void TrackUpdateTime(Modules.StrategyRuntime.Domain.StrategyRuntimeRow row)
+        private void TrackUpdateTime(StrategyRuntimeRow row)
         {
             var updatedAt = row.UpdatedAt?.ToUniversalTime() ?? DateTime.MinValue;
             _lastUpdated[row.UsId] = updatedAt;
+        }
+
+        private static int ResolveRenewParallelism()
+        {
+            var degree = Environment.ProcessorCount * 2;
+            return Math.Clamp(degree, RenewParallelismMin, RenewParallelismMax);
         }
     }
 }
