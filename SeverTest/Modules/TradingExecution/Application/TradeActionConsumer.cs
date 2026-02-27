@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using ServerTest.Domain.Entities;
 using ServerTest.Modules.Positions.Infrastructure;
 using ServerTest.Modules.Positions.Application;
@@ -10,7 +9,6 @@ using ServerTest.Models;
 using ServerTest.Models.Strategy;
 using ServerTest.Modules.Notifications.Application;
 using ServerTest.Modules.Notifications.Domain;
-using ServerTest.Modules.Shared.Application.Diagnostics;
 using System.Text.Json;
 using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Modules.StrategyEngine.Application;
@@ -18,9 +16,6 @@ using ServerTest.Modules.StrategyEngine.Infrastructure;
 using ServerTest.Modules.StrategyRuntime.Infrastructure;
 using ServerTest.Modules.TradingExecution.Domain;
 using ServerTest.Modules.TradingExecution.Infrastructure;
-using ServerTest.Options;
-using ServerTest.Services;
-using System.Diagnostics;
 
 namespace ServerTest.Modules.TradingExecution.Application
 {
@@ -32,7 +27,6 @@ namespace ServerTest.Modules.TradingExecution.Application
         private readonly OrderOpenAttemptRepository _orderOpenAttemptRepository;
         private readonly StrategyRuntimeRepository _runtimeRepository;
         private readonly StrategySystemLogRepository _systemLogRepository;
-        private readonly StrategyEngineRunLogRepository? _runLogRepository;
         private readonly MarketDataEngine _marketDataEngine;
         private readonly IOrderExecutor _orderExecutor;
         private readonly PositionRiskConfigStore _riskConfigStore;
@@ -40,9 +34,6 @@ namespace ServerTest.Modules.TradingExecution.Application
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly INotificationPublisher _notificationPublisher;
         private readonly ILogger<TradeActionConsumer> _logger;
-        private readonly StrategyDiagnosticsOptions _diagnostics;
-        private readonly StrategyTaskTraceLogQueue? _taskTraceLogQueue;
-        private readonly string _instanceId;
         private readonly string _recoveryWorkerToken;
 
         private const int RecoveryMaxAttempts = 6;
@@ -87,10 +78,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             PositionRiskIndexManager riskIndexManager,
             IServiceScopeFactory serviceScopeFactory,
             INotificationPublisher notificationPublisher,
-            ILogger<TradeActionConsumer> logger,
-            StrategyTaskTraceLogQueue? taskTraceLogQueue = null,
-            IOptions<StrategyDiagnosticsOptions>? diagnosticsOptions = null,
-            StrategyEngineRunLogRepository? runLogRepository = null)
+            ILogger<TradeActionConsumer> logger)
         {
             _queue = queue ?? throw new ArgumentNullException(nameof(queue));
             _strategyEngine = strategyEngine ?? throw new ArgumentNullException(nameof(strategyEngine));
@@ -98,7 +86,6 @@ namespace ServerTest.Modules.TradingExecution.Application
             _orderOpenAttemptRepository = orderOpenAttemptRepository ?? throw new ArgumentNullException(nameof(orderOpenAttemptRepository));
             _runtimeRepository = runtimeRepository ?? throw new ArgumentNullException(nameof(runtimeRepository));
             _systemLogRepository = systemLogRepository ?? throw new ArgumentNullException(nameof(systemLogRepository));
-            _runLogRepository = runLogRepository;
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
@@ -106,9 +93,6 @@ namespace ServerTest.Modules.TradingExecution.Application
             _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
             _notificationPublisher = notificationPublisher ?? throw new ArgumentNullException(nameof(notificationPublisher));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _taskTraceLogQueue = taskTraceLogQueue;
-            _instanceId = ProcessInstanceIdProvider.InstanceId;
-            _diagnostics = diagnosticsOptions?.Value ?? new StrategyDiagnosticsOptions();
             _recoveryWorkerToken = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
         }
 
@@ -235,196 +219,36 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            var flow = "unknown";
-            Exception? error = null;
-            var consumeStopwatch = Stopwatch.StartNew();
-            try
-            {
-                if (!ShouldProcessTask(task))
-                {
-                    flow = "skip_runtime";
-                    return;
-                }
-
-                var action = task.Param != null && task.Param.Length > 0 ? task.Param[0] : string.Empty;
-                if (!TryMapAction(action, out var positionSide, out var orderSide, out var reduceOnly, out var isClose))
-                {
-                    flow = "skip_invalid_action";
-                    _logger.LogWarning("不支持的动作: {Action} uid={Uid} usId={UsId}", action, task.Uid, task.UsId);
-                    return;
-                }
-
-                var exchange = MarketDataKeyNormalizer.NormalizeExchange(task.Exchange);
-                var symbol = MarketDataKeyNormalizer.NormalizeSymbol(task.Symbol);
-
-                if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(symbol))
-                {
-                    flow = "skip_invalid_market";
-                    _logger.LogWarning("动作缺少交易所/交易对: uid={Uid} usId={UsId}", task.Uid, task.UsId);
-                    return;
-                }
-
-                var isTestingTask = IsTestingTask(task);
-
-                if (isClose)
-                {
-                    flow = "close";
-                    await HandleCloseAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
-                    return;
-                }
-
-                flow = "open";
-                await HandleOpenAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                error = ex;
-                throw;
-            }
-            finally
-            {
-                consumeStopwatch.Stop();
-                var consumeMs = (int)Math.Min(consumeStopwatch.ElapsedMilliseconds, int.MaxValue);
-                LogTradeConsumeProfile(task, flow, consumeMs);
-                TraceTradeConsume(task, flow, consumeMs, error);
-            }
-        }
-
-        private void LogTradeConsumeProfile(StrategyActionTask task, string flow, int consumeMs)
-        {
-            if (!_diagnostics.EnableTradeConsumeLog)
+            if (!ShouldProcessTask(task))
             {
                 return;
             }
 
-            var shouldLog = _diagnostics.LogEveryTradeAction ||
-                            consumeMs >= _diagnostics.SlowTradeActionThresholdMs;
-            if (!shouldLog)
+            var action = task.Param != null && task.Param.Length > 0 ? task.Param[0] : string.Empty;
+            if (!TryMapAction(action, out var positionSide, out var orderSide, out var reduceOnly, out var isClose))
             {
+                _logger.LogWarning("不支持的动作: {Action} uid={Uid} usId={UsId}", action, task.Uid, task.UsId);
                 return;
             }
 
-            var signalLagMs = ResolveSignalLagMs(task);
-            if (consumeMs >= _diagnostics.SlowTradeActionThresholdMs)
+            var exchange = MarketDataKeyNormalizer.NormalizeExchange(task.Exchange);
+            var symbol = MarketDataKeyNormalizer.NormalizeSymbol(task.Symbol);
+
+            if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(symbol))
             {
-                _logger.LogWarning(
-                    "[交易动作消费画像] flow={Flow} uid={Uid} usId={UsId} 方法={Method} 交易所={Exchange} 交易对={Symbol} 耗时={Duration}毫秒 阈值={Threshold}毫秒 信号时间差={SignalLag}毫秒",
-                    flow,
-                    task.Uid,
-                    task.UsId,
-                    task.Method,
-                    task.Exchange,
-                    task.Symbol,
-                    consumeMs,
-                    _diagnostics.SlowTradeActionThresholdMs,
-                    signalLagMs);
+                _logger.LogWarning("动作缺少交易所/交易对: uid={Uid} usId={UsId}", task.Uid, task.UsId);
                 return;
             }
 
-            _logger.LogInformation(
-                "[交易动作消费画像] flow={Flow} uid={Uid} usId={UsId} 方法={Method} 交易所={Exchange} 交易对={Symbol} 耗时={Duration}毫秒 信号时间差={SignalLag}毫秒",
-                flow,
-                task.Uid,
-                task.UsId,
-                task.Method,
-                task.Exchange,
-                task.Symbol,
-                consumeMs,
-                signalLagMs);
-        }
+            var isTestingTask = IsTestingTask(task);
 
-        private void TraceTradeConsume(StrategyActionTask task, string flow, int consumeMs, Exception? error)
-        {
-            if (_taskTraceLogQueue == null || !_diagnostics.EnableTaskTracePersist)
+            if (isClose)
             {
+                await HandleCloseAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
                 return;
             }
 
-            var status = ResolveTradeTraceStatus(flow, error);
-            var shouldPersist = _diagnostics.TaskTraceLogEveryEvent
-                || !string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
-                || consumeMs >= _diagnostics.SlowTaskTraceThresholdMs;
-            if (!shouldPersist)
-            {
-                return;
-            }
-
-            var rootTraceId = MarketDataTask.NormalizeTraceId(
-                string.IsNullOrWhiteSpace(task.RootTraceId) ? task.TraceId : task.RootTraceId);
-            var payload = new
-            {
-                signalLagMs = ResolveSignalLagMs(task),
-                isTesting = IsTestingTask(task),
-                slowThresholdMs = _diagnostics.SlowTaskTraceThresholdMs
-            };
-
-            _taskTraceLogQueue.TryEnqueue(new StrategyTaskTraceLog
-            {
-                TraceId = rootTraceId,
-                ParentTraceId = string.IsNullOrWhiteSpace(task.TraceId) ? null : task.TraceId,
-                EventStage = "trade.consume",
-                EventStatus = status,
-                ActorModule = nameof(TradeActionConsumer),
-                ActorInstance = _instanceId,
-                Uid = task.Uid,
-                UsId = task.UsId,
-                StrategyUid = task.StrategyUid,
-                Exchange = task.Exchange,
-                Symbol = task.Symbol,
-                Timeframe = task.TimeframeSec > 0 ? $"{task.TimeframeSec}s" : null,
-                CandleTimestamp = task.MarketTask.CandleTimestamp,
-                IsBarClose = task.MarketTask.IsBarClose,
-                Method = task.Method,
-                Flow = flow,
-                DurationMs = consumeMs,
-                MetricsJson = SerializeTracePayload(payload),
-                ErrorMessage = error?.Message
-            });
-        }
-
-        private static string ResolveTradeTraceStatus(string flow, Exception? error)
-        {
-            if (error != null)
-            {
-                return "fail";
-            }
-
-            if (!string.IsNullOrWhiteSpace(flow) && flow.StartsWith("skip_", StringComparison.OrdinalIgnoreCase))
-            {
-                return "skip";
-            }
-
-            return "success";
-        }
-
-        private static string? SerializeTracePayload(object payload)
-        {
-            try
-            {
-                return JsonSerializer.Serialize(payload);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static int ResolveSignalLagMs(StrategyActionTask task)
-        {
-            var candleTimestamp = task.MarketTask.CandleTimestamp;
-            if (candleTimestamp <= 0)
-            {
-                return -1;
-            }
-
-            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var lag = now - candleTimestamp;
-            if (lag <= 0)
-            {
-                return 0;
-            }
-
-            return (int)Math.Min(lag, int.MaxValue);
+            await HandleOpenAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
         }
 
         private bool ShouldProcessTask(StrategyActionTask task)
@@ -510,19 +334,19 @@ namespace ServerTest.Modules.TradingExecution.Application
             if (currentOpenQty + requestedOrderQty > effectiveMaxPositionQty)
             {
                 var blockedMessage = $"开仓被最大持仓限制阻断：当前同向持仓{currentOpenQty} + 本次开仓{requestedOrderQty} > 上限{effectiveMaxPositionQty}";
-                //_logger.LogInformation(
-                //    "开仓被上限阻断: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} signalTime={SignalTimeUtc:O} signalPrice={SignalPrice} openCount={OpenCount} currentOpenQty={CurrentOpenQty} requestQty={RequestQty} maxQty={MaxQty}",
-                //    task.Uid,
-                //    task.UsId,
-                //    exchange,
-                //    symbol,
-                //    positionSide,
-                //    signalTimeUtc,
-                //    entryPrice,
-                //    openExposure.OpenCount,
-                //    currentOpenQty,
-                //    requestedOrderQty,
-                //    effectiveMaxPositionQty);
+                _logger.LogInformation(
+                    "开仓被上限阻断: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} signalTime={SignalTimeUtc:O} signalPrice={SignalPrice} openCount={OpenCount} currentOpenQty={CurrentOpenQty} requestQty={RequestQty} maxQty={MaxQty}",
+                    task.Uid,
+                    task.UsId,
+                    exchange,
+                    symbol,
+                    positionSide,
+                    signalTimeUtc,
+                    entryPrice,
+                    openExposure.OpenCount,
+                    currentOpenQty,
+                    requestedOrderQty,
+                    effectiveMaxPositionQty);
 
                 if (!isTestingTask)
                 {
@@ -703,69 +527,8 @@ namespace ServerTest.Modules.TradingExecution.Application
             _riskIndexManager.UpsertPosition(entity, riskConfig);
 
             // 12. 记录开仓成功日志
-            //_logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} versionId={VersionId} {Exchange} {Symbol} {Side} mode={Mode}",
-            //    positionId, task.Uid, task.UsId, task.StrategyVersionId, exchange, symbol, positionSide, isTestingTask ? "testing" : "live");
-
-            // 12.1 记录开仓链路 trace（含订单ID，便于通过订单反查策略与任务）
-            if (_taskTraceLogQueue != null)
-            {
-                var rootTraceId = MarketDataTask.NormalizeTraceId(
-                    string.IsNullOrWhiteSpace(task.RootTraceId) ? task.TraceId : task.RootTraceId);
-                var orderPayload = new
-                {
-                    orderId = openOrderResult?.ExchangeOrderId,
-                    positionId,
-                    positionSide,
-                    orderSide,
-                    qty = task.OrderQty,
-                    averagePrice = openOrderResult?.AveragePrice,
-                    isTesting = isTestingTask
-                };
-
-                _taskTraceLogQueue.TryEnqueue(new StrategyTaskTraceLog
-                {
-                    TraceId = rootTraceId,
-                    ParentTraceId = string.IsNullOrWhiteSpace(task.TraceId) ? null : task.TraceId,
-                    EventStage = "trade.open.order",
-                    EventStatus = "success",
-                    ActorModule = nameof(TradeActionConsumer),
-                    ActorInstance = _instanceId,
-                    Uid = task.Uid,
-                    UsId = task.UsId,
-                    StrategyUid = task.StrategyUid,
-                    Exchange = exchange,
-                    Symbol = symbol,
-                    Timeframe = task.TimeframeSec > 0 ? $"{task.TimeframeSec}s" : null,
-                    CandleTimestamp = task.MarketTask.CandleTimestamp,
-                    IsBarClose = task.MarketTask.IsBarClose,
-                    Method = task.Method,
-                    Flow = "open",
-                    DurationMs = null,
-                    MetricsJson = SerializeTracePayload(orderPayload),
-                    ErrorMessage = null
-                });
-
-                // 同步追加到任务主记录，后续后台可直接通过主表检索订单ID。
-                if (_runLogRepository != null && !string.IsNullOrWhiteSpace(openOrderResult?.ExchangeOrderId))
-                {
-                    try
-                    {
-                        await _runLogRepository.AppendOpenOrderIdAsync(
-                                rootTraceId,
-                                openOrderResult.ExchangeOrderId,
-                                ct)
-                            .ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(
-                            ex,
-                            "任务主记录追加订单ID失败: traceId={TraceId} orderId={OrderId}",
-                            rootTraceId,
-                            openOrderResult.ExchangeOrderId);
-                    }
-                }
-            }
+            _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} versionId={VersionId} {Exchange} {Symbol} {Side} mode={Mode}",
+                positionId, task.Uid, task.UsId, task.StrategyVersionId, exchange, symbol, positionSide, isTestingTask ? "testing" : "live");
 
             var payload = JsonSerializer.Serialize(new
             {
@@ -813,13 +576,13 @@ namespace ServerTest.Modules.TradingExecution.Application
                 {
                     if (closedCount == 0)
                     {
-                        //_logger.LogInformation("没有可平仓位: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
-                        //    task.Uid, task.UsId, exchange, symbol, positionSide);
+                        _logger.LogInformation("没有可平仓位: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
+                            task.Uid, task.UsId, exchange, symbol, positionSide);
                     }
                     else
                     {
-                        //_logger.LogInformation("平仓动作完成: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} 共处理{ClosedCount}个仓位",
-                        //    task.Uid, task.UsId, exchange, symbol, positionSide, closedCount);
+                        _logger.LogInformation("平仓动作完成: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} 共处理{ClosedCount}个仓位",
+                            task.Uid, task.UsId, exchange, symbol, positionSide, closedCount);
                     }
                     return;
                 }
@@ -924,11 +687,11 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             CleanupClosedPositionLocalState(existing.PositionId);
 
-            //_logger.LogInformation("仓位已平: id={PositionId} uid={Uid} usId={UsId} mode={Mode}",
-            //    existing.PositionId,
-            //    existing.Uid,
-            //    existing.UsId,
-            //    useLocalSimulation ? "testing" : "live");
+            _logger.LogInformation("仓位已平: id={PositionId} uid={Uid} usId={UsId} mode={Mode}",
+                existing.PositionId,
+                existing.Uid,
+                existing.UsId,
+                useLocalSimulation ? "testing" : "live");
             return true;
         }
 

@@ -196,7 +196,7 @@ namespace ServerTest.Controllers
         }
 
         /// <summary>
-        /// 取消回测任务（仅 queued 状态可取消）
+        /// 取消回测任务
         /// </summary>
         [HttpPost("task/{taskId}/cancel")]
         public async Task<IActionResult> CancelTask(long taskId)

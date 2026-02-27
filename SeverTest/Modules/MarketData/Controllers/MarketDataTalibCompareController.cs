@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using ccxt;
 using Microsoft.AspNetCore.Mvc;
@@ -35,15 +35,15 @@ namespace ServerTest.Controllers
         private static readonly Lazy<TalibRandomCatalog> CatalogLoader = new(LoadTalibCatalog);
 
         private readonly HistoricalMarketDataCache _historicalCache;
-        private readonly TalibWasmNodePool _wasmPool;
+        private readonly TalibWasmNodeInvoker _wasmInvoker;
 
         public MarketDataTalibCompareController(
             ILogger<MarketDataTalibCompareController> logger,
             HistoricalMarketDataCache historicalCache,
-            TalibWasmNodePool wasmPool) : base(logger)
+            TalibWasmNodeInvoker wasmInvoker) : base(logger)
         {
             _historicalCache = historicalCache ?? throw new ArgumentNullException(nameof(historicalCache));
-            _wasmPool = wasmPool ?? throw new ArgumentNullException(nameof(wasmPool));
+            _wasmInvoker = wasmInvoker ?? throw new ArgumentNullException(nameof(wasmInvoker));
         }
 
         public sealed class TaRandomCompareRequest
@@ -120,7 +120,7 @@ namespace ServerTest.Controllers
                 var bars = Math.Clamp(payload.Bars <= 0 ? 2000 : payload.Bars, 50, 2000);
                 var random = payload.Seed.HasValue ? new Random(payload.Seed.Value) : Random.Shared;
 
-                if (!_wasmPool.IsEnabled)
+                if (!_wasmInvoker.IsEnabled)
                 {
                     return BadRequest(ApiResponse<object>.Error("当前后端未启用 TalibWasmNode 同核心模式，无法执行一致性随机测试"));
                 }
@@ -169,7 +169,7 @@ namespace ServerTest.Controllers
                     var inputs = BuildInputs(selection.Window, indicator.Inputs);
                     var options = indicator.Options.Select(option => option.Value).ToArray();
 
-                    if (_wasmPool.TryCompute(
+                    if (_wasmInvoker.TryCompute(
                         indicator.TalibCode,
                         inputs,
                         options,

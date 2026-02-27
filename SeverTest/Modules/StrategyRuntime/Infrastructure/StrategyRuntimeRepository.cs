@@ -62,32 +62,6 @@ WHERE us.state IN @states
             return rows.ToList();
         }
 
-        /// <summary>
-        /// 查询可运行策略的轻量信息（仅用于租约同步与接管判断）。
-        /// </summary>
-        public async Task<IReadOnlyList<StrategyRuntimeRow>> GetRunnableHeadersAsync(
-            IReadOnlyCollection<string> states,
-            CancellationToken ct = default)
-        {
-            if (states == null || states.Count == 0)
-            {
-                return Array.Empty<StrategyRuntimeRow>();
-            }
-
-            const string sql = @"
-SELECT
-  us.us_id AS UsId,
-  us.uid AS Uid,
-  us.state AS State,
-  us.updated_at AS UpdatedAt
-FROM user_strategy us
-WHERE us.state IN @states
-";
-
-            var rows = await _db.QueryAsync<StrategyRuntimeRow>(sql, new { states }, null, ct).ConfigureAwait(false);
-            return rows.ToList();
-        }
-
         public async Task<IReadOnlyList<StrategyRuntimeRow>> GetByIdsAsync(
             IReadOnlyCollection<long> usIds,
             CancellationToken ct = default)
@@ -130,41 +104,6 @@ WHERE us.us_id IN @usIds
 
             var rows = await _db.QueryAsync<StrategyRuntimeRow>(sql, new { usIds }, null, ct).ConfigureAwait(false);
             return rows.ToList();
-        }
-
-        /// <summary>
-        /// 按策略 ID 查询轻量信息（仅包含状态与更新时间）。
-        /// </summary>
-        public async Task<IReadOnlyList<StrategyRuntimeRow>> GetByIdsHeadersAsync(
-            IReadOnlyCollection<long> usIds,
-            CancellationToken ct = default)
-        {
-            if (usIds == null || usIds.Count == 0)
-            {
-                return Array.Empty<StrategyRuntimeRow>();
-            }
-
-            const string sql = @"
-SELECT
-  us.us_id AS UsId,
-  us.uid AS Uid,
-  us.state AS State,
-  us.updated_at AS UpdatedAt
-FROM user_strategy us
-WHERE us.us_id IN @usIds
-";
-
-            var rows = await _db.QueryAsync<StrategyRuntimeRow>(sql, new { usIds }, null, ct).ConfigureAwait(false);
-            return rows.ToList();
-        }
-
-        /// <summary>
-        /// 查询单个策略的完整运行时数据。
-        /// </summary>
-        public async Task<StrategyRuntimeRow?> GetByIdAsync(long usId, CancellationToken ct = default)
-        {
-            var rows = await GetByIdsAsync(new[] { usId }, ct).ConfigureAwait(false);
-            return rows.FirstOrDefault();
         }
 
         public Task<int> UpdateExchangeApiKeyAsync(

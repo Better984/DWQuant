@@ -38,10 +38,6 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.super-admin-test-dialog__grid--triple {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .super-admin-test-dialog__field {
   display: flex;
   flex-direction: column;
@@ -126,31 +122,8 @@
   background: #fff5f5;
 }
 
-.super-admin-test-dialog__hint {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.super-admin-test-dialog__switch {
-  justify-content: flex-end;
-}
-
-.super-admin-test-dialog__switch input {
-  width: 16px;
-  height: 16px;
-}
-
-.super-admin-test-dialog__mono {
-  word-break: break-all;
-  font-family: "Consolas", "Courier New", monospace;
-}
-
 @media (max-width: 768px) {
   .super-admin-test-dialog__grid {
-    grid-template-columns: 1fr;
-  }
-
-  .super-admin-test-dialog__grid--triple {
     grid-template-columns: 1fr;
   }
 

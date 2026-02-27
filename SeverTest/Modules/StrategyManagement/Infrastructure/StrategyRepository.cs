@@ -57,7 +57,6 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
         private readonly RealTimeStrategyEngine _strategyEngine;
         private readonly StrategyActionTaskQueue _strategyActionTaskQueue;
         private readonly StrategyOwnershipService _ownership;
-        private readonly LiveTradingWorkerDispatchService _liveDispatchService;
         private readonly UserExchangeApiKeyRepository _apiKeyRepository;
         private readonly StrategyRunCheckService _runCheckService;
         private readonly StrategyRunCheckLogRepository _runCheckLogRepository;
@@ -99,18 +98,6 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             public bool IsBacktestCurve { get; set; }
         }
 
-        /// <summary>
-        /// 按市场聚合的运行策略项（用于实盘情况主列表）。
-        /// </summary>
-        public sealed class RunningStrategyByMarketItem
-        {
-            public string Exchange { get; set; } = string.Empty;
-            public string Symbol { get; set; } = string.Empty;
-            public string Timeframe { get; set; } = string.Empty;
-            public int StrategyCount { get; set; }
-            public DateTime? LastRunAt { get; set; }
-        }
-
         private sealed class StrategyMarketItem
         {
             public long MarketId { get; set; }
@@ -149,7 +136,6 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             RealTimeStrategyEngine strategyEngine,
             StrategyActionTaskQueue strategyActionTaskQueue,
             StrategyOwnershipService ownership,
-            LiveTradingWorkerDispatchService liveDispatchService,
             UserExchangeApiKeyRepository apiKeyRepository,
             StrategyRunCheckService runCheckService,
             StrategyRunCheckLogRepository runCheckLogRepository,
@@ -164,7 +150,6 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             _strategyEngine = strategyEngine;
             _strategyActionTaskQueue = strategyActionTaskQueue ?? throw new ArgumentNullException(nameof(strategyActionTaskQueue));
             _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
-            _liveDispatchService = liveDispatchService ?? throw new ArgumentNullException(nameof(liveDispatchService));
             _apiKeyRepository = apiKeyRepository ?? throw new ArgumentNullException(nameof(apiKeyRepository));
             _runCheckService = runCheckService ?? throw new ArgumentNullException(nameof(runCheckService));
             _runCheckLogRepository = runCheckLogRepository ?? throw new ArgumentNullException(nameof(runCheckLogRepository));
@@ -393,245 +378,6 @@ ORDER BY us.updated_at DESC
                 Logger.LogError(ex, "获取策略列表失败: uid={Uid}", uid);
                 return StatusCode(500, ApiResponse<object>.Error("获取策略列表失败，请稍后重试"));
             }
-        }
-
-        /// <summary>
-        /// 管理员：获取运行中策略（running/paused_open_position/testing）分页列表，用于服务器实盘情况展示。
-        /// </summary>
-        /// <param name="page">页码，从 1 开始</param>
-        /// <param name="pageSize">每页条数，最大 100</param>
-        /// <returns>(total, items)</returns>
-        public async Task<(int Total, List<object> Items)> GetRunningStrategiesForAdminAsync(int page = 1, int pageSize = 100)
-        {
-            page = Math.Max(1, page);
-            pageSize = Math.Min(Math.Max(1, pageSize), 100);
-            var offset = (page - 1) * pageSize;
-
-            using var connection = await _db.GetConnectionAsync();
-
-            var countCmd = new MySqlCommand(@"
-SELECT COUNT(*) FROM user_strategy us
-WHERE us.state IN ('running', 'paused_open_position', 'testing')
-", connection);
-            var total = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
-
-            var cmd = new MySqlCommand(@"
-SELECT
-  us.uid,
-  us.us_id,
-  us.def_id,
-  us.alias_name,
-  us.description,
-  us.state,
-  us.exchange_api_key_id,
-  us.updated_at,
-  sd.name AS def_name,
-  sv.version_no
-FROM user_strategy us
-JOIN strategy_def sd ON sd.def_id = us.def_id
-JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
-WHERE us.state IN ('running', 'paused_open_position', 'testing')
-ORDER BY us.updated_at DESC
-LIMIT @limit OFFSET @offset
-", connection);
-            cmd.Parameters.AddWithValue("@limit", pageSize);
-            cmd.Parameters.AddWithValue("@offset", offset);
-
-            using var reader = await cmd.ExecuteReaderAsync();
-            var exchangeApiKeyIdOrdinal = reader.GetOrdinal("exchange_api_key_id");
-            var results = new List<object>();
-            while (await reader.ReadAsync())
-            {
-                results.Add(new
-                {
-                    uid = reader.GetInt64("uid"),
-                    usId = reader.GetInt64("us_id"),
-                    defId = reader.GetInt64("def_id"),
-                    defName = reader.GetString("def_name"),
-                    aliasName = reader.GetString("alias_name"),
-                    description = reader.GetString("description"),
-                    state = reader.GetString("state"),
-                    versionNo = reader.GetInt32("version_no"),
-                    updatedAt = reader.GetDateTime("updated_at"),
-                    exchangeApiKeyId = reader.IsDBNull(exchangeApiKeyIdOrdinal) ? (long?)null : reader.GetInt64(exchangeApiKeyIdOrdinal)
-                });
-            }
-
-            return (total, results);
-        }
-
-        /// <summary>
-        /// 按市场聚合运行中策略：从 config_json 解析 Trade.Exchange/Symbol/TimeframeSec，归一化后按 (exchange, symbol, timeframe) 分组统计。
-        /// 返回每个市场的策略数，timeframe 以字符串形式（如 1m、5m）输出。
-        /// </summary>
-        public async Task<List<RunningStrategyByMarketItem>> GetRunningStrategiesByMarketAsync(CancellationToken ct = default)
-        {
-            using var connection = await _db.GetConnectionAsync();
-            var cmd = new MySqlCommand(@"
-SELECT sv.config_json
-FROM user_strategy us
-JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
-WHERE us.state IN ('running', 'paused_open_position', 'testing')
-", connection);
-
-            var groups = new Dictionary<string, RunningStrategyByMarketItem>(StringComparer.OrdinalIgnoreCase);
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            var configOrdinal = reader.GetOrdinal("config_json");
-
-            while (await reader.ReadAsync(ct))
-            {
-                if (reader.IsDBNull(configOrdinal))
-                    continue;
-
-                var json = reader.GetString(configOrdinal);
-                if (string.IsNullOrWhiteSpace(json))
-                    continue;
-
-                try
-                {
-                    var node = JsonNode.Parse(json);
-                    var trade = node?["trade"];
-                    if (trade == null)
-                        continue;
-
-                    var exchange = MarketDataKeyNormalizer.NormalizeExchange(trade["exchange"]?.GetValue<string>() ?? string.Empty);
-                    var symbol = MarketDataKeyNormalizer.NormalizeSymbol(trade["symbol"]?.GetValue<string>() ?? string.Empty);
-                    var timeframeSec = trade["timeframeSec"]?.GetValue<int>() ?? 0;
-                    var timeframe = MarketDataKeyNormalizer.TimeframeFromSeconds(timeframeSec);
-
-                    if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(symbol) || string.IsNullOrWhiteSpace(timeframe))
-                        continue;
-
-                    var key = $"{exchange}|{symbol}|{timeframe}";
-                    if (!groups.TryGetValue(key, out var item))
-                    {
-                        item = new RunningStrategyByMarketItem
-                        {
-                            Exchange = exchange,
-                            Symbol = symbol,
-                            Timeframe = timeframe,
-                            StrategyCount = 0
-                        };
-                        groups[key] = item;
-                    }
-                    item.StrategyCount++;
-                }
-                catch
-                {
-                    // 忽略解析失败的配置
-                }
-            }
-
-            return groups.Values.OrderByDescending(x => x.StrategyCount).ThenBy(x => x.Exchange).ThenBy(x => x.Symbol).ThenBy(x => x.Timeframe).ToList();
-        }
-
-        /// <summary>
-        /// 按市场筛选运行中策略，支持分页和搜索（aliasName/defName/usId）。
-        /// </summary>
-        public async Task<(int Total, List<object> Items)> GetRunningStrategiesForMarketAsync(
-            string exchange,
-            string symbol,
-            string timeframe,
-            int page = 1,
-            int pageSize = 100,
-            string? search = null,
-            CancellationToken ct = default)
-        {
-            page = Math.Max(1, page);
-            pageSize = Math.Min(Math.Max(1, pageSize), 100);
-            var offset = (page - 1) * pageSize;
-
-            var timeframeSec = (int)(MarketDataConfig.TimeframeToMs(timeframe) / 1000);
-            var normalizedExchange = MarketDataKeyNormalizer.NormalizeExchange(exchange);
-            var normalizedSymbol = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
-
-            using var connection = await _db.GetConnectionAsync();
-
-            var whereClause = @"
-WHERE us.state IN ('running', 'paused_open_position', 'testing')
-  AND LOWER(TRIM(JSON_UNQUOTE(COALESCE(JSON_EXTRACT(sv.config_json, '$.trade.exchange'), '""""')))) = LOWER(@exchange)
-  AND UPPER(REPLACE(TRIM(JSON_UNQUOTE(COALESCE(JSON_EXTRACT(sv.config_json, '$.trade.symbol'), '""""'))), '_', '/')) = UPPER(@symbol)
-  AND COALESCE(JSON_EXTRACT(sv.config_json, '$.trade.timeframeSec'), 0) = @timeframeSec";
-            var searchClause = "";
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                searchClause = @"
-  AND (us.alias_name LIKE @searchPattern OR sd.name LIKE @searchPattern OR (@searchUsId >= 0 AND us.us_id = @searchUsId))";
-            }
-
-            var countSql = $@"
-SELECT COUNT(*)
-FROM user_strategy us
-JOIN strategy_def sd ON sd.def_id = us.def_id
-JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
-{whereClause}{searchClause}";
-
-            var countCmd = new MySqlCommand(countSql, connection);
-            countCmd.Parameters.AddWithValue("@exchange", normalizedExchange);
-            countCmd.Parameters.AddWithValue("@symbol", normalizedSymbol);
-            countCmd.Parameters.AddWithValue("@timeframeSec", timeframeSec);
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                var pattern = $"%{search.Trim()}%";
-                countCmd.Parameters.AddWithValue("@searchPattern", pattern);
-                countCmd.Parameters.AddWithValue("@searchUsId", long.TryParse(search.Trim(), out var usId) ? usId : -1);
-            }
-
-            var total = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct));
-
-            var listSql = $@"
-SELECT
-  us.uid,
-  us.us_id,
-  us.def_id,
-  us.alias_name,
-  us.description,
-  us.state,
-  us.exchange_api_key_id,
-  us.updated_at,
-  sd.name AS def_name,
-  sv.version_no
-FROM user_strategy us
-JOIN strategy_def sd ON sd.def_id = us.def_id
-JOIN strategy_version sv ON sv.version_id = us.pinned_version_id
-{whereClause}{searchClause}
-ORDER BY us.updated_at DESC
-LIMIT @limit OFFSET @offset";
-
-            var listCmd = new MySqlCommand(listSql, connection);
-            listCmd.Parameters.AddWithValue("@exchange", normalizedExchange);
-            listCmd.Parameters.AddWithValue("@symbol", normalizedSymbol);
-            listCmd.Parameters.AddWithValue("@timeframeSec", timeframeSec);
-            listCmd.Parameters.AddWithValue("@limit", pageSize);
-            listCmd.Parameters.AddWithValue("@offset", offset);
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                var pattern = $"%{search.Trim()}%";
-                listCmd.Parameters.AddWithValue("@searchPattern", pattern);
-                listCmd.Parameters.AddWithValue("@searchUsId", long.TryParse(search.Trim(), out var usId) ? usId : -1);
-            }
-
-            var results = new List<object>();
-            using var reader = await listCmd.ExecuteReaderAsync(ct);
-            var exchangeApiKeyIdOrdinal = reader.GetOrdinal("exchange_api_key_id");
-            while (await reader.ReadAsync(ct))
-            {
-                results.Add(new
-                {
-                    uid = reader.GetInt64("uid"),
-                    usId = reader.GetInt64("us_id"),
-                    defId = reader.GetInt64("def_id"),
-                    defName = reader.GetString("def_name"),
-                    aliasName = reader.GetString("alias_name"),
-                    description = reader.GetString("description"),
-                    state = reader.GetString("state"),
-                    versionNo = reader.GetInt32("version_no"),
-                    updatedAt = reader.GetDateTime("updated_at"),
-                    exchangeApiKeyId = reader.IsDBNull(exchangeApiKeyIdOrdinal) ? (long?)null : reader.GetInt64(exchangeApiKeyIdOrdinal)
-                });
-            }
-
-            return (total, results);
         }
 
         public async Task<IActionResult> ListOfficial(long uid)
@@ -1764,44 +1510,6 @@ ORDER BY version_no ASC
             }
         }
 
-        /// <summary>
-        /// 获取指定用户下超级测试台创建的测试策略 us_id 列表。
-        /// 匹配 strategy_def.description 为超级管理员测试台/批量创建/回测压测生成的策略。
-        /// </summary>
-        public async Task<List<long>> GetTestStrategyUsIdsForUserAsync(long uid, CancellationToken ct = default)
-        {
-            var testDescriptions = new[]
-            {
-                "超级管理员测试台随机策略",
-                "超级管理员批量创建测试策略",
-                "超级管理员回测压测自动生成策略"
-            };
-
-            await using var connection = await _db.GetConnectionAsync();
-            var placeholders = string.Join(", ", testDescriptions.Select((_, i) => $"@d{i}"));
-            var cmd = new MySqlCommand($@"
-SELECT us.us_id
-FROM user_strategy us
-JOIN strategy_def sd ON sd.def_id = us.def_id
-WHERE us.uid = @uid AND sd.description IN ({placeholders})
-ORDER BY us.us_id
-", connection);
-            cmd.Parameters.AddWithValue("@uid", uid);
-            for (var i = 0; i < testDescriptions.Length; i++)
-            {
-                cmd.Parameters.AddWithValue($"@d{i}", testDescriptions[i]);
-            }
-
-            var results = new List<long>();
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                results.Add(reader.GetInt64(0));
-            }
-
-            return results;
-        }
-
         public async Task<IActionResult> Delete(long uid, StrategyDeleteRequest request)
         {
             var strategyBlocked = false;
@@ -1873,7 +1581,6 @@ WHERE us_id = @us_id AND uid = @uid
                 }
 
                 Logger.LogInformation("策略删除成功并完成立即停机: uid={Uid} usId={UsId}", uid, request.UsId);
-                await TryDispatchLiveRemoveAsync(request.UsId, "user_delete", CancellationToken.None).ConfigureAwait(false);
 
                 return Ok(ApiResponse<object>.Ok(new { request.UsId }, "删除成功"));
             }
@@ -2281,14 +1988,6 @@ WHERE us_id = @us_id AND uid = @uid
                 }
 
                 Logger.LogInformation("{Tag} uid={Uid} usId={UsId} state={State}", StrategyStateLogTag, uid, id, nextState);
-                if (runtimeStrategy != null)
-                {
-                    await TryDispatchLiveUpsertAsync(id, $"state={nextState}", ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    await TryDispatchLiveRemoveAsync(id, $"state={nextState}", ct).ConfigureAwait(false);
-                }
 
                 var response = new { UsId = id, State = nextState, ExchangeApiKeyId = effectiveExchangeApiKeyId };
                 return Ok(ApiResponse<object>.Ok(response, "状态更新成功"));
@@ -2529,38 +2228,6 @@ LIMIT 1
             tradeNode["exchange"] = exchange;
             rootNode["trade"] = tradeNode;
             return rootNode.ToJsonString();
-        }
-
-        private async Task TryDispatchLiveUpsertAsync(long usId, string reason, CancellationToken ct)
-        {
-            try
-            {
-                await _liveDispatchService.DispatchUpsertAsync(usId, reason, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(
-                    ex,
-                    "向实盘节点分发 upsert 指令失败: usId={UsId} reason={Reason}",
-                    usId,
-                    reason);
-            }
-        }
-
-        private async Task TryDispatchLiveRemoveAsync(long usId, string reason, CancellationToken ct)
-        {
-            try
-            {
-                await _liveDispatchService.DispatchRemoveAsync(usId, reason, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(
-                    ex,
-                    "向实盘节点分发 remove 指令失败: usId={UsId} reason={Reason}",
-                    usId,
-                    reason);
-            }
         }
 
         private async Task TryWriteRunCheckLogAsync(

@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using ServerTest.Models;
 using ServerTest.Models.Indicator;
 using ServerTest.Models.Strategy;
@@ -10,10 +9,7 @@ using System.Text;
 using System.Text.Json;
 using StrategyModel = ServerTest.Models.Strategy.Strategy;
 using ServerTest.Modules.MarketStreaming.Application;
-using ServerTest.Modules.Shared.Application.Diagnostics;
 using ServerTest.Modules.StrategyEngine.Infrastructure;
-using ServerTest.Options;
-using ServerTest.Services;
 
 namespace ServerTest.Modules.StrategyEngine.Application
 {
@@ -30,11 +26,9 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private readonly ConditionEvaluator _conditionEvaluator;
         private readonly ConditionUsageTracker _conditionUsageTracker;
         private readonly IStrategyRuntimeTemplateProvider? _templateProvider;
-        private readonly StrategyTaskTraceLogQueue? _taskTraceLogQueue;
+        private readonly TestStrategyCheckLogRepository? _testCheckLogRepository; // 测试用：策略检查日志仓储（后续会删除）
         private readonly string _engineInstanceId;
-        private readonly StrategyDiagnosticsOptions _diagnostics;
         private readonly ParallelOptions _parallelOptions;
-        private readonly LiveTradingObjectPoolManager? _objectPool;
         private const int ParallelExecutionThreshold = 8;
 
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, StrategyModel>> _strategiesByKey = new();
@@ -52,10 +46,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
             ConditionEvaluator? conditionEvaluator = null,
             ConditionUsageTracker? conditionUsageTracker = null,
             IStrategyRuntimeTemplateProvider? templateProvider = null,
-            StrategyTaskTraceLogQueue? taskTraceLogQueue = null,
-            int? maxParallelism = null,
-            IOptions<StrategyDiagnosticsOptions>? diagnosticsOptions = null,
-            LiveTradingObjectPoolManager? objectPool = null)
+            TestStrategyCheckLogRepository? testCheckLogRepository = null, // 测试用：策略检查日志仓储（后续会删除）
+            int? maxParallelism = null)
         {
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _marketTaskSubscription = _marketDataEngine.SubscribeMarketTasks("StrategyEngine");
@@ -67,12 +59,10 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _conditionEvaluator = conditionEvaluator ?? throw new ArgumentNullException(nameof(conditionEvaluator));
             _conditionUsageTracker = conditionUsageTracker ?? throw new ArgumentNullException(nameof(conditionUsageTracker));
             _templateProvider = templateProvider;
-            _taskTraceLogQueue = taskTraceLogQueue;
+            _testCheckLogRepository = testCheckLogRepository; // 测试用：可选依赖，避免非测试环境报错
             _maxParallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount);
             _parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = _maxParallelism };
-            _engineInstanceId = ProcessInstanceIdProvider.InstanceId;
-            _diagnostics = diagnosticsOptions?.Value ?? new StrategyDiagnosticsOptions();
-            _objectPool = objectPool;
+            _engineInstanceId = $"{Environment.MachineName}:{Environment.ProcessId}";
         }
 
         public void UpsertStrategy(StrategyModel strategy)
@@ -89,13 +79,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
-            _conditionEvaluator.InvalidateStrategy(strategy.UidCode);
             var key = BuildIndexKey(trade.Exchange, trade.Symbol, trade.TimeframeSec);
             var bucket = _strategiesByKey.GetOrAdd(
                 key,
                 _ => new ConcurrentDictionary<string, StrategyModel>(StringComparer.Ordinal));
             var indicatorRequests = BuildIndicatorRequests(strategy);
-            _indicatorEngine?.RegisterRequestsForStrategy(indicatorRequests);
             bucket[strategy.UidCode] = strategy;
             _strategyKeyByUid[strategy.UidCode] = key;
             _indicatorRequestsByStrategy[strategy.UidCode] = indicatorRequests;
@@ -112,24 +100,24 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (indicatorRequests.Count > 0)
             {
-                //var indicators = string.Join("\n", indicatorRequests.Select(request => request.Key.ToString()));
-                //_logger.LogInformation(
-                //    "策略已注册: {Uid} 交易所={Exchange} 交易对={Symbol} 周期={TimeframeSec}秒 指标数={Count}\n{Indicators}",
-                //    strategy.UidCode,
-                //    trade.Exchange,
-                //    trade.Symbol,
-                //    trade.TimeframeSec,
-                //    indicatorRequests.Count,
-                //    indicators);
+                var indicators = string.Join("\n", indicatorRequests.Select(request => request.Key.ToString()));
+                _logger.LogInformation(
+                    "策略已注册: {Uid} 交易所={Exchange} 交易对={Symbol} 周期={TimeframeSec}秒 指标数={Count}\n{Indicators}",
+                    strategy.UidCode,
+                    trade.Exchange,
+                    trade.Symbol,
+                    trade.TimeframeSec,
+                    indicatorRequests.Count,
+                    indicators);
             }
             else
             {
-                //_logger.LogInformation(
-                //    "策略已注册: {Uid} 交易所={Exchange} 交易对={Symbol} 周期={TimeframeSec}秒 无指标",
-                //    strategy.UidCode,
-                //    trade.Exchange,
-                //    trade.Symbol,
-                //    trade.TimeframeSec);
+                _logger.LogInformation(
+                    "策略已注册: {Uid} 交易所={Exchange} 交易对={Symbol} 周期={TimeframeSec}秒 无指标",
+                    strategy.UidCode,
+                    trade.Exchange,
+                    trade.Symbol,
+                    trade.TimeframeSec);
             }
         }
 
@@ -157,7 +145,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
             _indicatorRequestsByStrategy.TryRemove(uidCode, out _);
             _runtimeSchedules.TryRemove(uidCode, out _);
             _conditionUsageTracker.RemoveStrategy(uidCode);
-            _conditionEvaluator.InvalidateStrategy(uidCode);
             return true;
         }
 
@@ -252,24 +239,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return true;
         }
 
-        internal MarketDataTaskSubscription MarketTaskSubscription => _marketTaskSubscription;
-
-        internal void ProcessTask(MarketDataTask task) => HandleTask(task);
-
-        internal void AdjustInnerParallelism(int shardCount)
-        {
-            if (shardCount > 1)
-            {
-                _parallelOptions.MaxDegreeOfParallelism = Math.Max(2, _maxParallelism / shardCount);
-            }
-        }
-
         public async Task RunAsync(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 MarketDataTask task;
-                var dequeueStartLocal = DateTime.Now;
                 try
                 {
                     task = await _marketTaskSubscription.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -278,18 +252,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 {
                     break;
                 }
-
-                var dequeueEndLocal = DateTime.Now;
-                _logger.LogInformation(
-                    "[策略任务开始] 处理方={Instance} 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 收线={IsBarClose} K线时间={CandleTime} 出队开始本地时间={DequeueStart} 出队结束本地时间={DequeueEnd}",
-                    _engineInstanceId,
-                    task.Exchange,
-                    task.Symbol,
-                    task.Timeframe,
-                    task.IsBarClose,
-                    DateTimeOffset.FromUnixTimeMilliseconds(task.CandleTimestamp).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                    dequeueStartLocal.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                    dequeueEndLocal.ToString("yyyy-MM-dd HH:mm:ss.fff"));
 
                 HandleTask(task);
             }
@@ -313,117 +275,79 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         private void HandleTask(MarketDataTask task)
         {
-            var t0 = Stopwatch.GetTimestamp();
-            var trace = new StrategyRunTrace();
-            var matchedCount = 0;
+            var stopwatch = Stopwatch.StartNew();
+            var key = BuildIndexKey(task.Exchange, task.Symbol, task.TimeframeSec);
+            _strategiesByKey.TryGetValue(key, out var strategies);
+            var matchedCount = strategies?.Count ?? 0;
+            var modeText = task.IsBarClose ? "close" : "update";
+            var metrics = new StrategyRunMetrics();
 
-            TraceTaskClaim(task);
 
-            try
+            // _logger.LogInformation(
+            //     "Strategy engine task ({Mode}): {Exchange} {Symbol} {Timeframe} time={Time} matched={Count}",
+            //     modeText,
+            //     task.Exchange,
+            //     task.Symbol,
+            //     task.Timeframe,
+            //     FormatTimestamp(task.CandleTimestamp),
+            //     matchedCount);
+
+            if (strategies == null || strategies.IsEmpty)
             {
-                var key = BuildIndexKey(task.Exchange, task.Symbol, task.TimeframeSec);
-                _strategiesByKey.TryGetValue(key, out var strategies);
-                matchedCount = strategies?.Count ?? 0;
-                var t1 = Stopwatch.GetTimestamp();
-                trace.LookupMs = TicksToMs(t0, t1);
-
-                if (strategies == null || strategies.IsEmpty)
-                {
-                    LogStrategyRun(task, matchedCount, TicksToMs(t0, t1), trace);
-                    return;
-                }
-
-                var indicatorSnapshot = UpdateIndicatorsBeforeExecute(strategies.Values, task);
-                var t2 = Stopwatch.GetTimestamp();
-                trace.IndicatorMs = TicksToMs(t1, t2);
-                trace.IndicatorRequestCount = indicatorSnapshot.RequestCount;
-                trace.IndicatorSuccessCount = indicatorSnapshot.SuccessCount;
-                trace.IndicatorTotalCount = indicatorSnapshot.TotalCount;
-
-                if (_maxParallelism <= 1 || matchedCount < ParallelExecutionThreshold)
-                {
-                    foreach (var strategy in strategies.Values)
-                    {
-                        ExecuteStrategyTask(strategy, task, trace);
-                    }
-                }
-                else
-                {
-                    Parallel.ForEach(strategies.Values, _parallelOptions, strategy =>
-                    {
-                        ExecuteStrategyTask(strategy, task, trace);
-                    });
-                }
-                var t3 = Stopwatch.GetTimestamp();
-                trace.ExecuteMs = TicksToMs(t2, t3);
-
-                LogStrategyRun(task, matchedCount, TicksToMs(t0, t3), trace);
-            }
-            catch (Exception ex)
-            {
-                var now = Stopwatch.GetTimestamp();
-                LogStrategyRun(task, matchedCount, TicksToMs(t0, now), trace, ex);
-                throw;
-            }
-        }
-
-        private static int TicksToMs(long start, long end)
-        {
-            return (int)((end - start) * 1000 / Stopwatch.Frequency);
-        }
-
-        private void ExecuteStrategyTask(
-            StrategyModel strategy,
-            MarketDataTask task,
-            StrategyRunTrace? trace)
-        {
-            if (!IsRunnableState(strategy.State))
-            {
-                trace?.IncrementSkippedByState();
-                trace?.IncrementSkipped();
+                stopwatch.Stop();
+                LogStrategyRun(task, matchedCount, metrics, stopwatch.ElapsedMilliseconds);
                 return;
             }
 
-            trace?.IncrementRunnableStrategy();
-            var startTicks = Stopwatch.GetTimestamp();
+            UpdateIndicatorsBeforeExecute(strategies.Values, task);
 
-            StrategyExecutionContext? context = null;
-            try
+            // 小批策略直接串行，避免 Parallel.ForEach 的调度开销反噬吞吐；
+            // 大批策略保留并行执行，兼顾吞吐与延迟稳定性。
+            if (_maxParallelism <= 1 || matchedCount < ParallelExecutionThreshold)
             {
-                context = _objectPool != null
-                    ? _objectPool.RentContext(strategy, task, _valueResolver, _actionExecutor)
-                    : new StrategyExecutionContext(strategy, task, _valueResolver, _actionExecutor);
-
-                var runtimeGate = ResolveRuntimeGate(strategy, context.CurrentTime);
-                if (!runtimeGate.AllowEntry && !runtimeGate.AllowExit)
+                foreach (var strategy in strategies.Values)
                 {
-                    trace?.IncrementSkippedByRuntimeGate();
-                    trace?.IncrementSkipped();
-                    return;
-                }
-
-                ExecuteLogic(context, runtimeGate, trace);
-                trace?.AddExecutedStrategy(strategy.UidCode);
-                trace?.IncrementExecuted();
-            }
-            finally
-            {
-                if (trace != null)
-                {
-                    var elapsedMs = (Stopwatch.GetTimestamp() - startTicks) * 1000 / Stopwatch.Frequency;
-                    trace.RecordStrategyExec(elapsedMs);
-                }
-                if (_objectPool != null && context != null)
-                {
-                    _objectPool.ReturnContext(context);
+                    ExecuteStrategyTask(strategy, task, metrics);
                 }
             }
+            else
+            {
+                Parallel.ForEach(strategies.Values, _parallelOptions, strategy =>
+                {
+                    ExecuteStrategyTask(strategy, task, metrics);
+                });
+            }
+
+            stopwatch.Stop();
+            LogStrategyRun(task, matchedCount, metrics, stopwatch.ElapsedMilliseconds);
+        }
+
+        private void ExecuteStrategyTask(StrategyModel strategy, MarketDataTask task, StrategyRunMetrics metrics)
+        {
+            if (!IsRunnableState(strategy.State))
+            {
+                Interlocked.Increment(ref metrics.SkippedCount);
+                return;
+            }
+
+            var context = new StrategyExecutionContext(strategy, task, _valueResolver, _actionExecutor);
+            // 运行时间门禁：禁止时段按策略策略处理入口/出口
+            var runtimeGate = ResolveRuntimeGate(strategy, context.CurrentTime);
+            if (!runtimeGate.AllowEntry && !runtimeGate.AllowExit)
+            {
+                Interlocked.Increment(ref metrics.SkippedCount);
+                return;
+            }
+
+            ExecuteLogic(context, runtimeGate, metrics);
+            metrics.AddExecutedStrategy(strategy.UidCode);
+            Interlocked.Increment(ref metrics.ExecutedCount);
         }
 
         private void ExecuteLogic(
             StrategyExecutionContext context,
             StrategyRuntimeGate runtimeGate,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             var logic = context.StrategyConfig.Logic;
             if (logic == null)
@@ -433,7 +357,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (runtimeGate.AllowExit)
             {
-                ExecuteBranch(context, logic.Exit.Long, "Exit.Long", trace);
+                ExecuteBranch(context, logic.Exit.Long, "Exit.Long", metrics);
             }
             //ExecuteBranch(context, logic.Exit.Short, "Exit.Short");
 
@@ -447,12 +371,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
-            if (!EvaluateEntryFilters(context, logic.Entry.Long, "Entry.Long", trace))
+            if (!EvaluateEntryFilters(context, logic.Entry.Long, "Entry.Long", metrics))
             {
                 return;
             }
 
-            ExecuteBranch(context, logic.Entry.Long, "Entry.Long", trace);
+            ExecuteBranch(context, logic.Entry.Long, "Entry.Long", metrics);
             //ExecuteBranch(context, logic.Entry.Short, "Entry.Short");
         }
 
@@ -460,7 +384,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             StrategyExecutionContext context,
             StrategyLogicBranch branch,
             string stage,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             if (branch == null || !branch.Enabled)
             {
@@ -478,16 +402,24 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return true;
             }
 
-            PrecomputeRequiredConditions(context, filters, trace);
-            var results = _objectPool != null ? _objectPool.RentResultList() : new List<ConditionEvaluationResult>();
-            var stageLabel = stage;
-            var pass = EvaluateChecks(context, filters, results, stageLabel, trace);
-            if (!pass && trace != null)
+            PrecomputeRequiredConditions(context, filters, metrics);
+            var results = new List<ConditionEvaluationResult>();
+            var stageLabel = $"{stage}.Filter";
+            var pass = EvaluateChecks(context, filters, results, stageLabel, metrics);
+            if (!pass && metrics != null)
             {
-                trace.IncrementSkipped();
+                Interlocked.Increment(ref metrics.SkippedCount);
             }
 
-            if (_objectPool != null) _objectPool.ReturnResultList(results);
+            if (!pass)
+            {
+                _logger.LogDebug(
+                    "筛选器未通过: {Uid} {Stage} 时间={Time}",
+                    context.Strategy.UidCode,
+                    stageLabel,
+                    FormatTimestamp(context.Task.CandleTimestamp));
+            }
+
             return pass;
         }
 
@@ -524,23 +456,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
             StrategyExecutionContext context,
             StrategyLogicBranch branch,
             string stage,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             if (branch == null || !branch.Enabled)
             {
                 return;
             }
 
-            var containers = branch.Containers;
-            if (containers == null || containers.Count == 0) return;
+            var containers = branch.Containers ?? new List<ConditionContainer>();
             var passCount = 0;
-            var debugBranch = _diagnostics.LogEveryRunTask && _logger.IsEnabled(LogLevel.Debug);
-            List<ConditionEvaluationResult>? aggregatedResults = null;
-            try
-            {
-            aggregatedResults = _objectPool != null ? _objectPool.RentResultList() : new List<ConditionEvaluationResult>();
+            var aggregatedResults = new List<ConditionEvaluationResult>();
+            var debugEnabled = _logger.IsEnabled(LogLevel.Debug);
 
-            PrecomputeRequiredConditions(context, containers, trace);
+            PrecomputeRequiredConditions(context, containers, metrics);
 
             for (var i = 0; i < containers.Count; i++)
             {
@@ -550,48 +478,58 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     continue;
                 }
 
-                var checkResults = _objectPool != null ? _objectPool.RentResultList() : new List<ConditionEvaluationResult>();
-                // stageLabel only built when needed for debug logging
-                //_logger.LogDebug(
-                //    "策略检查开始: {Uid} {Stage} 时间={Time}",
-                //    context.Strategy.UidCode,
-                //    stageLabel,
-                //    FormatTimestamp(context.Task.CandleTimestamp));
+                var checkResults = new List<ConditionEvaluationResult>();
+                var stageLabel = $"{stage}[{i}]";
+                _logger.LogDebug(
+                    "策略检查开始: {Uid} {Stage} 时间={Time}",
+                    context.Strategy.UidCode,
+                    stageLabel,
+                    FormatTimestamp(context.Task.CandleTimestamp));
 
-                if (!EvaluateChecks(context, container.Checks, checkResults, stage, trace))
+                if (!EvaluateChecks(context, container.Checks, checkResults, stageLabel, metrics))
                 {
-                    if (_objectPool != null) _objectPool.ReturnResultList(checkResults);
+                    _logger.LogDebug(
+                        "策略检查失败: {Uid} {Stage} 时间={Time}",
+                        context.Strategy.UidCode,
+                        stageLabel,
+                        FormatTimestamp(context.Task.CandleTimestamp));
                     continue;
                 }
 
                 passCount++;
                 aggregatedResults.AddRange(checkResults);
-                if (_objectPool != null) _objectPool.ReturnResultList(checkResults);
+
+                _logger.LogDebug(
+                    "策略检查通过: {Uid} {Stage} 时间={Time}",
+                    context.Strategy.UidCode,
+                    stageLabel,
+                    FormatTimestamp(context.Task.CandleTimestamp));
             }
 
             if (passCount < branch.MinPassConditionContainer)
             {
-                //_logger.LogDebug(
-                //    "策略容器数量不足: {Uid} {Stage} 需要={Need} 通过={Pass}",
-                //    context.Strategy.UidCode,
-                //    stage,
-                //    branch.MinPassConditionContainer,
-                //    passCount);
+                _logger.LogDebug(
+                    "策略容器数量不足: {Uid} {Stage} 需要={Need} 通过={Pass}",
+                    context.Strategy.UidCode,
+                    stage,
+                    branch.MinPassConditionContainer,
+                    passCount);
                 return;
             }
 
-            ExecuteActions(context, branch.OnPass, aggregatedResults, stage, trace);
-            }
-            finally
-            {
-                if (_objectPool != null) _objectPool.ReturnResultList(aggregatedResults);
-            }
+            _logger.LogDebug(
+                "策略检查通过，执行动作: {Uid} {Stage} 时间={Time}",
+                context.Strategy.UidCode,
+                stage,
+                FormatTimestamp(context.Task.CandleTimestamp));
+
+            ExecuteActions(context, branch.OnPass, aggregatedResults, stage, metrics);
         }
 
         private void PrecomputeRequiredConditions(
             StrategyExecutionContext context,
             IReadOnlyList<ConditionContainer> containers,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             if (containers == null || containers.Count == 0)
             {
@@ -620,7 +558,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         }
 
                         _conditionEvaluator.Evaluate(context, condition);
-                        trace?.IncrementConditionEval();
+                        metrics?.IncrementConditionEval();
                     }
                 }
             }
@@ -629,7 +567,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private void PrecomputeRequiredConditions(
             StrategyExecutionContext context,
             ConditionGroupSet? checks,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             if (checks == null || !checks.Enabled || checks.Groups == null || checks.Groups.Count == 0)
             {
@@ -651,7 +589,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     }
 
                     _conditionEvaluator.Evaluate(context, condition);
-                    trace?.IncrementConditionEval();
+                    metrics?.IncrementConditionEval();
                 }
             }
         }
@@ -661,17 +599,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
             ConditionGroupSet checks,
             List<ConditionEvaluationResult> results,
             string stage,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             if (checks == null || !checks.Enabled)
             {
                 return false;
             }
 
-            var groups = checks.Groups;
-            if (groups == null || groups.Count == 0) return false;
+            var groups = checks.Groups ?? new List<ConditionGroup>();
             var passGroups = 0;
-            var debugChecks = _diagnostics.LogEveryRunTask && _logger.IsEnabled(LogLevel.Debug);
 
             for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
             {
@@ -681,102 +617,135 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     continue;
                 }
 
-                var conditions = group.Conditions;
-                if (conditions == null || conditions.Count == 0)
+                var crossRequired = new List<StrategyMethod>();
+                var crossOptional = new List<StrategyMethod>();
+                var required = new List<StrategyMethod>();
+                var optional = new List<StrategyMethod>();
+
+                // 重要：优先级拆分仅调整“评估顺序”，不改变 Required/Optional 语义。
+                ConditionPriorityHelper.SplitByPriority(
+                    group.Conditions ?? new List<StrategyMethod>(),
+                    crossRequired,
+                    crossOptional,
+                    required,
+                    optional);
+
+                var hasEnabled = crossRequired.Count + crossOptional.Count + required.Count + optional.Count > 0;
+                if (!hasEnabled)
                 {
-                    if (group.MinPassConditions <= 0) passGroups++;
+                    if (group.MinPassConditions <= 0)
+                    {
+                        passGroups++;
+                    }
                     continue;
                 }
 
-                List<StrategyMethod>? crossRequired = null, crossOptional = null, requiredL = null, optionalL = null;
-                try
+                var requiredFailed = false;
+                var optionalPassCount = 0;
+
+                bool EvaluateCondition(StrategyMethod condition, bool isRequired)
                 {
-                    if (_objectPool != null)
-                    {
-                        crossRequired = _objectPool.RentMethodList();
-                        crossOptional = _objectPool.RentMethodList();
-                        requiredL = _objectPool.RentMethodList();
-                        optionalL = _objectPool.RentMethodList();
-                    }
-                    else
-                    {
-                        crossRequired = new List<StrategyMethod>();
-                        crossOptional = new List<StrategyMethod>();
-                        requiredL = new List<StrategyMethod>();
-                        optionalL = new List<StrategyMethod>();
-                    }
+                    var result = _conditionEvaluator.Evaluate(context, condition);
+                    metrics?.IncrementConditionEval();
+                    results.Add(result);
+                    _logger.LogDebug(
+                        "条件检查: {Uid} {Stage} 组{Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
+                        context.Strategy.UidCode,
+                        stage,
+                        groupIndex,
+                        condition.Method,
+                        condition.Required,
+                        result.Success,
+                        result.Message);
 
-                    ConditionPriorityHelper.SplitByPriority(conditions, crossRequired, crossOptional, requiredL, optionalL);
-
-                    var hasEnabled = crossRequired.Count + crossOptional.Count + requiredL.Count + optionalL.Count > 0;
-                    if (!hasEnabled)
+                    if (context.Strategy.State == StrategyState.Testing && _testCheckLogRepository != null)
                     {
-                        if (group.MinPassConditions <= 0) passGroups++;
-                        continue;
+                        // 仅 testing 状态保留测试检查日志，避免实盘高压场景下产生大量 Task.Run 调度开销。
+                        _ = LogCheckResultAsync(context, stage, groupIndex, condition, result, isRequired, ct: default);
                     }
 
-                    var requiredFailed = false;
-                    var optionalPassCount = 0;
-
-                    // P0: Cross/Required
-                    foreach (var condition in crossRequired)
+                    if (isRequired && !result.Success)
                     {
-                        var result = _conditionEvaluator.Evaluate(context, condition);
-                        trace?.IncrementConditionEval();
-                        results.Add(result);
-                        if (debugChecks)
-                            _logger.LogDebug("\u6761\u4ef6\u68c0\u67e5: {Uid} {Stage} G{Group} M={Method} R=true P={Result}",
-                                context.Strategy.UidCode, stage, groupIndex, condition.Method, result.Success);
-                        if (!result.Success) { requiredFailed = true; break; }
-                    }
-                    if (requiredFailed) continue;
-
-                    // P0: Cross/Optional
-                    foreach (var condition in crossOptional)
-                    {
-                        var result = _conditionEvaluator.Evaluate(context, condition);
-                        trace?.IncrementConditionEval();
-                        results.Add(result);
-                        if (result.Success) optionalPassCount++;
+                        _logger.LogDebug(
+                            "必需条件失败: {Uid} {Stage} 组{Group} 方法={Method}",
+                            context.Strategy.UidCode,
+                            stage,
+                            groupIndex,
+                            condition.Method);
+                        requiredFailed = true;
+                        return false;
                     }
 
-                    // P1: Required
-                    foreach (var condition in requiredL)
+                    if (!isRequired && result.Success)
                     {
-                        var result = _conditionEvaluator.Evaluate(context, condition);
-                        trace?.IncrementConditionEval();
-                        results.Add(result);
-                        if (debugChecks)
-                            _logger.LogDebug("\u6761\u4ef6\u68c0\u67e5: {Uid} {Stage} G{Group} M={Method} R=true P={Result}",
-                                context.Strategy.UidCode, stage, groupIndex, condition.Method, result.Success);
-                        if (!result.Success) { requiredFailed = true; break; }
+                        optionalPassCount++;
                     }
-                    if (requiredFailed) continue;
 
-                    // P2: Optional
-                    if (optionalPassCount < group.MinPassConditions)
+                    return result.Success;
+                }
+
+                // P0：Cross/穿透类优先评估
+                foreach (var condition in crossRequired)
+                {
+                    EvaluateCondition(condition, isRequired: true);
+                    if (requiredFailed)
                     {
-                        foreach (var condition in optionalL)
+                        break;
+                    }
+                }
+
+                if (requiredFailed)
+                {
+                    continue;
+                }
+
+                foreach (var condition in crossOptional)
+                {
+                    EvaluateCondition(condition, isRequired: false);
+                }
+
+                // P1?Required ??
+                foreach (var condition in required)
+                {
+                    EvaluateCondition(condition, isRequired: true);
+                    if (requiredFailed)
+                    {
+                        break;
+                    }
+                }
+
+                if (requiredFailed)
+                {
+                    continue;
+                }
+
+                // P2：Optional 条件（达到最小通过数后提前结束）
+                if (optionalPassCount < group.MinPassConditions)
+                {
+                    foreach (var condition in optional)
+                    {
+                        EvaluateCondition(condition, isRequired: false);
+                        if (optionalPassCount >= group.MinPassConditions)
                         {
-                            var result = _conditionEvaluator.Evaluate(context, condition);
-                            trace?.IncrementConditionEval();
-                            results.Add(result);
-                            if (result.Success) optionalPassCount++;
-                            if (optionalPassCount >= group.MinPassConditions) break;
+                            break;
                         }
                     }
-
-                    if (optionalPassCount >= group.MinPassConditions) passGroups++;
                 }
-                finally
+
+                var pass = optionalPassCount >= group.MinPassConditions;
+                if (!pass)
                 {
-                    if (_objectPool != null)
-                    {
-                        _objectPool.ReturnMethodList(crossRequired);
-                        _objectPool.ReturnMethodList(crossOptional);
-                        _objectPool.ReturnMethodList(requiredL);
-                        _objectPool.ReturnMethodList(optionalL);
-                    }
+                    _logger.LogDebug(
+                        "条件组数量不足: {Uid} {Stage} 组{Group} 需要{Need} 通过={Pass}",
+                        context.Strategy.UidCode,
+                        stage,
+                        groupIndex,
+                        group.MinPassConditions,
+                        optionalPassCount);
+                }
+                else
+                {
+                    passGroups++;
                 }
             }
 
@@ -788,7 +757,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             ActionSet actions,
             IReadOnlyList<ConditionEvaluationResult> triggerResults,
             string stage,
-            StrategyRunTrace? trace)
+            StrategyRunMetrics? metrics)
         {
             if (actions == null || !actions.Enabled)
             {
@@ -798,37 +767,38 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var optionalSuccessCount = 0;
             var hasEnabled = false;
 
-            var actionConditions = actions.Conditions;
-            if (actionConditions == null || actionConditions.Count == 0) return;
-            var debugActions = _diagnostics.LogEveryRunTask && _logger.IsEnabled(LogLevel.Debug);
-
-            foreach (var action in actionConditions)
+            foreach (var action in actions.Conditions ?? new List<StrategyMethod>())
             {
                 if (action == null || !action.Enabled)
                 {
                     continue;
                 }
 
-                trace?.IncrementActionExec();
+                metrics?.IncrementActionExec();
                 hasEnabled = true;
                 var result = ActionMethodRegistry.Run(context, action, triggerResults);
-                if (debugActions)
-                    _logger.LogDebug("动作执行: {Uid} {Stage} M={Method} R={Required} P={Result}",
-                        context.Strategy.UidCode, stage, action.Method, action.Required, result.Success);
+                _logger.LogDebug(
+                    "动作执行: {Uid} {Stage} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
+                    context.Strategy.UidCode,
+                    stage,
+                    action.Method,
+                    action.Required,
+                    result.Success,
+                    result.Message.ToString());
 
                 if (result.Success && IsOpenAction(action))
                 {
-                    trace?.AddOpenTaskStrategy(context.Strategy.UidCode);
-                    var actionTaskTraceId = ExtractActionTaskTraceId(result.Message);
-                    if (!string.IsNullOrWhiteSpace(actionTaskTraceId))
-                    {
-                        trace?.AddOpenTaskTraceId(actionTaskTraceId);
-                    }
-                    trace?.IncrementOpenTask();
+                    metrics?.AddOpenTaskStrategy(context.Strategy.UidCode);
+                    metrics?.IncrementOpenTask();
                 }
 
                 if (action.Required && !result.Success)
                 {
+                    _logger.LogDebug(
+                        "动作失败（必需）: {Uid} {Stage} 方法={Method}",
+                        context.Strategy.UidCode,
+                        stage,
+                        action.Method);
                     return;
                 }
 
@@ -843,7 +813,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
-            // min pass check (no debug log in hot path)
+            if (optionalSuccessCount < actions.MinPassConditions)
+            {
+                _logger.LogDebug(
+                    "动作最小通过数未达到: {Uid} {Stage} 需要={Need} 通过={Pass}",
+                    context.Strategy.UidCode,
+                    stage,
+                    actions.MinPassConditions,
+                    optionalSuccessCount);
+            }
         }
 
         private static string BuildIndexKey(string exchange, string symbol, int timeframeSec)
@@ -851,31 +829,16 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return $"{exchange}|{symbol}|{timeframeSec}";
         }
 
-        private void LogStrategyRun(
-            MarketDataTask task,
-            int matchedCount,
-            long durationMs,
-            StrategyRunTrace? trace,
-            Exception? runError = null)
+        private void LogStrategyRun(MarketDataTask task, int matchedCount, StrategyRunMetrics metrics, long durationMs)
         {
-            var executedIds = BuildDelimitedIds(trace?.EnumerateExecutedStrategyIds());
-            var openIds = BuildDelimitedIds(trace?.EnumerateOpenTaskStrategyIds());
-            var openTaskTraceIds = BuildDelimitedIds(trace?.EnumerateOpenTaskTraceIds());
-            var executedCount = trace?.ExecutedCount ?? 0;
-            var skippedCount = trace?.SkippedCount ?? 0;
-            var conditionEvalCount = trace?.ConditionEvalCount ?? 0;
-            var actionExecCount = trace?.ActionExecCount ?? 0;
-            var openTaskCount = trace?.OpenTaskCount ?? 0;
+            var executedIds = BuildDelimitedIds(metrics.ExecutedStrategyIds.Keys);
+            var openIds = BuildDelimitedIds(metrics.OpenTaskStrategyIds.Keys);
             var modeText = task.IsBarClose ? "close" : "update";
-            var traceId = MarketDataTask.NormalizeTraceId(task.TraceId);
-            var runStatus = ResolveRunStatus(matchedCount, trace, runError);
 
-            if (executedCount > 0)
+            if (metrics.ExecutedCount > 0)
             {
                 _logger.LogInformation(
-                    "[策略运行] 追踪ID={TraceId} 处理方={Instance} 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 模式={Mode} 时间={Time} 耗时={Duration}毫秒 匹配={Matched} 执行={Executed} 跳过={Skipped} 条件={Conditions} 动作={Actions} 开放任务={OpenTasks} 执行ID={ExecIds} 开放ID={OpenIds}",
-                    traceId,
-                    _engineInstanceId,
+                    "[策略运行] 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 模式={Mode} 时间={Time} 耗时={Duration}毫秒 匹配={Matched} 执行={Executed} 跳过={Skipped} 条件={Conditions} 动作={Actions} 开放任务={OpenTasks} 执行ID={ExecIds} 开放ID={OpenIds}",
                     task.Exchange,
                     task.Symbol,
                     task.Timeframe,
@@ -883,98 +846,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     FormatTimestampIso(task.CandleTimestamp),
                     durationMs,
                     matchedCount,
-                    executedCount,
-                    skippedCount,
-                    conditionEvalCount,
-                    actionExecCount,
-                    openTaskCount,
+                    metrics.ExecutedCount,
+                    metrics.SkippedCount,
+                    metrics.ConditionEvalCount,
+                    metrics.ActionExecCount,
+                    metrics.OpenTaskCount,
                     executedIds,
                     openIds);
             }
-
-            if (trace != null && ShouldLogRunProfile(durationMs, trace))
-            {
-                var avgStrategyMs = trace.GetStrategyExecAverageMs();
-                var maxStrategyMs = trace.GetStrategyExecMaxMs();
-                var samples = trace.GetStrategyExecSamples();
-                if (IsSlowRun(durationMs, trace))
-                {
-                    _logger.LogWarning(
-                        "[策略运行画像] 追踪ID={TraceId} 处理方={Instance} 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 模式={Mode} 时间={Time} 总耗时={Duration}毫秒 分段=查找{Lookup}ms/指标{Indicator}ms/执行{Execute}ms 匹配={Matched} 可运行={Runnable} 执行={Executed} 状态跳过={StateSkipped} 时间门禁跳过={GateSkipped} 条件={Conditions} 动作={Actions} 开放任务={OpenTasks} 指标请求={IndicatorReq} 指标成功={IndicatorSuccess}/{IndicatorTotal} 单策略样本={StrategySamples} 单策略均值={StrategyAvg}ms 单策略最大={StrategyMax}ms",
-                        traceId,
-                        _engineInstanceId,
-                        task.Exchange,
-                        task.Symbol,
-                        task.Timeframe,
-                        modeText,
-                        FormatTimestampIso(task.CandleTimestamp),
-                        durationMs,
-                        trace.LookupMs,
-                        trace.IndicatorMs,
-                        trace.ExecuteMs,
-                        matchedCount,
-                        trace.RunnableStrategyCount,
-                        executedCount,
-                        trace.SkippedByStateCount,
-                        trace.SkippedByRuntimeGateCount,
-                        conditionEvalCount,
-                        actionExecCount,
-                        openTaskCount,
-                        trace.IndicatorRequestCount,
-                        trace.IndicatorSuccessCount,
-                        trace.IndicatorTotalCount,
-                        samples,
-                        avgStrategyMs,
-                        maxStrategyMs);
-                }
-                else
-                {
-                    _logger.LogInformation(
-                        "[策略运行画像] 追踪ID={TraceId} 处理方={Instance} 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 模式={Mode} 时间={Time} 总耗时={Duration}毫秒 分段=查找{Lookup}ms/指标{Indicator}ms/执行{Execute}ms 匹配={Matched} 可运行={Runnable} 执行={Executed} 状态跳过={StateSkipped} 时间门禁跳过={GateSkipped} 条件={Conditions} 动作={Actions} 开放任务={OpenTasks} 指标请求={IndicatorReq} 指标成功={IndicatorSuccess}/{IndicatorTotal} 单策略样本={StrategySamples} 单策略均值={StrategyAvg}ms 单策略最大={StrategyMax}ms",
-                        traceId,
-                        _engineInstanceId,
-                        task.Exchange,
-                        task.Symbol,
-                        task.Timeframe,
-                        modeText,
-                        FormatTimestampIso(task.CandleTimestamp),
-                        durationMs,
-                        trace.LookupMs,
-                        trace.IndicatorMs,
-                        trace.ExecuteMs,
-                        matchedCount,
-                        trace.RunnableStrategyCount,
-                        executedCount,
-                        trace.SkippedByStateCount,
-                        trace.SkippedByRuntimeGateCount,
-                        conditionEvalCount,
-                        actionExecCount,
-                        openTaskCount,
-                        trace.IndicatorRequestCount,
-                        trace.IndicatorSuccessCount,
-                        trace.IndicatorTotalCount,
-                        samples,
-                        avgStrategyMs,
-                        maxStrategyMs);
-                }
-            }
-
-            if (runError != null)
-            {
-                _logger.LogError(
-                    runError,
-                    "[策略运行失败] 追踪ID={TraceId} 处理方={Instance} 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 模式={Mode} 时间={Time} 已耗时={Duration}毫秒",
-                    traceId,
-                    _engineInstanceId,
-                    task.Exchange,
-                    task.Symbol,
-                    task.Timeframe,
-                    modeText,
-                    FormatTimestampIso(task.CandleTimestamp),
-                    durationMs);
-            }
-
-            TraceTaskRun(task, matchedCount, durationMs, trace, runError);
 
             if (_runLogQueue == null)
             {
@@ -991,211 +870,20 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 IsBarClose = task.IsBarClose,
                 DurationMs = (int)Math.Min(durationMs, int.MaxValue),
                 MatchedCount = matchedCount,
-                ExecutedCount = executedCount,
-                SkippedCount = skippedCount,
-                ConditionEvalCount = conditionEvalCount,
-                ActionExecCount = actionExecCount,
-                OpenTaskCount = openTaskCount,
-                TraceId = traceId,
-                RunStatus = runStatus,
-                LookupMs = trace?.LookupMs ?? 0,
-                IndicatorMs = trace?.IndicatorMs ?? 0,
-                ExecuteMs = trace?.ExecuteMs ?? 0,
-                RunnableStrategyCount = trace?.RunnableStrategyCount ?? 0,
-                StateSkippedCount = trace?.SkippedByStateCount ?? 0,
-                RuntimeGateSkippedCount = trace?.SkippedByRuntimeGateCount ?? 0,
-                IndicatorRequestCount = trace?.IndicatorRequestCount ?? 0,
-                IndicatorSuccessCount = trace?.IndicatorSuccessCount ?? 0,
-                IndicatorTotalCount = trace?.IndicatorTotalCount ?? 0,
+                ExecutedCount = metrics.ExecutedCount,
+                SkippedCount = metrics.SkippedCount,
+                ConditionEvalCount = metrics.ConditionEvalCount,
+                ActionExecCount = metrics.ActionExecCount,
+                OpenTaskCount = metrics.OpenTaskCount,
                 ExecutedStrategyIds = string.IsNullOrWhiteSpace(executedIds) ? null : executedIds,
                 OpenTaskStrategyIds = string.IsNullOrWhiteSpace(openIds) ? null : openIds,
-                OpenTaskTraceIds = string.IsNullOrWhiteSpace(openTaskTraceIds) ? null : openTaskTraceIds,
-                ExtraJson = _diagnostics.PersistRunProfileExtraJson
-                    ? BuildRunExtraJson(durationMs, matchedCount, trace, runError, traceId)
-                    : null,
+                ExtraJson = null,
                 EngineInstance = _engineInstanceId
             };
 
             if (!_runLogQueue.TryEnqueue(log))
             {
                 _logger.LogWarning("策略运行日志入队失败");
-            }
-        }
-
-        private void TraceTaskClaim(MarketDataTask task)
-        {
-            if (!ShouldPersistTaskTrace())
-            {
-                return;
-            }
-
-            var traceId = MarketDataTask.NormalizeTraceId(task.TraceId);
-            var signalLagMs = ResolveSignalLagMs(task.CandleTimestamp);
-            var payload = new
-            {
-                mode = task.IsBarClose ? "close" : "update",
-                signalLagMs
-            };
-
-            _taskTraceLogQueue!.TryEnqueue(new StrategyTaskTraceLog
-            {
-                TraceId = traceId,
-                ParentTraceId = null,
-                EventStage = "strategy.claim",
-                EventStatus = "start",
-                ActorModule = nameof(RealTimeStrategyEngine),
-                ActorInstance = _engineInstanceId,
-                Exchange = task.Exchange,
-                Symbol = task.Symbol,
-                Timeframe = task.Timeframe,
-                CandleTimestamp = task.CandleTimestamp,
-                IsBarClose = task.IsBarClose,
-                Method = task.IsBarClose ? "close" : "update",
-                DurationMs = 0,
-                MetricsJson = SerializeTracePayload(payload)
-            });
-        }
-
-        private void TraceTaskRun(
-            MarketDataTask task,
-            int matchedCount,
-            long durationMs,
-            StrategyRunTrace? trace,
-            Exception? runError)
-        {
-            var status = ResolveRunStatus(matchedCount, trace, runError);
-            if (!ShouldPersistTaskTrace(durationMs, status, runError))
-            {
-                return;
-            }
-
-            var traceId = MarketDataTask.NormalizeTraceId(task.TraceId);
-            var payload = new
-            {
-                stage = new
-                {
-                    lookupMs = trace?.LookupMs ?? 0,
-                    indicatorMs = trace?.IndicatorMs ?? 0,
-                    executeMs = trace?.ExecuteMs ?? 0,
-                    totalMs = (int)Math.Min(durationMs, int.MaxValue)
-                },
-                counters = new
-                {
-                    matchedCount,
-                    runnableCount = trace?.RunnableStrategyCount ?? 0,
-                    executedCount = trace?.ExecutedCount ?? 0,
-                    skippedCount = trace?.SkippedCount ?? 0,
-                    conditionEvalCount = trace?.ConditionEvalCount ?? 0,
-                    actionExecCount = trace?.ActionExecCount ?? 0,
-                    openTaskCount = trace?.OpenTaskCount ?? 0,
-                    indicatorRequestCount = trace?.IndicatorRequestCount ?? 0,
-                    indicatorSuccessCount = trace?.IndicatorSuccessCount ?? 0,
-                    indicatorTotalCount = trace?.IndicatorTotalCount ?? 0
-                },
-                strategy = new
-                {
-                    stateSkippedCount = trace?.SkippedByStateCount ?? 0,
-                    runtimeGateSkippedCount = trace?.SkippedByRuntimeGateCount ?? 0,
-                    perStrategySamples = trace?.GetStrategyExecSamples() ?? 0,
-                    perStrategyAvgMs = trace?.GetStrategyExecAverageMs() ?? 0,
-                    perStrategyMaxMs = trace?.GetStrategyExecMaxMs() ?? 0
-                }
-            };
-
-            _taskTraceLogQueue!.TryEnqueue(new StrategyTaskTraceLog
-            {
-                TraceId = traceId,
-                ParentTraceId = null,
-                EventStage = "strategy.run",
-                EventStatus = status,
-                ActorModule = nameof(RealTimeStrategyEngine),
-                ActorInstance = _engineInstanceId,
-                Exchange = task.Exchange,
-                Symbol = task.Symbol,
-                Timeframe = task.Timeframe,
-                CandleTimestamp = task.CandleTimestamp,
-                IsBarClose = task.IsBarClose,
-                Method = task.IsBarClose ? "close" : "update",
-                DurationMs = (int)Math.Min(durationMs, int.MaxValue),
-                MetricsJson = SerializeTracePayload(payload),
-                ErrorMessage = runError?.Message
-            });
-        }
-
-        private bool ShouldPersistTaskTrace(
-            long? durationMs = null,
-            string? status = null,
-            Exception? error = null)
-        {
-            if (_taskTraceLogQueue == null || !_diagnostics.EnableTaskTracePersist)
-            {
-                return false;
-            }
-
-            if (_diagnostics.TaskTraceLogEveryEvent)
-            {
-                return true;
-            }
-
-            if (error != null)
-            {
-                return true;
-            }
-
-            if (!string.IsNullOrWhiteSpace(status) &&
-                !string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            return durationMs.HasValue && durationMs.Value >= _diagnostics.SlowTaskTraceThresholdMs;
-        }
-
-        private static string ResolveRunStatus(int matchedCount, StrategyRunTrace? trace, Exception? runError)
-        {
-            if (runError != null)
-            {
-                return "fail";
-            }
-
-            if (matchedCount <= 0)
-            {
-                return "skip_nomatch";
-            }
-
-            if (trace == null || trace.ExecutedCount <= 0)
-            {
-                return "skip_no_execute";
-            }
-
-            return "success";
-        }
-
-        private static int ResolveSignalLagMs(long candleTimestamp)
-        {
-            if (candleTimestamp <= 0)
-            {
-                return -1;
-            }
-
-            var lag = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - candleTimestamp;
-            if (lag <= 0)
-            {
-                return 0;
-            }
-
-            return (int)Math.Min(lag, int.MaxValue);
-        }
-
-        private static string? SerializeTracePayload(object payload)
-        {
-            try
-            {
-                return JsonSerializer.Serialize(payload);
-            }
-            catch
-            {
-                return null;
             }
         }
 
@@ -1226,58 +914,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// 从动作执行返回消息中提取动作任务ID（taskTraceId）。
-        /// </summary>
-        private static string? ExtractActionTaskTraceId(StringBuilder? messageBuilder)
-        {
-            if (messageBuilder == null || messageBuilder.Length == 0)
-            {
-                return null;
-            }
-
-            var message = messageBuilder.ToString();
-            if (string.IsNullOrWhiteSpace(message))
-            {
-                return null;
-            }
-
-            const string marker = "taskTraceId=";
-            var idx = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (idx < 0)
-            {
-                return null;
-            }
-
-            var start = idx + marker.Length;
-            if (start >= message.Length)
-            {
-                return null;
-            }
-
-            var end = start;
-            while (end < message.Length)
-            {
-                var ch = message[end];
-                if ((ch >= 'a' && ch <= 'z') ||
-                    (ch >= 'A' && ch <= 'Z') ||
-                    (ch >= '0' && ch <= '9'))
-                {
-                    end++;
-                    continue;
-                }
-
-                break;
-            }
-
-            if (end <= start)
-            {
-                return null;
-            }
-
-            return message.Substring(start, end - start);
         }
 
         private static string BuildDelimitedIds(IEnumerable<string> ids)
@@ -1318,152 +954,34 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 .ToString("yyyy-MM-ddTHH:mm:ss");
         }
 
-        private bool ShouldLogRunProfile(long durationMs, StrategyRunTrace trace)
+        private sealed class StrategyRunMetrics
         {
-            if (!_diagnostics.EnableRunProfileLog)
-            {
-                return false;
-            }
-
-            if (_diagnostics.LogEveryRunTask)
-            {
-                return true;
-            }
-
-            if (trace.ExecutedCount > 0)
-            {
-                return true;
-            }
-
-            return IsSlowRun(durationMs, trace);
-        }
-
-        private bool IsSlowRun(long durationMs, StrategyRunTrace trace)
-        {
-            return durationMs >= _diagnostics.SlowRunThresholdMs ||
-                   trace.IndicatorMs >= _diagnostics.SlowIndicatorRefreshThresholdMs;
-        }
-
-        private string? BuildRunExtraJson(
-            long durationMs,
-            int matchedCount,
-            StrategyRunTrace? trace,
-            Exception? runError,
-            string traceId)
-        {
-            if (trace == null)
-            {
-                return null;
-            }
-
-            var payload = new
-            {
-                trace = new
-                {
-                    traceId,
-                    engineInstance = _engineInstanceId,
-                    status = runError == null ? "success" : "fail",
-                    error = runError?.Message
-                },
-                stage = new
-                {
-                    lookupMs = trace.LookupMs,
-                    indicatorMs = trace.IndicatorMs,
-                    executeMs = trace.ExecuteMs,
-                    totalMs = (int)Math.Min(durationMs, int.MaxValue)
-                },
-                indicator = new
-                {
-                    requestCount = trace.IndicatorRequestCount,
-                    successCount = trace.IndicatorSuccessCount,
-                    totalCount = trace.IndicatorTotalCount
-                },
-                strategy = new
-                {
-                    matchedCount,
-                    runnableCount = trace.RunnableStrategyCount,
-                    executedCount = trace.ExecutedCount,
-                    stateSkippedCount = trace.SkippedByStateCount,
-                    runtimeGateSkippedCount = trace.SkippedByRuntimeGateCount,
-                    perStrategySamples = trace.GetStrategyExecSamples(),
-                    perStrategyAvgMs = trace.GetStrategyExecAverageMs(),
-                    perStrategyMaxMs = trace.GetStrategyExecMaxMs()
-                },
-                counters = new
-                {
-                    skippedCount = trace.SkippedCount,
-                    conditionEvalCount = trace.ConditionEvalCount,
-                    actionExecCount = trace.ActionExecCount,
-                    openTaskCount = trace.OpenTaskCount
-                }
-            };
-
-            return JsonSerializer.Serialize(payload);
-        }
-
-        private readonly struct IndicatorRefreshSnapshot
-        {
-            public IndicatorRefreshSnapshot(int requestCount, int successCount, int totalCount)
-            {
-                RequestCount = Math.Max(0, requestCount);
-                SuccessCount = Math.Max(0, successCount);
-                TotalCount = Math.Max(0, totalCount);
-            }
-
-            public int RequestCount { get; }
-            public int SuccessCount { get; }
-            public int TotalCount { get; }
-
-            public static IndicatorRefreshSnapshot Empty => new(0, 0, 0);
-        }
-
-        private sealed class StrategyRunTrace
-        {
-            private long _strategyExecTotalMs;
-            private int _strategyExecSamples;
-            private int _strategyExecMaxMs;
-            private readonly ConcurrentBag<string> _executedStrategyIds = new();
-            private readonly ConcurrentBag<string> _openTaskStrategyIds = new();
-            private readonly ConcurrentBag<string> _openTaskTraceIds = new();
-
-            public int LookupMs;
-            public int IndicatorMs;
-            public int ExecuteMs;
-            public int IndicatorRequestCount;
-            public int IndicatorSuccessCount;
-            public int IndicatorTotalCount;
-            public int RunnableStrategyCount;
-            public int SkippedByStateCount;
-            public int SkippedByRuntimeGateCount;
+            public readonly ConcurrentDictionary<string, byte> ExecutedStrategyIds = new(StringComparer.Ordinal);
+            public readonly ConcurrentDictionary<string, byte> OpenTaskStrategyIds = new(StringComparer.Ordinal);
             public int ExecutedCount;
             public int SkippedCount;
             public int ConditionEvalCount;
             public int ActionExecCount;
             public int OpenTaskCount;
 
-            public void IncrementRunnableStrategy()
+            public void AddExecutedStrategy(string uid)
             {
-                Interlocked.Increment(ref RunnableStrategyCount);
+                if (string.IsNullOrWhiteSpace(uid))
+                {
+                    return;
+                }
+
+                ExecutedStrategyIds.TryAdd(uid, 0);
             }
 
-            public void IncrementSkippedByState()
+            public void AddOpenTaskStrategy(string uid)
             {
-                Interlocked.Increment(ref SkippedByStateCount);
-            }
+                if (string.IsNullOrWhiteSpace(uid))
+                {
+                    return;
+                }
 
-            public void IncrementSkippedByRuntimeGate()
-            {
-                Interlocked.Increment(ref SkippedByRuntimeGateCount);
-            }
-
-            public void IncrementExecuted()
-            {
-                Interlocked.Increment(ref ExecutedCount);
-            }
-
-            public void IncrementSkipped()
-            {
-                Interlocked.Increment(ref SkippedCount);
+                OpenTaskStrategyIds.TryAdd(uid, 0);
             }
 
             public void IncrementConditionEval()
@@ -1479,94 +997,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
             public void IncrementOpenTask()
             {
                 Interlocked.Increment(ref OpenTaskCount);
-            }
-
-            public void AddExecutedStrategy(string uid)
-            {
-                if (string.IsNullOrWhiteSpace(uid))
-                {
-                    return;
-                }
-
-                _executedStrategyIds.Add(uid);
-            }
-
-            public void AddOpenTaskStrategy(string uid)
-            {
-                if (string.IsNullOrWhiteSpace(uid))
-                {
-                    return;
-                }
-
-                _openTaskStrategyIds.Add(uid);
-            }
-
-            public IEnumerable<string> EnumerateExecutedStrategyIds()
-            {
-                return _executedStrategyIds;
-            }
-
-            public IEnumerable<string> EnumerateOpenTaskStrategyIds()
-            {
-                return _openTaskStrategyIds;
-            }
-
-            public void AddOpenTaskTraceId(string traceId)
-            {
-                if (string.IsNullOrWhiteSpace(traceId))
-                {
-                    return;
-                }
-
-                _openTaskTraceIds.Add(traceId);
-            }
-
-            public IEnumerable<string> EnumerateOpenTaskTraceIds()
-            {
-                return _openTaskTraceIds;
-            }
-
-            public void RecordStrategyExec(long elapsedMs)
-            {
-                var ms = (int)Math.Clamp(elapsedMs, 0L, (long)int.MaxValue);
-                Interlocked.Add(ref _strategyExecTotalMs, ms);
-                Interlocked.Increment(ref _strategyExecSamples);
-
-                while (true)
-                {
-                    var currentMax = Volatile.Read(ref _strategyExecMaxMs);
-                    if (ms <= currentMax)
-                    {
-                        break;
-                    }
-
-                    if (Interlocked.CompareExchange(ref _strategyExecMaxMs, ms, currentMax) == currentMax)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            public int GetStrategyExecSamples()
-            {
-                return Volatile.Read(ref _strategyExecSamples);
-            }
-
-            public int GetStrategyExecAverageMs()
-            {
-                var samples = Volatile.Read(ref _strategyExecSamples);
-                if (samples <= 0)
-                {
-                    return 0;
-                }
-
-                var total = Volatile.Read(ref _strategyExecTotalMs);
-                return (int)Math.Clamp(total / samples, 0L, (long)int.MaxValue);
-            }
-
-            public int GetStrategyExecMaxMs()
-            {
-                return Volatile.Read(ref _strategyExecMaxMs);
             }
         }
 
@@ -1608,11 +1038,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
             public static StrategyRuntimeGate BlockAll => new(false, false);
         }
 
-        private IndicatorRefreshSnapshot UpdateIndicatorsBeforeExecute(IEnumerable<StrategyModel> strategies, MarketDataTask task)
+        private void UpdateIndicatorsBeforeExecute(IEnumerable<StrategyModel> strategies, MarketDataTask task)
         {
             if (_indicatorEngine == null)
             {
-                return IndicatorRefreshSnapshot.Empty;
+                return;
             }
 
             var exchange = MarketDataKeyNormalizer.NormalizeExchange(task.Exchange);
@@ -1657,32 +1087,18 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (requestMap.Count == 0)
             {
-                return IndicatorRefreshSnapshot.Empty;
+                return;
             }
 
-            var normalizedTask = new MarketDataTask(
-                exchange,
-                symbol,
-                timeframe,
-                task.CandleTimestamp,
-                task.TimeframeSec,
-                task.IsBarClose,
-                MarketDataTask.NormalizeTraceId(task.TraceId));
+            var normalizedTask = new MarketDataTask(exchange, symbol, timeframe, task.CandleTimestamp, task.IsBarClose);
             var indicatorTask = new IndicatorTask(normalizedTask, requestMap.Values.ToList());
             var result = _indicatorEngine.ProcessTaskNow(indicatorTask);
-            if (_diagnostics.LogEveryRunTask && _logger.IsEnabled(LogLevel.Debug))
-            {
-                _logger.LogDebug(
-                    "指标刷新: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Total}",
-                    normalizedTask.Exchange,
-                    normalizedTask.Symbol,
-                    normalizedTask.Timeframe,
-                    FormatTimestamp(normalizedTask.CandleTimestamp),
-                    result.SuccessCount,
-                    result.TotalCount);
-            }
-            return new IndicatorRefreshSnapshot(
-                requestMap.Count,
+            _logger.LogDebug(
+                "指标刷新: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Total}",
+                normalizedTask.Exchange,
+                normalizedTask.Symbol,
+                normalizedTask.Timeframe,
+                FormatTimestamp(normalizedTask.CandleTimestamp),
                 result.SuccessCount,
                 result.TotalCount);
         }
@@ -1822,5 +1238,99 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
         }
 
+        /// <summary>
+        /// 测试用：记录策略检查结果到数据库（后续会删除）
+        /// </summary>
+        private async Task LogCheckResultAsync(
+            StrategyExecutionContext context,
+            string stage,
+            int groupIndex,
+            StrategyMethod condition,
+            ConditionEvaluationResult result,
+            bool isRequired,
+            CancellationToken ct)
+        {
+            if (_testCheckLogRepository == null)
+            {
+                return; // 非测试环境，跳过记录
+            }
+
+            try
+            {
+                var trade = context.StrategyConfig?.Trade;
+                if (trade == null)
+                {
+                    return;
+                }
+
+                // 构建条件键
+                var conditionKey = ConditionKeyBuilder.BuildKey(trade, condition);
+
+                // 构建检查过程详情（JSON格式）
+                var checkProcess = new
+                {
+                    stage = stage,
+                    groupIndex = groupIndex,
+                    conditionKey = conditionKey.Text,
+                    conditionKeyId = conditionKey.Id,
+                    method = condition.Method,
+                    isRequired = isRequired,
+                    enabled = condition.Enabled,
+                    result = new
+                    {
+                        success = result.Success,
+                        message = result.Message,
+                        key = result.Key
+                    },
+                    strategy = new
+                    {
+                        uidCode = context.Strategy.UidCode,
+                        state = context.Strategy.State.ToString()
+                    },
+                    task = new
+                    {
+                        exchange = context.Task.Exchange,
+                        symbol = context.Task.Symbol,
+                        timeframe = context.Task.Timeframe,
+                        candleTimestamp = context.Task.CandleTimestamp,
+                        isBarClose = context.Task.IsBarClose
+                    },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                var checkProcessJson = JsonSerializer.Serialize(checkProcess, new JsonSerializerOptions
+                {
+                    WriteIndented = false,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
+
+                var log = new TestStrategyCheckLog
+                {
+                    Uid = context.Strategy.CreatorUserId,
+                    UsId = context.Strategy.Id,
+                    Exchange = trade.Exchange,
+                    Symbol = trade.Symbol,
+                    Timeframe = trade.TimeframeSec.ToString(),
+                    CandleTimestamp = context.Task.CandleTimestamp,
+                    Stage = stage,
+                    GroupIndex = groupIndex,
+                    ConditionKey = conditionKey.Id,
+                    Method = condition.Method,
+                    IsRequired = isRequired,
+                    Success = result.Success,
+                    Message = result.Message ?? string.Empty,
+                    CheckProcess = checkProcessJson,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _testCheckLogRepository.InsertAsync(log, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // 记录失败不影响主流程，只记录警告日志
+                _logger.LogWarning(ex, "记录测试检查日志失败: uid={Uid} usId={UsId} stage={Stage}", 
+                    context.Strategy.CreatorUserId, context.Strategy.Id, stage);
+            }
+        }
     }
 }

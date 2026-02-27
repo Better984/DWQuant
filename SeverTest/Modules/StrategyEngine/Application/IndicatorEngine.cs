@@ -2,21 +2,26 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Models;
 using ServerTest.Models.Indicator;
-using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Options;
 using System.Collections.Concurrent;
-using System.Diagnostics;
+using System.Threading.Channels;
+using ServerTest.Services;
 
 namespace ServerTest.Modules.StrategyEngine.Application
 {
     public sealed class IndicatorEngine
     {
-        // 临时排障日志：测试完成后请删除。
-        private const bool EnableTempIndicatorPerfLog = true;
         private readonly IMarketDataProvider _marketDataProvider;
         private readonly ILogger<IndicatorEngine> _logger;
+        private readonly TalibIndicatorCatalog? _catalog;
         private readonly TalibIndicatorCalculator _calculator;
-        private readonly int _computeParallelism;
+        private readonly Channel<IndicatorTask> _taskChannel;
+        private readonly Channel<IndicatorTask> _criticalWriteChannel;
+        private readonly QueuePressureMonitor _queueMonitor;
+        private int _pendingCriticalWrites;
+        private Task? _criticalWriteWorker;
+        private readonly object _criticalWriteWorkerLock = new();
+        private const int MaxPendingCriticalWrites = 128;
 
         private readonly ConcurrentDictionary<IndicatorKey, IndicatorHandle> _handles = new();
 
@@ -24,32 +29,30 @@ namespace ServerTest.Modules.StrategyEngine.Application
             IMarketDataProvider marketDataProvider,
             ILogger<IndicatorEngine> logger,
             IOptions<RuntimeQueueOptions> queueOptions,
-            TalibWasmNodePool? wasmPool = null)
+            TalibWasmNodeInvoker? wasmInvoker = null)
         {
-            _ = queueOptions;
             _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _calculator = new TalibIndicatorCalculator(TryLoadCatalog(), wasmPool);
-            var cpuParallelism = Math.Max(2, Environment.ProcessorCount);
-            if (wasmPool is { IsEnabled: true })
+            var options = queueOptions?.Value ?? new RuntimeQueueOptions();
+            var indicatorQueueOptions = NormalizeQueueOptions(options.Indicator, _logger);
+            // 初始化队列，启用有界通道与背压策略
+            _taskChannel = ChannelFactory.Create<IndicatorTask>(
+                indicatorQueueOptions,
+                "IndicatorEngine",
+                logger,
+                singleReader: false,
+                singleWriter: false);
+            _criticalWriteChannel = Channel.CreateBounded<IndicatorTask>(new BoundedChannelOptions(MaxPendingCriticalWrites)
             {
-                // WASM 调用最终受 Node 池并发能力约束，避免线程数远大于池大小导致大量锁等待。
-                _computeParallelism = Math.Max(1, Math.Min(cpuParallelism, wasmPool.PoolSize));
-                _logger.LogInformation(
-                    "指标并行度已按 WASM 池收敛: parallelism={Parallelism}, cpuParallelism={CpuParallelism}, wasmPoolSize={WasmPoolSize}",
-                    _computeParallelism,
-                    cpuParallelism,
-                    wasmPool.PoolSize);
-            }
-            else
-            {
-                _computeParallelism = cpuParallelism;
-            }
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropWrite
+            });
+            _queueMonitor = new QueuePressureMonitor("IndicatorEngine", indicatorQueueOptions, logger);
+            _catalog = TryLoadCatalog();
+            _calculator = new TalibIndicatorCalculator(_catalog, wasmInvoker);
         }
 
-        /// <summary>
-        /// 极简模式：收到任务后直接异步并行计算，不走队列补写/预计算分支。
-        /// </summary>
         public void EnqueueTask(IndicatorTask task)
         {
             if (task == null || task.Requests == null || task.Requests.Count == 0)
@@ -58,50 +61,63 @@ namespace ServerTest.Modules.StrategyEngine.Application
             }
 
             RegisterRequests(task.Requests);
-            _ = ProcessTaskInternalAsync(task, log: false).ContinueWith(t =>
+            if (!_taskChannel.Writer.TryWrite(task))
             {
                 _logger.LogWarning(
-                    t.Exception,
-                    "指标异步任务执行异常: {Exchange} {Symbol} {Timeframe} time={Time}",
+                    "指标任务入队失败: {Exchange} {Symbol} {Timeframe} time={Time}",
                     task.MarketTask.Exchange,
                     task.MarketTask.Symbol,
                     task.MarketTask.Timeframe,
                     FormatTimestamp(task.MarketTask.CandleTimestamp));
-            }, TaskContinuationOptions.OnlyOnFaulted);
-        }
-
-        /// <summary>
-        /// 策略加载时预注册指标请求，提前创建句柄，减少首次执行抖动。
-        /// </summary>
-        public void RegisterRequestsForStrategy(IReadOnlyList<IndicatorRequest> requests)
-        {
-            if (requests == null || requests.Count == 0)
-            {
+                _queueMonitor.OnEnqueueFailed();
+                if (task.MarketTask.IsBarClose)
+                {
+                    TryScheduleCriticalWrite(task);
+                }
                 return;
             }
 
-            RegisterRequests(requests);
+            _queueMonitor.OnEnqueueSuccess();
+
+            _logger.LogInformation(
+                "指标引擎接收任务: {Exchange} {Symbol} {Timeframe} time={Time} 请求数={Count}",
+                task.MarketTask.Exchange,
+                task.MarketTask.Symbol,
+                task.MarketTask.Timeframe,
+                FormatTimestamp(task.MarketTask.CandleTimestamp),
+                task.Requests.Count);
         }
 
         /// <summary>
-        /// 极简模式下不做“预计算水位”判定，统一按任务触发计算。
+        /// 收线场景下的关键补写：队列满时异步等待空位，降低关键指标刷新任务丢失概率。
         /// </summary>
-        public bool IsTaskPrecomputed(MarketDataTask task)
+        private void TryScheduleCriticalWrite(IndicatorTask task)
         {
-            return false;
+            var pending = Interlocked.Increment(ref _pendingCriticalWrites);
+            if (pending > MaxPendingCriticalWrites)
+            {
+                Interlocked.Decrement(ref _pendingCriticalWrites);
+                _logger.LogError(
+                    "指标关键补写队列已满，丢弃任务: {Exchange} {Symbol} {Timeframe} time={Time}",
+                    task.MarketTask.Exchange,
+                    task.MarketTask.Symbol,
+                    task.MarketTask.Timeframe,
+                    FormatTimestamp(task.MarketTask.CandleTimestamp));
+                return;
+            }
+
+            if (!_criticalWriteChannel.Writer.TryWrite(task))
+            {
+                Interlocked.Decrement(ref _pendingCriticalWrites);
+                _logger.LogError(
+                    "指标关键补写总队列已满，丢弃任务: {Exchange} {Symbol} {Timeframe} time={Time}",
+                    task.MarketTask.Exchange,
+                    task.MarketTask.Symbol,
+                    task.MarketTask.Timeframe,
+                    FormatTimestamp(task.MarketTask.CandleTimestamp));
+            }
         }
 
-        /// <summary>
-        /// 极简模式下不维护水位；保留该方法仅为兼容调用方。
-        /// </summary>
-        public void MarkTaskPrecomputed(MarketDataTask task)
-        {
-            // 无操作
-        }
-
-        /// <summary>
-        /// 保留兼容入口：当前版本已关闭指标独立队列消费，主计算由策略执行前直接触发。
-        /// </summary>
         public async Task RunAsync(int workerCount, CancellationToken cancellationToken)
         {
             if (workerCount <= 0)
@@ -109,28 +125,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 throw new ArgumentOutOfRangeException(nameof(workerCount));
             }
 
-            _logger.LogInformation("指标独立消费 worker 已关闭，使用策略执行前并行刷新，workerCount={WorkerCount}", workerCount);
-            try
+            var workers = new Task[workerCount + 1];
+            for (var i = 0; i < workerCount; i++)
             {
-                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                workers[i] = ConsumeAsync(cancellationToken);
             }
-            catch (OperationCanceledException)
-            {
-                // 服务停止时正常退出。
-            }
-        }
 
-        /// <summary>
-        /// 极简模式下不做自动预计算，统一使用“任务到来即算”的主路径。
-        /// </summary>
-        public async Task SubscribeAndAutoUpdateAsync(
-            MarketDataEngine marketDataEngine,
-            CancellationToken cancellationToken)
-        {
-            _ = marketDataEngine;
-            _ = cancellationToken;
-            _logger.LogInformation("指标自动预计算已关闭，使用主执行链路并行计算");
-            await Task.CompletedTask.ConfigureAwait(false);
+            // 关键补写消费 worker 固定单线程，避免高压下每次失败都创建 Task.Run。
+            workers[workerCount] = EnsureCriticalWriteWorker(cancellationToken);
+            await Task.WhenAll(workers).ConfigureAwait(false);
         }
 
         public bool TryGetValue(
@@ -150,7 +153,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var handle = GetOrCreateHandle(effectiveRequest);
             handle.UpdateMaxOffset(effectiveRequest.MaxOffset);
 
-            if (handle.TryGetValueFresh(offset, normalizedTask.CandleTimestamp, out value))
+            if (handle.TryGetValue(offset, out value))
             {
                 return true;
             }
@@ -160,7 +163,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
-            return handle.TryGetValueFresh(offset, normalizedTask.CandleTimestamp, out value);
+            return handle.TryGetValue(offset, out value);
         }
 
         public bool TryGetCachedValue(IndicatorKey key, int offset, out double value)
@@ -174,172 +177,67 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return handle.TryGetValue(offset, out value);
         }
 
-        public (int SuccessCount, int TotalCount) ProcessTaskNow(IndicatorTask task)
+        private async Task ConsumeAsync(CancellationToken cancellationToken)
         {
-            return ProcessTaskInternalAsync(task, log: false).GetAwaiter().GetResult();
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                IndicatorTask task;
+                try
+                {
+                    task = await _taskChannel.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                    _queueMonitor.OnDequeue();
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                ProcessTask(task);
+            }
         }
 
-        private async Task<(int SuccessCount, int TotalCount)> ProcessTaskInternalAsync(
-            IndicatorTask task,
-            bool log,
-            CancellationToken cancellationToken = default)
+        public (int SuccessCount, int TotalCount) ProcessTaskNow(IndicatorTask task)
+        {
+            return ProcessTaskInternal(task, log: true);
+        }
+
+        private void ProcessTask(IndicatorTask task)
+        {
+            ProcessTaskInternal(task, log: true);
+        }
+
+        private (int SuccessCount, int TotalCount) ProcessTaskInternal(IndicatorTask task, bool log)
         {
             if (task == null || task.Requests == null || task.Requests.Count == 0)
             {
                 return (0, 0);
             }
 
-            var mergedRequests = MergeRequests(task.Requests);
-            if (mergedRequests.Count == 0)
-            {
-                return (0, 0);
-            }
-
-            var acceptedAt = DateTime.Now;
-            var taskStartTicks = Stopwatch.GetTimestamp();
             var normalizedTask = NormalizeTask(task.MarketTask);
             var successCount = 0;
-            var detailLogs = EnableTempIndicatorPerfLog
-                ? new ConcurrentBag<IndicatorComputeDetail>()
-                : null;
-            var parallelOptions = new ParallelOptions
+            foreach (var request in task.Requests)
             {
-                MaxDegreeOfParallelism = _computeParallelism,
-                CancellationToken = cancellationToken
-            };
-
-            await Parallel.ForEachAsync(mergedRequests, parallelOptions, (request, _) =>
-            {
-                var indicatorStartTicks = Stopwatch.GetTimestamp();
-                var threadId = Environment.CurrentManagedThreadId;
                 var handle = GetOrCreateHandle(request);
                 handle.UpdateMaxOffset(request.MaxOffset);
-                var updated = handle.Update(normalizedTask, _marketDataProvider, _calculator, _logger, out var computeCore);
-                if (updated)
+                if (handle.Update(normalizedTask, _marketDataProvider, _calculator, _logger))
                 {
-                    Interlocked.Increment(ref successCount);
-                }
-
-                if (detailLogs != null)
-                {
-                    detailLogs.Add(new IndicatorComputeDetail(
-                        request.Key.ToString(),
-                        computeCore,
-                        ElapsedMs(indicatorStartTicks, Stopwatch.GetTimestamp()),
-                        updated,
-                        threadId));
-                }
-
-                return ValueTask.CompletedTask;
-            }).ConfigureAwait(false);
-
-            var totalMs = ElapsedMs(taskStartTicks, Stopwatch.GetTimestamp());
-            if (EnableTempIndicatorPerfLog)
-            {
-                //_logger.LogInformation(
-                //    "[临时指标日志][任务] {Exchange} {Symbol} {Timeframe} K线={CandleTime} 接收时间={AcceptedAt} 指标数={Count} 成功={Success} 并行度={Parallelism} 总耗时={TotalMs}ms",
-                //    normalizedTask.Exchange,
-                //    normalizedTask.Symbol,
-                //    normalizedTask.Timeframe,
-                //    FormatTimestamp(normalizedTask.CandleTimestamp),
-                //    acceptedAt.ToString("yyyy-MM-dd HH:mm:ss.fff"),
-                //    mergedRequests.Count,
-                //    successCount,
-                //    _computeParallelism,
-                //    totalMs);
-
-                if (detailLogs != null && !detailLogs.IsEmpty)
-                {
-                    var details = detailLogs.ToArray();
-                    Array.Sort(details, static (a, b) => b.DurationMs.CompareTo(a.DurationMs));
-
-                    var threadIds = new SortedSet<int>();
-                    var coreCounter = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var detail in details)
-                    {
-                        threadIds.Add(detail.ThreadId);
-                        var coreKey = string.IsNullOrWhiteSpace(detail.Core) ? "未知" : detail.Core;
-                        if (coreCounter.TryGetValue(coreKey, out var existed))
-                        {
-                            coreCounter[coreKey] = existed + 1;
-                        }
-                        else
-                        {
-                            coreCounter[coreKey] = 1;
-                        }
-                    }
-
-                    var coreSummaryParts = new List<string>(coreCounter.Count);
-                    foreach (var pair in coreCounter.OrderByDescending(static p => p.Value))
-                    {
-                        coreSummaryParts.Add($"{pair.Key}:{pair.Value}");
-                    }
-                    var coreSummary = coreSummaryParts.Count == 0 ? "无" : string.Join(", ", coreSummaryParts);
-                    var threadSummary = threadIds.Count == 0 ? "无" : string.Join(",", threadIds);
-                    _logger.LogInformation(
-                        "[临时指标日志][核心汇总] {Exchange} {Symbol} {Timeframe} 参与线程数={ThreadCount} 线程={Threads} 计算核心分布={CoreSummary}",
-                        normalizedTask.Exchange,
-                        normalizedTask.Symbol,
-                        normalizedTask.Timeframe,
-                        threadIds.Count,
-                        threadSummary,
-                        coreSummary);
-
-                    //foreach (var detail in details)
-                    //{
-                    //    _logger.LogInformation(
-                    //        "[临时指标日志][明细] Key={Key} 成功={Success} 核心={Core} 线程={ThreadId} 耗时={DurationMs}ms",
-                    //        detail.Key,
-                    //        detail.Success,
-                    //        detail.Core,
-                    //        detail.ThreadId,
-                    //        detail.DurationMs);
-                    //}
+                    successCount++;
                 }
             }
 
             if (log)
             {
-                _logger.LogDebug(
+                _logger.LogInformation(
                     "指标任务完成: {Exchange} {Symbol} {Timeframe} time={Time} 成功={Success}/{Total}",
                     normalizedTask.Exchange,
                     normalizedTask.Symbol,
                     normalizedTask.Timeframe,
                     FormatTimestamp(normalizedTask.CandleTimestamp),
                     successCount,
-                    mergedRequests.Count);
+                    task.Requests.Count);
             }
 
-            return (successCount, mergedRequests.Count);
-        }
-
-        private static int ElapsedMs(long startTicks, long endTicks)
-        {
-            return (int)((endTicks - startTicks) * 1000 / Stopwatch.Frequency);
-        }
-
-        private static List<IndicatorRequest> MergeRequests(IReadOnlyList<IndicatorRequest> requests)
-        {
-            var map = new Dictionary<IndicatorKey, IndicatorRequest>();
-            for (var i = 0; i < requests.Count; i++)
-            {
-                var request = requests[i];
-                if (request == null)
-                {
-                    continue;
-                }
-
-                if (map.TryGetValue(request.Key, out var existing))
-                {
-                    map[request.Key] = existing.WithMaxOffset(Math.Max(existing.MaxOffset, request.MaxOffset));
-                }
-                else
-                {
-                    map[request.Key] = request;
-                }
-            }
-
-            return map.Values.ToList();
+            return (successCount, task.Requests.Count);
         }
 
         private void RegisterRequests(IReadOnlyList<IndicatorRequest> requests)
@@ -370,14 +268,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             try
             {
-                return new MarketDataTask(
-                    exchange,
-                    symbol,
-                    timeframe,
-                    task.CandleTimestamp,
-                    task.TimeframeSec,
-                    task.IsBarClose,
-                    MarketDataTask.NormalizeTraceId(task.TraceId));
+                return new MarketDataTask(exchange, symbol, timeframe, task.CandleTimestamp, task.IsBarClose);
             }
             catch
             {
@@ -395,6 +286,82 @@ namespace ServerTest.Modules.StrategyEngine.Application
             return DateTimeOffset.FromUnixTimeMilliseconds(timestamp)
                 .ToLocalTime()
                 .ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private static QueueOptions NormalizeQueueOptions(QueueOptions? source, ILogger logger)
+        {
+            source ??= new QueueOptions();
+            var fullMode = source.FullMode?.Trim();
+            if (string.Equals(fullMode, "dropoldest", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fullMode, "dropnewest", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "指标队列 FullMode={FullMode} 可能导致关键任务静默覆盖，已自动调整为 DropWrite",
+                    source.FullMode);
+                fullMode = "DropWrite";
+            }
+
+            return new QueueOptions
+            {
+                Capacity = Math.Max(1, source.Capacity),
+                FullMode = string.IsNullOrWhiteSpace(fullMode) ? "DropWrite" : fullMode,
+                WarningThresholdPercent = source.WarningThresholdPercent,
+                WarningIntervalSeconds = source.WarningIntervalSeconds
+            };
+        }
+
+        private Task EnsureCriticalWriteWorker(CancellationToken cancellationToken)
+        {
+            lock (_criticalWriteWorkerLock)
+            {
+                if (_criticalWriteWorker == null || _criticalWriteWorker.IsCompleted)
+                {
+                    _criticalWriteWorker = Task.Run(() => ConsumeCriticalWritesAsync(cancellationToken), cancellationToken);
+                }
+
+                return _criticalWriteWorker;
+            }
+        }
+
+        private async Task ConsumeCriticalWritesAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await foreach (var task in _criticalWriteChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        await _taskChannel.Writer.WriteAsync(task, cancellationToken).ConfigureAwait(false);
+                        _queueMonitor.OnEnqueueSuccess();
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _queueMonitor.OnEnqueueFailed();
+                    }
+                    catch (Exception ex)
+                    {
+                        _queueMonitor.OnEnqueueFailed();
+                        _logger.LogWarning(ex,
+                            "指标关键补写异常: {Exchange} {Symbol} {Timeframe} time={Time}",
+                            task.MarketTask.Exchange,
+                            task.MarketTask.Symbol,
+                            task.MarketTask.Timeframe,
+                            FormatTimestamp(task.MarketTask.CandleTimestamp));
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _pendingCriticalWrites);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 停机阶段取消消费，忽略即可。
+            }
         }
 
         private TalibIndicatorCatalog? TryLoadCatalog()
@@ -416,12 +383,5 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return null;
             }
         }
-
-        private readonly record struct IndicatorComputeDetail(
-            string Key,
-            string Core,
-            int DurationMs,
-            bool Success,
-            int ThreadId);
     }
 }

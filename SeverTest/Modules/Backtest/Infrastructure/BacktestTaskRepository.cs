@@ -502,7 +502,7 @@ WHERE task_id = @taskId
         }
 
         /// <summary>
-        /// 取消任务（仅允许取消 queued 任务）。
+        /// 取消任务。
         /// </summary>
         public async Task<bool> CancelAsync(long taskId, long userId, CancellationToken ct = default)
         {
@@ -513,7 +513,7 @@ SET status = 'cancelled',
     stage = 'cancelled',
     stage_name = '已取消',
     assigned_worker_id = NULL
-WHERE task_id = @taskId AND user_id = @userId AND status = 'queued'";
+WHERE task_id = @taskId AND user_id = @userId AND status IN ('queued', 'running')";
 
             await using var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
             await using var cmd = new MySqlCommand(sql, conn);

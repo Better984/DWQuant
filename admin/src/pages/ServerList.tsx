@@ -29,8 +29,6 @@ import {
   UpOutlined,
   DeleteOutlined,
   PartitionOutlined,
-  ThunderboltOutlined,
-  ApartmentOutlined,
 } from '@ant-design/icons';
 import { HttpClient } from '../network/httpClient';
 import { getToken } from '../network';
@@ -77,7 +75,6 @@ interface ServerNode {
 }
 
 interface Strategy {
-  uid?: number;
   usId: number;
   defId: number;
   defName: string;
@@ -205,159 +202,17 @@ interface RiskTreeNodeData {
   rangeText?: string;
 }
 
-/** 实盘布局项：按 exchange/symbol/timeframe 聚合 */
-interface TaskTraceLayoutItem {
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  strategyCount: number;
-  taskCount: number;
-  totalDurationMs: number;
-  lastExecutedAt: string;
-}
-
-interface MarketByMarketItem {
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  strategyCount: number;
-  lastRunAt?: string | null;
-}
-
-interface MarketTaskSummary {
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  taskCount: number;
-  avgDurationMs: number;
-  successRatePct: number;
-  stageStats?: { eventStage: string; traceCount: number; avgDurationMs: number }[];
-  recentOrders?: {
-    orderId?: string | null;
-    uid?: number | null;
-    usId?: number | null;
-    positionSide?: string | null;
-    qty?: number | null;
-    averagePrice?: number | null;
-    createdAt?: string;
-  }[];
-  recentTasks?: {
-    runAt: string;
-    traceId?: string;
-    runStatus?: string;
-    exchange: string;
-    symbol: string;
-    timeframe: string;
-    candleTimestamp: number;
-    isBarClose: boolean;
-    durationMs: number;
-    lookupMs: number;
-    indicatorMs: number;
-    executeMs: number;
-    matchedCount: number;
-    runnableStrategyCount: number;
-    executedCount: number;
-    skippedCount: number;
-    conditionEvalCount: number;
-    actionExecCount: number;
-    openTaskCount: number;
-    stateSkippedCount: number;
-    runtimeGateSkippedCount: number;
-    indicatorRequestCount: number;
-    indicatorSuccessCount: number;
-    indicatorTotalCount: number;
-    executedStrategyIds?: string | null;
-    openTaskStrategyIds?: string | null;
-    openTaskTraceIds?: string | null;
-    openOrderIds?: string | null;
-    engineInstance?: string | null;
-    perStrategySamples: number;
-    perStrategyAvgMs: number;
-    perStrategyMaxMs: number;
-    successRatePct: number;
-    openTaskRatePct: number;
-  }[];
-}
-
-type MarketRecentTaskItem = NonNullable<MarketTaskSummary['recentTasks']>[number];
-
-interface StrategyRunMetricItem {
-  runAt: string;
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  candleTimestamp: number;
-  isBarClose: boolean;
-  durationMs: number;
-  matchedCount: number;
-  executedCount: number;
-  skippedCount: number;
-  conditionEvalCount: number;
-  actionExecCount: number;
-  openTaskCount: number;
-  engineInstance?: string | null;
-  traceId?: string | null;
-  runStatus?: string | null;
-  lookupMs: number;
-  indicatorMs: number;
-  executeMs: number;
-  perStrategySamples: number;
-  perStrategyAvgMs: number;
-  perStrategyMaxMs: number;
-  successRatePct: number;
-  openTaskRatePct: number;
-}
-
-/** 实盘任务按 trace_id 聚合的摘要（列表展示） */
-interface TaskTraceSummaryItem {
-  traceId: string;
-  exchange?: string | null;
-  symbol?: string | null;
-  timeframe?: string | null;
-  candleTimestamp?: number | null;
-  strategyCount: number;
-  totalDurationMs: number;
-  firstCreatedAt: string;
-  lastCreatedAt: string;
-}
-
-/** 实盘任务链路追踪明细项（详情弹窗展示） */
-interface TaskTraceLogItem {
-  id: number;
-  traceId: string;
-  parentTraceId?: string | null;
-  eventStage: string;
-  eventStatus: string;
-  actorModule: string;
-  actorInstance: string;
-  uid?: number | null;
-  usId?: number | null;
-  strategyUid?: string | null;
-  exchange?: string | null;
-  symbol?: string | null;
-  timeframe?: string | null;
-  candleTimestamp?: number | null;
-  isBarClose?: boolean | null;
-  method?: string | null;
-  flow?: string | null;
-  durationMs?: number | null;
-  metricsJson?: string | null;
-  errorMessage?: string | null;
-  createdAt: string;
-}
-
 const ServerList: React.FC = () => {
   const [servers, setServers] = useState<ServerNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
+  const [strategiesLoading, setStrategiesLoading] = useState(false);
+  const [strategySearch, setStrategySearch] = useState<Record<string, string>>({});
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
   const [strategyPositions, setStrategyPositions] = useState<Position[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [strategyDetailVisible, setStrategyDetailVisible] = useState(false);
-  const [strategyRunMetrics, setStrategyRunMetrics] = useState<StrategyRunMetricItem[]>([]);
-  const [strategyRunMetricsLoading, setStrategyRunMetricsLoading] = useState(false);
-  const [selectedRunMetric, setSelectedRunMetric] = useState<StrategyRunMetricItem | null>(null);
-  const [runMetricDetailVisible, setRunMetricDetailVisible] = useState(false);
   const [checkLogs, setCheckLogs] = useState<CheckLog[]>([]);
   const [checkLogsLoading, setCheckLogsLoading] = useState(false);
   const [checkLogsVisible, setCheckLogsVisible] = useState(false);
@@ -373,36 +228,6 @@ const ServerList: React.FC = () => {
   const [riskPositionSearch, setRiskPositionSearch] = useState<string>('');
   const [riskPositionDetailVisible, setRiskPositionDetailVisible] = useState(false);
   const [selectedRiskPosition, setSelectedRiskPosition] = useState<RiskPositionSnapshot | null>(null);
-  const [taskTraceItems, setTaskTraceItems] = useState<TaskTraceSummaryItem[]>([]);
-  const [taskTraceTotal, setTaskTraceTotal] = useState(0);
-  const [taskTracePage, setTaskTracePage] = useState(1);
-  const [taskTracePageSize, setTaskTracePageSize] = useState(50);
-  const [taskTraceLoading, setTaskTraceLoading] = useState(false);
-  const [taskTraceMachineName, setTaskTraceMachineName] = useState<string>('');
-  const [taskTraceDetailVisible, setTaskTraceDetailVisible] = useState(false);
-  const [taskTraceDetailItems, setTaskTraceDetailItems] = useState<TaskTraceLogItem[]>([]);
-  const [taskTraceDetailLoading, setTaskTraceDetailLoading] = useState(false);
-  const [selectedTaskTraceId, setSelectedTaskTraceId] = useState<string | null>(null);
-  const [taskTraceLayoutItems, setTaskTraceLayoutItems] = useState<TaskTraceLayoutItem[]>([]);
-  const [taskTraceLayoutLoading, setTaskTraceLayoutLoading] = useState(false);
-  const [layoutFilterExchange, setLayoutFilterExchange] = useState('');
-  const [layoutFilterSymbol, setLayoutFilterSymbol] = useState('');
-  const [layoutFilterTimeframe, setLayoutFilterTimeframe] = useState('');
-  const [marketItems, setMarketItems] = useState<MarketByMarketItem[]>([]);
-  const [marketLoading, setMarketLoading] = useState(false);
-  const [marketMachineName, setMarketMachineName] = useState('');
-  const [selectedMarket, setSelectedMarket] = useState<MarketByMarketItem | null>(null);
-  const [marketDetailVisible, setMarketDetailVisible] = useState(false);
-  const [marketTaskSummary, setMarketTaskSummary] = useState<MarketTaskSummary | null>(null);
-  const [marketTaskSummaryLoading, setMarketTaskSummaryLoading] = useState(false);
-  const [selectedMarketTask, setSelectedMarketTask] = useState<MarketRecentTaskItem | null>(null);
-  const [marketTaskDetailVisible, setMarketTaskDetailVisible] = useState(false);
-  const [marketStrategies, setMarketStrategies] = useState<Strategy[]>([]);
-  const [marketStrategiesTotal, setMarketStrategiesTotal] = useState(0);
-  const [marketStrategiesPage, setMarketStrategiesPage] = useState(1);
-  const [marketStrategiesPageSize, setMarketStrategiesPageSize] = useState(20);
-  const [marketStrategiesLoading, setMarketStrategiesLoading] = useState(false);
-  const [marketStrategiesSearch, setMarketStrategiesSearch] = useState('');
 
   const client = new HttpClient();
   client.setTokenProvider(getToken);
@@ -417,12 +242,9 @@ const ServerList: React.FC = () => {
 
   useEffect(() => {
     if (expandedNodeId) {
-      const server = servers.find((s) => s.nodeId === expandedNodeId);
-      if (server) {
-        loadMarketByMarket(server.machineName);
-      }
+      loadRunningStrategies();
     }
-  }, [expandedNodeId, servers]);
+  }, [expandedNodeId]);
 
   const loadServers = async () => {
     setLoading(true);
@@ -440,283 +262,18 @@ const ServerList: React.FC = () => {
     }
   };
 
-  const loadMarketByMarket = async (machineName: string) => {
-    setMarketLoading(true);
-    setMarketMachineName(machineName);
+  const loadRunningStrategies = async () => {
+    setStrategiesLoading(true);
     try {
-      const items = await client.postProtocol<MarketByMarketItem[]>(
-        '/api/admin/strategy/running/by-market',
-        'admin.strategy.running.by-market',
-        { machineName }
+      const data = await client.postProtocol<Strategy[]>('/api/strategy/list', 'strategy.list', {});
+      const runningStrategies = (Array.isArray(data) ? data : []).filter(
+        (s) => s.state?.toLowerCase() === 'running' || s.state?.toLowerCase() === 'paused_open_position' || s.state?.toLowerCase() === 'testing'
       );
-      setMarketItems(Array.isArray(items) ? items : []);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '加载市场列表失败');
-    } finally {
-      setMarketLoading(false);
-    }
-  };
-
-  const loadMarketTaskSummary = async (
-    machineName: string,
-    exchange: string,
-    symbol: string,
-    timeframe: string
-  ) => {
-    setMarketTaskSummaryLoading(true);
-    try {
-      const data = await client.postProtocol<MarketTaskSummary>(
-        '/api/admin/strategy/task-trace/market-summary',
-        'admin.strategy.task.trace.market-summary',
-        { machineName, exchange, symbol, timeframe }
-      );
-      setMarketTaskSummary(data ?? null);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '加载任务报告失败');
-    } finally {
-      setMarketTaskSummaryLoading(false);
-    }
-  };
-
-  const loadMarketStrategies = async (
-    exchange: string,
-    symbol: string,
-    timeframe: string,
-    page = 1,
-    pageSize = 20,
-    search = ''
-  ) => {
-    setMarketStrategiesLoading(true);
-    try {
-      const data = await client.postProtocol<{ total: number; items: Strategy[] }>(
-        '/api/admin/strategy/running/list-by-market',
-        'admin.strategy.running.list-by-market',
-        { exchange, symbol, timeframe, page, pageSize, search: search || undefined }
-      );
-      const items = data?.items ?? [];
-      const total = data?.total ?? 0;
-      setMarketStrategies(Array.isArray(items) ? items : []);
-      setMarketStrategiesTotal(typeof total === 'number' ? total : 0);
-      setMarketStrategiesPage(page);
-      setMarketStrategiesPageSize(pageSize);
+      setStrategies(runningStrategies);
     } catch (err) {
       showError(err instanceof Error ? err.message : '加载策略列表失败');
     } finally {
-      setMarketStrategiesLoading(false);
-    }
-  };
-
-  const renderMarketTaskSummary = () => {
-    if (!marketTaskSummary) {
-      return <Empty description="暂无任务报告数据" />;
-    }
-
-    const { taskCount, avgDurationMs, successRatePct, stageStats, recentOrders, recentTasks } = marketTaskSummary;
-    const successTasks = Math.round((taskCount * successRatePct) / 100);
-    const failedTasks = Math.max(taskCount - successTasks, 0);
-    const safeStageStats = Array.isArray(stageStats) ? stageStats : [];
-    const totalStageAvgMs = safeStageStats.reduce((sum, s) => sum + (s.avgDurationMs || 0), 0);
-    const enrichedStageStats = safeStageStats.map((s) => {
-      const coveragePct =
-        taskCount > 0 ? Number(((s.traceCount / taskCount) * 100).toFixed(1)) : 0;
-      const sharePct =
-        totalStageAvgMs > 0 ? Number(((s.avgDurationMs / totalStageAvgMs) * 100).toFixed(1)) : 0;
-      return { ...s, coveragePct, sharePct };
-    });
-    const bottleneckStage =
-      enrichedStageStats.length > 0
-        ? enrichedStageStats.reduce((max, cur) =>
-            cur.avgDurationMs > max.avgDurationMs ? cur : max,
-          enrichedStageStats[0])
-        : null;
-
-    return (
-      <div>
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
-            <Statistic title="任务数" value={taskCount} />
-          </Col>
-          <Col span={6}>
-            <Statistic title="平均耗时(ms)" value={avgDurationMs} />
-          </Col>
-          <Col span={6}>
-            <Statistic title="成功率" value={successRatePct} suffix="%" precision={2} />
-          </Col>
-          <Col span={6}>
-            <Statistic
-              title="成功/失败任务数"
-              valueRender={() => (
-                <span>
-                  {successTasks} / {failedTasks}
-                </span>
-              )}
-            />
-          </Col>
-        </Row>
-        {enrichedStageStats.length > 0 && (
-          <>
-            <Divider>按阶段统计</Divider>
-            <Table
-              dataSource={enrichedStageStats}
-              rowKey="eventStage"
-              size="small"
-              pagination={false}
-              columns={[
-                { title: '阶段', dataIndex: 'eventStage', key: 'eventStage', width: 180 },
-                { title: '任务数', dataIndex: 'traceCount', key: 'traceCount', width: 90 },
-                {
-                  title: '平均耗时(ms)',
-                  dataIndex: 'avgDurationMs',
-                  key: 'avgDurationMs',
-                  width: 110,
-                },
-                {
-                  title: '覆盖率',
-                  dataIndex: 'coveragePct',
-                  key: 'coveragePct',
-                  width: 110,
-                  render: (value: number) => `${value}%`,
-                },
-                {
-                  title: '耗时占比',
-                  dataIndex: 'sharePct',
-                  key: 'sharePct',
-                  width: 110,
-                  render: (value: number) => `${value}%`,
-                },
-              ]}
-            />
-            {bottleneckStage && (
-              <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
-                瓶颈阶段：{bottleneckStage.eventStage}（平均 {bottleneckStage.avgDurationMs}ms，
-                约占阶段总耗时 {bottleneckStage.sharePct}%）
-              </div>
-            )}
-          </>
-        )}
-        {Array.isArray(recentOrders) && recentOrders.length > 0 && (
-          <>
-            <Divider>最近下单记录（样本）</Divider>
-            <Table
-              dataSource={recentOrders}
-              rowKey={(row, index) => `${row.orderId || 'order'}-${index}`}
-              size="small"
-              pagination={false}
-              columns={[
-                {
-                  title: '时间',
-                  dataIndex: 'createdAt',
-                  key: 'createdAt',
-                  width: 180,
-                  render: (value?: string) => (value ? new Date(value).toLocaleString() : '-'),
-                },
-                { title: '订单ID', dataIndex: 'orderId', key: 'orderId', width: 200 },
-                { title: '策略ID(usId)', dataIndex: 'usId', key: 'usId', width: 120 },
-                { title: 'UID', dataIndex: 'uid', key: 'uid', width: 120 },
-                { title: '方向', dataIndex: 'positionSide', key: 'positionSide', width: 90 },
-                { title: '数量', dataIndex: 'qty', key: 'qty', width: 120 },
-                { title: '成交价', dataIndex: 'averagePrice', key: 'averagePrice', width: 120 },
-              ]}
-            />
-          </>
-        )}
-        {Array.isArray(recentTasks) && recentTasks.length > 0 && (
-          <>
-            <Divider>最近5次任务（主记录）</Divider>
-            <Table
-              dataSource={recentTasks}
-              rowKey={(row, index) => `${row.traceId || row.runAt}-${index}`}
-              size="small"
-              pagination={false}
-              onRow={(row) => ({
-                onClick: () => {
-                  setSelectedMarketTask(row);
-                  setMarketTaskDetailVisible(true);
-                },
-                style: { cursor: 'pointer' },
-              })}
-              columns={[
-                {
-                  title: '时间',
-                  dataIndex: 'runAt',
-                  key: 'runAt',
-                  width: 180,
-                  render: (value?: string) => (value ? new Date(value).toLocaleString() : '-'),
-                },
-                {
-                  title: '追踪ID',
-                  dataIndex: 'traceId',
-                  key: 'traceId',
-                  width: 210,
-                  ellipsis: true,
-                  render: (v?: string) => <code>{v || '-'}</code>,
-                },
-                {
-                  title: '状态',
-                  dataIndex: 'runStatus',
-                  key: 'runStatus',
-                  width: 110,
-                  render: (v?: string) => getRunStatusTag(v),
-                },
-                { title: '总耗时(ms)', dataIndex: 'durationMs', key: 'durationMs', width: 110 },
-                {
-                  title: '分段(ms)',
-                  key: 'segments',
-                  width: 180,
-                  render: (_: unknown, row: NonNullable<MarketTaskSummary['recentTasks']>[number]) =>
-                    `查找 ${row.lookupMs} / 指标 ${row.indicatorMs} / 执行 ${row.executeMs}`,
-                },
-                {
-                  title: '匹配/执行',
-                  key: 'matchExecute',
-                  width: 120,
-                  render: (_: unknown, row: NonNullable<MarketTaskSummary['recentTasks']>[number]) =>
-                    `${row.matchedCount} / ${row.executedCount}`,
-                },
-                { title: '开仓任务数', dataIndex: 'openTaskCount', key: 'openTaskCount', width: 100 },
-                {
-                  title: '执行成功率',
-                  dataIndex: 'successRatePct',
-                  key: 'successRatePct',
-                  width: 110,
-                  render: (value: number) => `${value}%`,
-                },
-                {
-                  title: '操作',
-                  key: 'action',
-                  width: 100,
-                  render: (_: unknown, row: NonNullable<MarketTaskSummary['recentTasks']>[number]) => (
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedMarketTask(row);
-                        setMarketTaskDetailVisible(true);
-                      }}
-                    >
-                      查看详情
-                    </Button>
-                  ),
-                },
-              ]}
-            />
-          </>
-        )}
-      </div>
-    );
-  };
-
-  const handleMarketRowClick = (market: MarketByMarketItem) => {
-    setSelectedMarket(market);
-    setMarketDetailVisible(true);
-    setMarketTaskSummary(null);
-    setMarketStrategies([]);
-    setMarketStrategiesTotal(0);
-    setMarketStrategiesPage(1);
-    if (marketMachineName) {
-      loadMarketTaskSummary(marketMachineName, market.exchange, market.symbol, market.timeframe);
-      loadMarketStrategies(market.exchange, market.symbol, market.timeframe, 1, 20, '');
+      setStrategiesLoading(false);
     }
   };
 
@@ -733,30 +290,6 @@ const ServerList: React.FC = () => {
       showError(err instanceof Error ? err.message : '加载仓位历史失败');
     } finally {
       setPositionsLoading(false);
-    }
-  };
-
-  const loadStrategyRunMetrics = async (usId: number) => {
-    const machineName =
-      marketMachineName || servers.find((s) => s.nodeId === expandedNodeId)?.machineName || '';
-    if (!machineName) {
-      setStrategyRunMetrics([]);
-      return;
-    }
-
-    setStrategyRunMetricsLoading(true);
-    try {
-      const data = await client.postProtocol<StrategyRunMetricItem[]>(
-        '/api/admin/strategy/run-metrics/recent',
-        'admin.strategy.run.metrics.recent',
-        { machineName, usId, limit: 5 }
-      );
-      setStrategyRunMetrics(Array.isArray(data) ? data : []);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '加载策略运行画像失败');
-      setStrategyRunMetrics([]);
-    } finally {
-      setStrategyRunMetricsLoading(false);
     }
   };
 
@@ -794,63 +327,6 @@ const ServerList: React.FC = () => {
       showError(err instanceof Error ? err.message : '加载风控索引失败');
     } finally {
       setRiskIndexLoading(false);
-    }
-  };
-
-  const loadTaskTrace = async (machineName: string, page = 1, pageSize = 50) => {
-    setTaskTraceLoading(true);
-    setTaskTraceMachineName(machineName);
-    try {
-      const data = await client.postProtocol<{ total: number; items: TaskTraceSummaryItem[] }>(
-        '/api/admin/strategy/task-trace/list',
-        'admin.strategy.task.trace.list',
-        { machineName, page, pageSize: Math.min(pageSize, 100) }
-      );
-      const items = data?.items ?? [];
-      const total = data?.total ?? 0;
-      setTaskTraceItems(Array.isArray(items) ? items : []);
-      setTaskTraceTotal(typeof total === 'number' ? total : 0);
-      setTaskTracePage(page);
-      setTaskTracePageSize(Math.min(pageSize, 100));
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '加载实盘任务详情失败');
-    } finally {
-      setTaskTraceLoading(false);
-    }
-  };
-
-  const loadTaskTraceLayout = async (machineName: string) => {
-    setTaskTraceLayoutLoading(true);
-    try {
-      const items = await client.postProtocol<TaskTraceLayoutItem[]>(
-        '/api/admin/strategy/task-trace/layout',
-        'admin.strategy.task.trace.layout',
-        { machineName }
-      );
-      setTaskTraceLayoutItems(Array.isArray(items) ? items : []);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '加载布局失败');
-    } finally {
-      setTaskTraceLayoutLoading(false);
-    }
-  };
-
-  const loadTaskTraceDetail = async (traceId: string) => {
-    setSelectedTaskTraceId(traceId);
-    setTaskTraceDetailVisible(true);
-    setTaskTraceDetailLoading(true);
-    setTaskTraceDetailItems([]);
-    try {
-      const items = await client.postProtocol<TaskTraceLogItem[]>(
-        '/api/admin/strategy/task-trace/detail',
-        'admin.strategy.task.trace.detail',
-        { traceId }
-      );
-      setTaskTraceDetailItems(Array.isArray(items) ? items : []);
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '加载任务明细失败');
-    } finally {
-      setTaskTraceDetailLoading(false);
     }
   };
 
@@ -958,20 +434,6 @@ const ServerList: React.FC = () => {
     return <Tag color={statusInfo.color}>{statusInfo.text}</Tag>;
   };
 
-  const getRunStatusTag = (status?: string | null) => {
-    const normalized = (status || '').toLowerCase();
-    if (normalized === 'success') {
-      return <Tag color="success">success</Tag>;
-    }
-    if (normalized.startsWith('skip')) {
-      return <Tag color="default">{status}</Tag>;
-    }
-    if (normalized === 'fail') {
-      return <Tag color="error">fail</Tag>;
-    }
-    return <Tag color="processing">{status || '-'}</Tag>;
-  };
-
   const handleNodeClick = (nodeId: string) => {
     if (expandedNodeId === nodeId) {
       setExpandedNodeId(null);
@@ -983,11 +445,20 @@ const ServerList: React.FC = () => {
   const handleViewStrategyDetail = async (strategy: Strategy) => {
     setSelectedStrategy(strategy);
     setStrategyDetailVisible(true);
-    await Promise.all([
-      loadStrategyPositions(strategy.usId),
-      loadStrategyRunMetrics(strategy.usId),
-    ]);
+    await loadStrategyPositions(strategy.usId);
   };
+
+  const filteredStrategies = useMemo(() => {
+    if (!expandedNodeId) return [];
+    const searchText = strategySearch[expandedNodeId]?.toLowerCase() || '';
+    if (!searchText) return strategies;
+    return strategies.filter(
+      (s) =>
+        s.aliasName?.toLowerCase().includes(searchText) ||
+        s.defName?.toLowerCase().includes(searchText) ||
+        s.usId.toString().includes(searchText)
+    );
+  }, [strategies, strategySearch, expandedNodeId]);
 
   const filteredCheckLogs = useMemo(() => {
     if (checkLogFilter === 'all') {
@@ -1126,20 +597,6 @@ const ServerList: React.FC = () => {
       };
     });
   }, [riskIndexData, formatDecimal, formatRange]);
-
-  const filteredLayoutItems = useMemo(() => {
-    if (!taskTraceLayoutItems.length) return [];
-    const ex = layoutFilterExchange.trim().toLowerCase();
-    const sym = layoutFilterSymbol.trim().toLowerCase();
-    const tf = layoutFilterTimeframe.trim().toLowerCase();
-    if (!ex && !sym && !tf) return taskTraceLayoutItems;
-    return taskTraceLayoutItems.filter((r) => {
-      if (ex && !(r.exchange?.toLowerCase().includes(ex))) return false;
-      if (sym && !(r.symbol?.toLowerCase().includes(sym))) return false;
-      if (tf && !(r.timeframe?.toLowerCase().includes(tf))) return false;
-      return true;
-    });
-  }, [taskTraceLayoutItems, layoutFilterExchange, layoutFilterSymbol, layoutFilterTimeframe]);
 
   const riskSelectedPositions = useMemo(() => {
     const allPositions = riskSelectedPositionIds.length > 0
@@ -1428,10 +885,6 @@ const ServerList: React.FC = () => {
                     onChange={(key) => {
                       if (key === 'position-risk') {
                         loadRiskIndex();
-                      } else if (key === 'layout') {
-                        loadTaskTraceLayout(server.machineName);
-                      } else if (key === 'strategies') {
-                        loadMarketByMarket(server.machineName);
                       }
                     }}
                     items={[
@@ -1447,133 +900,63 @@ const ServerList: React.FC = () => {
                           <div className="strategies-tab-content">
                             <div className="strategies-header">
                               <Space size="small">
-                                <span className="strategies-count">
-                                  共 <strong>{marketItems.reduce((sum, m) => sum + m.strategyCount, 0)}</strong> 条运行策略，
-                                  <strong>{marketItems.length}</strong> 个市场（按 交易所/币种/周期 聚合）
-                                </span>
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<ReloadOutlined />}
-                                  onClick={() => loadMarketByMarket(server.machineName)}
-                                  loading={marketLoading}
-                                >
-                                  刷新
-                                </Button>
+                                <span className="strategies-count">策略数: <strong>{strategies.length}</strong></span>
                               </Space>
-                            </div>
-                            {marketLoading ? (
-                              <div style={{ textAlign: 'center', padding: 40 }}>
-                                <Spin size="large" />
-                              </div>
-                            ) : marketItems.length === 0 ? (
-                              <Empty description="暂无运行中的策略市场" />
-                            ) : (
-                              <Table
-                                dataSource={marketItems}
-                                rowKey={(r) => `${r.exchange}|${r.symbol}|${r.timeframe}`}
+                              <Search
+                                placeholder="搜索策略"
+                                allowClear
                                 size="small"
-                                onRow={(r) => ({
-                                  onClick: () => handleMarketRowClick(r),
-                                  style: { cursor: 'pointer' },
-                                })}
-                                columns={[
-                                  { title: '交易所', dataIndex: 'exchange', key: 'exchange', width: 90 },
-                                  { title: '币种', dataIndex: 'symbol', key: 'symbol', width: 120 },
-                                  { title: '周期', dataIndex: 'timeframe', key: 'timeframe', width: 70 },
-                                  { title: '运行策略数', dataIndex: 'strategyCount', key: 'strategyCount', width: 100 },
-                                  {
-                                    title: '最后运行时间',
-                                    dataIndex: 'lastRunAt',
-                                    key: 'lastRunAt',
-                                    width: 175,
-                                    render: (v: string | null | undefined) => (v ? formatDate(v) : '-'),
-                                  },
-                                ]}
+                                style={{ width: 240 }}
+                                value={strategySearch[server.nodeId] || ''}
+                                onChange={(e) =>
+                                  setStrategySearch({ ...strategySearch, [server.nodeId]: e.target.value })
+                                }
+                                onSearch={(value) =>
+                                  setStrategySearch({ ...strategySearch, [server.nodeId]: value })
+                                }
                               />
-                            )}
-                          </div>
-                        ),
-                      },
-                      {
-                        key: 'layout',
-                        label: (
-                          <span>
-                            <ApartmentOutlined />
-                            布局查看
-                          </span>
-                        ),
-                        children: (
-                          <div className="task-trace-layout-tab">
-                            <div className="task-trace-layout-header">
-                              <Space wrap>
-                                <span>本机实盘引擎布局（主记录）：按 交易所/币对/周期 聚合</span>
-                                <Input
-                                  placeholder="筛选交易所"
-                                  allowClear
-                                  size="small"
-                                  style={{ width: 120 }}
-                                  value={layoutFilterExchange}
-                                  onChange={(e) => setLayoutFilterExchange(e.target.value)}
-                                />
-                                <Input
-                                  placeholder="筛选币种"
-                                  allowClear
-                                  size="small"
-                                  style={{ width: 120 }}
-                                  value={layoutFilterSymbol}
-                                  onChange={(e) => setLayoutFilterSymbol(e.target.value)}
-                                />
-                                <Input
-                                  placeholder="筛选周期"
-                                  allowClear
-                                  size="small"
-                                  style={{ width: 100 }}
-                                  value={layoutFilterTimeframe}
-                                  onChange={(e) => setLayoutFilterTimeframe(e.target.value)}
-                                />
-                                <Button
-                                  type="primary"
-                                  icon={<ReloadOutlined />}
-                                  onClick={() => loadTaskTraceLayout(server.machineName)}
-                                  loading={taskTraceLayoutLoading}
-                                  size="small"
-                                >
-                                  刷新
-                                </Button>
-                              </Space>
-                              <span className="task-trace-summary">
-                                共 {filteredLayoutItems.length} 个市场
-                                {filteredLayoutItems.length !== taskTraceLayoutItems.length && `（已筛选，共 ${taskTraceLayoutItems.length}）`}
-                              </span>
                             </div>
-                            {taskTraceLayoutLoading ? (
+                            {strategiesLoading ? (
                               <div style={{ textAlign: 'center', padding: 40 }}>
                                 <Spin size="large" />
                               </div>
-                            ) : taskTraceLayoutItems.length === 0 ? (
-                              <Empty description="暂无布局数据（主记录表暂无任务）" />
+                            ) : filteredStrategies.length === 0 ? (
+                              <Empty description="暂无运行中的策略" />
                             ) : (
-                              <Table
-                                dataSource={filteredLayoutItems}
-                                rowKey={(r) => `${r.exchange}|${r.symbol}|${r.timeframe}`}
-                                size="small"
-                                scroll={{ x: 700, y: 400 }}
-                                columns={[
-                                  { title: '交易所', dataIndex: 'exchange', key: 'exchange', width: 90 },
-                                  { title: '币对', dataIndex: 'symbol', key: 'symbol', width: 120 },
-                                  { title: '周期', dataIndex: 'timeframe', key: 'timeframe', width: 80 },
-                                  { title: '策略数', dataIndex: 'strategyCount', key: 'strategyCount', width: 80 },
-                                  { title: '任务数', dataIndex: 'taskCount', key: 'taskCount', width: 80 },
-                                  { title: '总耗时(ms)', dataIndex: 'totalDurationMs', key: 'totalDurationMs', width: 100 },
-                                  {
-                                    title: '最后执行',
-                                    dataIndex: 'lastExecutedAt',
-                                    key: 'lastExecutedAt',
-                                    width: 175,
-                                    render: (v: string) => formatDate(v),
-                                  },
-                                ]}
+                              <List
+                                dataSource={filteredStrategies}
+                                renderItem={(strategy) => (
+                                  <List.Item
+                                    className="strategy-item"
+                                    actions={[
+                                      <Button
+                                        type="link"
+                                        key="detail"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleViewStrategyDetail(strategy);
+                                        }}
+                                      >
+                                        查看详情
+                                      </Button>,
+                                    ]}
+                                  >
+                                    <List.Item.Meta
+                                      title={
+                                        <Space size="small">
+                                          <span className="strategy-name">{strategy.aliasName || strategy.defName}</span>
+                                          {getStrategyStatusTag(strategy.state)}
+                                          <span className="strategy-meta-inline">ID:{strategy.usId} | v{strategy.versionNo}</span>
+                                        </Space>
+                                      }
+                                      description={
+                                        strategy.description ? (
+                                          <div className="strategy-description">{strategy.description}</div>
+                                        ) : null
+                                      }
+                                    />
+                                  </List.Item>
+                                )}
                               />
                             )}
                           </div>
@@ -1751,12 +1134,6 @@ const ServerList: React.FC = () => {
           setStrategyDetailVisible(false);
           setSelectedStrategy(null);
           setStrategyPositions([]);
-          setStrategyRunMetrics([]);
-          setSelectedRunMetric(null);
-          setRunMetricDetailVisible(false);
-          if (marketMachineName) {
-            loadMarketByMarket(marketMachineName);
-          }
         }}
         footer={null}
         width={1200}
@@ -1789,81 +1166,6 @@ const ServerList: React.FC = () => {
               </Button>
             </div>
 
-            <Divider>最近5条策略运行画像</Divider>
-            {strategyRunMetricsLoading ? (
-              <div style={{ textAlign: 'center', padding: 20 }}>
-                <Spin size="small" />
-              </div>
-            ) : strategyRunMetrics.length === 0 ? (
-              <Empty description="暂无运行画像数据" />
-            ) : (
-              <Table
-                dataSource={strategyRunMetrics}
-                rowKey={(row, index) => `${row.runAt}-${index}`}
-                size="small"
-                pagination={false}
-                onRow={(row) => ({
-                  onClick: () => {
-                    setSelectedRunMetric(row);
-                    setRunMetricDetailVisible(true);
-                  },
-                  style: { cursor: 'pointer' },
-                })}
-                columns={[
-                  {
-                    title: '时间',
-                    dataIndex: 'runAt',
-                    key: 'runAt',
-                    width: 170,
-                    render: (v: string) => formatDate(v),
-                  },
-                  {
-                    title: '模式',
-                    dataIndex: 'isBarClose',
-                    key: 'isBarClose',
-                    width: 80,
-                    render: (v: boolean) => (v ? 'close' : 'update'),
-                  },
-                  { title: '总耗时(ms)', dataIndex: 'durationMs', key: 'durationMs', width: 100 },
-                  { title: '匹配', dataIndex: 'matchedCount', key: 'matchedCount', width: 80 },
-                  { title: '执行', dataIndex: 'executedCount', key: 'executedCount', width: 80 },
-                  { title: '开仓次数', dataIndex: 'openTaskCount', key: 'openTaskCount', width: 90 },
-                  {
-                    title: '执行成功率',
-                    dataIndex: 'successRatePct',
-                    key: 'successRatePct',
-                    width: 110,
-                    render: (v: number) => `${v}%`,
-                  },
-                  {
-                    title: '状态',
-                    dataIndex: 'runStatus',
-                    key: 'runStatus',
-                    width: 110,
-                    render: (v?: string | null) => getRunStatusTag(v),
-                  },
-                  {
-                    title: '操作',
-                    key: 'action',
-                    width: 100,
-                    render: (_: unknown, row: StrategyRunMetricItem) => (
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedRunMetric(row);
-                          setRunMetricDetailVisible(true);
-                        }}
-                      >
-                        查看详情
-                      </Button>
-                    ),
-                  },
-                ]}
-              />
-            )}
-
             <Divider>历史开仓</Divider>
             {positionsLoading ? (
               <div style={{ textAlign: 'center', padding: 40 }}>
@@ -1881,52 +1183,6 @@ const ServerList: React.FC = () => {
               />
             )}
           </div>
-        )}
-      </Modal>
-
-      {/* 策略运行画像详情弹窗 */}
-      <Modal
-        title={`运行画像详情 - ${selectedRunMetric ? formatDate(selectedRunMetric.runAt) : ''}`}
-        open={runMetricDetailVisible}
-        onCancel={() => {
-          setRunMetricDetailVisible(false);
-          setSelectedRunMetric(null);
-        }}
-        footer={null}
-        width={1000}
-      >
-        {selectedRunMetric ? (
-          <Descriptions column={2} bordered size="small">
-            <Descriptions.Item label="时间">{formatDate(selectedRunMetric.runAt)}</Descriptions.Item>
-            <Descriptions.Item label="状态">{getRunStatusTag(selectedRunMetric.runStatus)}</Descriptions.Item>
-            <Descriptions.Item label="追踪ID" span={2}>
-              <code>{selectedRunMetric.traceId || '-'}</code>
-            </Descriptions.Item>
-            <Descriptions.Item label="处理方" span={2}>
-              <code>{selectedRunMetric.engineInstance || '-'}</code>
-            </Descriptions.Item>
-            <Descriptions.Item label="交易所">{selectedRunMetric.exchange}</Descriptions.Item>
-            <Descriptions.Item label="币对">{selectedRunMetric.symbol}</Descriptions.Item>
-            <Descriptions.Item label="周期">{selectedRunMetric.timeframe}</Descriptions.Item>
-            <Descriptions.Item label="模式">{selectedRunMetric.isBarClose ? 'close' : 'update'}</Descriptions.Item>
-            <Descriptions.Item label="总耗时(ms)">{selectedRunMetric.durationMs}</Descriptions.Item>
-            <Descriptions.Item label="分段耗时(ms)">
-              查找 {selectedRunMetric.lookupMs} / 指标 {selectedRunMetric.indicatorMs} / 执行 {selectedRunMetric.executeMs}
-            </Descriptions.Item>
-            <Descriptions.Item label="匹配/执行/跳过">
-              {selectedRunMetric.matchedCount} / {selectedRunMetric.executedCount} / {selectedRunMetric.skippedCount}
-            </Descriptions.Item>
-            <Descriptions.Item label="条件/动作/开仓">
-              {selectedRunMetric.conditionEvalCount} / {selectedRunMetric.actionExecCount} / {selectedRunMetric.openTaskCount}
-            </Descriptions.Item>
-            <Descriptions.Item label="执行成功率">{selectedRunMetric.successRatePct}%</Descriptions.Item>
-            <Descriptions.Item label="开仓触发率">{selectedRunMetric.openTaskRatePct}%</Descriptions.Item>
-            <Descriptions.Item label="单策略样本/均值/最大">
-              {selectedRunMetric.perStrategySamples} / {selectedRunMetric.perStrategyAvgMs}ms / {selectedRunMetric.perStrategyMaxMs}ms
-            </Descriptions.Item>
-          </Descriptions>
-        ) : (
-          <Empty description="暂无明细" />
         )}
       </Modal>
 
@@ -2255,353 +1511,6 @@ const ServerList: React.FC = () => {
             <Descriptions.Item label="激活价">{formatDecimal(selectedRiskPosition.trailingActivationPrice)}</Descriptions.Item>
             <Descriptions.Item label="更新阈值价">{formatDecimal(selectedRiskPosition.trailingUpdateThresholdPrice)}</Descriptions.Item>
           </Descriptions>
-        )}
-      </Modal>
-
-      {/* 实盘任务链路明细弹窗 */}
-      <Modal
-        title={`任务明细 - ${selectedTaskTraceId ?? ''}`}
-        open={taskTraceDetailVisible}
-        onCancel={() => {
-          setTaskTraceDetailVisible(false);
-          setSelectedTaskTraceId(null);
-          setTaskTraceDetailItems([]);
-        }}
-        footer={null}
-        width={1400}
-        styles={{ body: { maxHeight: '70vh', overflow: 'auto' } }}
-      >
-        {taskTraceDetailLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin size="large" />
-          </div>
-        ) : taskTraceDetailItems.length === 0 ? (
-          <Empty description="暂无明细" />
-        ) : (
-          <Table
-            dataSource={taskTraceDetailItems}
-            rowKey="id"
-            size="small"
-            scroll={{ x: 1400 }}
-            pagination={{ pageSize: 20 }}
-            columns={[
-              { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
-              { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 175, render: (v: string) => formatDate(v) },
-              { title: '阶段', dataIndex: 'eventStage', key: 'eventStage', width: 140, ellipsis: true },
-              {
-                title: '状态',
-                dataIndex: 'eventStatus',
-                key: 'eventStatus',
-                width: 80,
-                render: (v: string) => {
-                  const color = v === 'success' ? 'success' : v === 'fail' ? 'error' : v === 'skip' ? 'default' : 'processing';
-                  return <Tag color={color}>{v}</Tag>;
-                },
-              },
-              { title: '模块', dataIndex: 'actorModule', key: 'actorModule', width: 120, ellipsis: true },
-              { title: '实例', dataIndex: 'actorInstance', key: 'actorInstance', width: 180, ellipsis: true },
-              { title: '交易所', dataIndex: 'exchange', key: 'exchange', width: 90 },
-              { title: '币对', dataIndex: 'symbol', key: 'symbol', width: 100 },
-              { title: '周期', dataIndex: 'timeframe', key: 'timeframe', width: 80 },
-              { title: '策略ID', dataIndex: 'usId', key: 'usId', width: 90 },
-              {
-                title: '方法/流程',
-                key: 'methodFlow',
-                width: 140,
-                render: (_: unknown, r: TaskTraceLogItem) => (
-                  <span title={r.flow ?? undefined}>{r.method ?? '-'}{r.flow ? ` / ${r.flow}` : ''}</span>
-                ),
-              },
-              { title: '耗时(ms)', dataIndex: 'durationMs', key: 'durationMs', width: 90 },
-              {
-                title: '错误',
-                dataIndex: 'errorMessage',
-                key: 'errorMessage',
-                width: 180,
-                ellipsis: true,
-                render: (v?: string | null) => (v ? <span style={{ color: '#cf1322' }}>{v}</span> : '-'),
-              },
-              {
-                title: '明细JSON',
-                dataIndex: 'metricsJson',
-                key: 'metricsJson',
-                width: 200,
-                ellipsis: true,
-                render: (v?: string | null) =>
-                  v ? (
-                    <pre style={{ margin: 0, fontSize: 11, maxWidth: 300, overflow: 'auto' }} title={v}>
-                      {v.length > 150 ? v.slice(0, 150) + '...' : v}
-                    </pre>
-                  ) : (
-                    '-'
-                  ),
-              },
-            ]}
-          />
-        )}
-      </Modal>
-
-      {/* 市场详情弹窗：任务报告 + 运行策略 */}
-      <Modal
-        title={
-          selectedMarket
-            ? `市场详情 - ${selectedMarket.exchange} ${selectedMarket.symbol} ${selectedMarket.timeframe}`
-            : '市场详情'
-        }
-        open={marketDetailVisible}
-        onCancel={() => {
-          setMarketDetailVisible(false);
-          setSelectedMarket(null);
-          setMarketTaskSummary(null);
-          setMarketStrategies([]);
-          setSelectedMarketTask(null);
-          setMarketTaskDetailVisible(false);
-        }}
-        footer={null}
-        width={900}
-        styles={{ body: { maxHeight: '70vh', overflow: 'auto' } }}
-      >
-        {selectedMarket && (
-          <Tabs
-            defaultActiveKey="task-report"
-            items={[
-              {
-                key: 'task-report',
-                label: <span>任务执行报告</span>,
-                children: (
-                  <div>
-                    {marketTaskSummaryLoading ? (
-                      <div style={{ textAlign: 'center', padding: 40 }}>
-                        <Spin size="large" />
-                      </div>
-                    ) : (
-                      renderMarketTaskSummary()
-                    )}
-                  </div>
-                ),
-              },
-              {
-                key: 'strategies',
-                label: <span>运行策略</span>,
-                children: (
-                  <div>
-                    <div style={{ marginBottom: 12 }}>
-                      <Space>
-                        <Search
-                          placeholder="搜索策略（名称/ID）"
-                          allowClear
-                          size="small"
-                          style={{ width: 220 }}
-                          value={marketStrategiesSearch}
-                          onChange={(e) => setMarketStrategiesSearch(e.target.value)}
-                          onSearch={() =>
-                            loadMarketStrategies(
-                              selectedMarket.exchange,
-                              selectedMarket.symbol,
-                              selectedMarket.timeframe,
-                              1,
-                              marketStrategiesPageSize,
-                              marketStrategiesSearch
-                            )
-                          }
-                        />
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<ReloadOutlined />}
-                          onClick={() =>
-                            loadMarketStrategies(
-                              selectedMarket.exchange,
-                              selectedMarket.symbol,
-                              selectedMarket.timeframe,
-                              marketStrategiesPage,
-                              marketStrategiesPageSize,
-                              marketStrategiesSearch
-                            )
-                          }
-                          loading={marketStrategiesLoading}
-                        >
-                          刷新
-                        </Button>
-                      </Space>
-                    </div>
-                    {marketStrategiesLoading ? (
-                      <div style={{ textAlign: 'center', padding: 20 }}>
-                        <Spin size="small" />
-                      </div>
-                    ) : marketStrategies.length === 0 ? (
-                      <Empty description="暂无运行中的策略" />
-                    ) : (
-                      <Table
-                        dataSource={marketStrategies}
-                        rowKey="usId"
-                        size="small"
-                        pagination={{
-                          current: marketStrategiesPage,
-                          pageSize: marketStrategiesPageSize,
-                          total: marketStrategiesTotal,
-                          pageSizeOptions: ['10', '20', '50'],
-                          showSizeChanger: true,
-                          showTotal: (t) => `共 ${t} 条`,
-                          onChange: (page, pageSize) => {
-                            loadMarketStrategies(
-                              selectedMarket.exchange,
-                              selectedMarket.symbol,
-                              selectedMarket.timeframe,
-                              page,
-                              pageSize ?? marketStrategiesPageSize,
-                              marketStrategiesSearch
-                            );
-                          },
-                        }}
-                        columns={[
-                          {
-                            title: '策略',
-                            key: 'strategy',
-                            render: (_: unknown, s: Strategy) => (
-                              <Space size="small">
-                                <span className="strategy-name">{s.aliasName || s.defName}</span>
-                                {getStrategyStatusTag(s.state)}
-                                <span className="strategy-meta-inline">ID:{s.usId} | v{s.versionNo}</span>
-                              </Space>
-                            ),
-                          },
-                          {
-                            title: '描述',
-                            dataIndex: 'description',
-                            key: 'description',
-                            ellipsis: true,
-                            render: (v: string) => (v ? <div className="strategy-description">{v}</div> : '-'),
-                          },
-                          {
-                            title: '操作',
-                            key: 'action',
-                            width: 100,
-                            render: (_: unknown, s: Strategy) => (
-                              <Button
-                                type="link"
-                                size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleViewStrategyDetail(s);
-                                }}
-                              >
-                                查看详情
-                              </Button>
-                            ),
-                          },
-                        ]}
-                      />
-                    )}
-                  </div>
-                ),
-              },
-            ]}
-          />
-        )}
-      </Modal>
-
-      {/* 市场任务详情弹窗（主记录） */}
-      <Modal
-        title={`任务详情 - ${selectedMarketTask?.traceId || ''}`}
-        open={marketTaskDetailVisible}
-        onCancel={() => {
-          setMarketTaskDetailVisible(false);
-          setSelectedMarketTask(null);
-        }}
-        footer={null}
-        width={1100}
-        styles={{ body: { maxHeight: '70vh', overflow: 'auto' } }}
-        className="market-task-detail-modal"
-      >
-        {selectedMarketTask ? (
-          <div className="market-task-detail">
-            <div className="market-task-detail-header">
-              <div className="market-task-detail-header-main">
-                <span className="market-task-label">任务</span>
-                <code className="market-task-trace-id">{selectedMarketTask.traceId || '-'}</code>
-              </div>
-              <div className="market-task-detail-header-meta">
-                <span className="market-task-time">{formatDate(selectedMarketTask.runAt)}</span>
-                {getRunStatusTag(selectedMarketTask.runStatus)}
-              </div>
-            </div>
-
-            <Divider className="market-task-divider" />
-
-            <Row gutter={16} className="market-task-section-row">
-              <Col span={24}>
-                <Descriptions column={2} size="small" bordered>
-                  <Descriptions.Item label="交易所">{selectedMarketTask.exchange}</Descriptions.Item>
-                  <Descriptions.Item label="币对">{selectedMarketTask.symbol}</Descriptions.Item>
-                  <Descriptions.Item label="周期">{selectedMarketTask.timeframe}</Descriptions.Item>
-                  <Descriptions.Item label="模式">{selectedMarketTask.isBarClose ? 'close' : 'update'}</Descriptions.Item>
-                  <Descriptions.Item label="处理方" span={2}>
-                    <code>{selectedMarketTask.engineInstance || '-'}</code>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="总耗时(ms)" span={2}>
-                    {selectedMarketTask.durationMs}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="分段耗时(ms)" span={2}>
-                    查找 {selectedMarketTask.lookupMs} / 指标 {selectedMarketTask.indicatorMs} / 执行{' '}
-                    {selectedMarketTask.executeMs}
-                  </Descriptions.Item>
-                </Descriptions>
-              </Col>
-
-              <Col span={24}>
-                <Descriptions column={1} size="small" bordered>
-                  <Descriptions.Item label="匹配/可运行/执行">
-                    {selectedMarketTask.matchedCount} / {selectedMarketTask.runnableStrategyCount} /{' '}
-                    {selectedMarketTask.executedCount}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="状态跳过/门禁跳过">
-                    {selectedMarketTask.stateSkippedCount} / {selectedMarketTask.runtimeGateSkippedCount}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="条件/动作/开仓">
-                    {selectedMarketTask.conditionEvalCount} / {selectedMarketTask.actionExecCount} /{' '}
-                    {selectedMarketTask.openTaskCount}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="指标请求/成功">
-                    {selectedMarketTask.indicatorRequestCount} / {selectedMarketTask.indicatorSuccessCount}/
-                    {selectedMarketTask.indicatorTotalCount}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="执行成功率">
-                    {selectedMarketTask.successRatePct}%
-                  </Descriptions.Item>
-                  <Descriptions.Item label="开仓触发率">
-                    {selectedMarketTask.openTaskRatePct}%
-                  </Descriptions.Item>
-                  <Descriptions.Item label="单策略样本/均值/最大">
-                    {selectedMarketTask.perStrategySamples} / {selectedMarketTask.perStrategyAvgMs}ms /{' '}
-                    {selectedMarketTask.perStrategyMaxMs}ms
-                  </Descriptions.Item>
-                </Descriptions>
-              </Col>
-            </Row>
-
-            <Divider className="market-task-divider" />
-
-            <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="追踪ID">
-                <code>{selectedMarketTask.traceId || '-'}</code>
-              </Descriptions.Item>
-              <Descriptions.Item label="执行策略ID集合">
-                <code>{selectedMarketTask.executedStrategyIds || '-'}</code>
-              </Descriptions.Item>
-              <Descriptions.Item label="开仓策略ID集合">
-                <code>{selectedMarketTask.openTaskStrategyIds || '-'}</code>
-              </Descriptions.Item>
-              <Descriptions.Item label="开仓任务ID集合">
-                <code>{selectedMarketTask.openTaskTraceIds || '-'}</code>
-              </Descriptions.Item>
-              <Descriptions.Item label="订单ID集合">
-                <code>{selectedMarketTask.openOrderIds || '-'}</code>
-              </Descriptions.Item>
-            </Descriptions>
-          </div>
-        ) : (
-          <Empty description="暂无任务明细" />
         )}
       </Modal>
     </div>

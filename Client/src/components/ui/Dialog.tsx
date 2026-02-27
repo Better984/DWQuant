@@ -97,20 +97,20 @@ const Dialog: React.FC<DialogProps> = ({
   return createPortal(
     <div className="ui-dialog-overlay" onClick={handleBackdropClick}>
       <div className={`ui-dialog ui-scrollable ${className}`} onClick={(e) => e.stopPropagation()}>
-        {/* 标题区域：右上角关闭按钮 */}
-        {(title || showCloseButton || (cancelText && !confirmText && !footer)) && (
+        {/* 标题区域 */}
+        {(title || showCloseButton) && (
           <>
             <div className="ui-dialog__header">
               {title && (
                 <h2 className="ui-dialog__title">{title}</h2>
               )}
-              {(showCloseButton || (cancelText && !confirmText && !footer)) && (
+              {showCloseButton && (
                 <button
-                  className={cancelText && !confirmText && !footer ? 'ui-dialog__close ui-dialog__close--text' : 'ui-dialog__close'}
-                  onClick={handleCancel}
+                  className="ui-dialog__close"
+                  onClick={onClose}
                   aria-label="关闭"
                 >
-                  {cancelText && !confirmText && !footer ? cancelText : CloseIcon}
+                  {CloseIcon}
                 </button>
               )}
             </div>
@@ -125,14 +125,14 @@ const Dialog: React.FC<DialogProps> = ({
           </div>
         )}
 
-        {/* 按钮区域：仅在有确认按钮或自定义 footer 时显示 */}
-        {(footer || confirmText || (cancelText && (confirmText || footer))) && (
+        {/* 按钮区域 */}
+        {(footer || cancelText || confirmText) && (
           <>
             <div className="ui-dialog__divider">{Divider}</div>
             <div className="ui-dialog__footer">
               {footer || (
                 <>
-                  {cancelText && (confirmText || footer) && (
+                  {cancelText && (
                     <button
                       className="ui-dialog__button ui-dialog__button--cancel"
                       onClick={handleCancel}

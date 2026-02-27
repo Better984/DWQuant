@@ -47,14 +47,14 @@ namespace ServerTest.Modules.Backtest.Application
         private readonly BacktestProgressPushService _progressPushService;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger<BacktestMainLoop> _logger;
-        private readonly TalibWasmNodePool? _wasmPool;
+        private readonly TalibWasmNodeInvoker? _wasmInvoker;
 
         public BacktestMainLoop(
             IOptions<RuntimeQueueOptions> queueOptions,
             ServerConfigStore configStore,
             BacktestObjectPoolManager objectPoolManager,
             BacktestProgressPushService progressPushService,
-            TalibWasmNodePool? wasmPool,
+            TalibWasmNodeInvoker? wasmInvoker,
             ILoggerFactory loggerFactory,
             ILogger<BacktestMainLoop> logger)
         {
@@ -62,7 +62,7 @@ namespace ServerTest.Modules.Backtest.Application
             _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
             _objectPoolManager = objectPoolManager ?? throw new ArgumentNullException(nameof(objectPoolManager));
             _progressPushService = progressPushService ?? throw new ArgumentNullException(nameof(progressPushService));
-            _wasmPool = wasmPool;
+            _wasmInvoker = wasmInvoker;
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -91,7 +91,7 @@ namespace ServerTest.Modules.Backtest.Application
                 provider,
                 _loggerFactory.CreateLogger<IndicatorEngine>(),
                 new OptionsWrapper<RuntimeQueueOptions>(_queueOptions),
-                _wasmPool);
+                _wasmInvoker);
             var valueResolver = new IndicatorValueResolver(
                 provider,
                 indicatorEngine,
@@ -695,7 +695,6 @@ namespace ServerTest.Modules.Backtest.Application
                         TotalBars = totalCandidates,
                         FoundPositions = 0,
                         TotalPositions = totalCandidates,
-                        BlockedPositions = 0,
                         Progress = 0m,
                         WinCount = 0,
                         LossCount = 0,
@@ -714,7 +713,6 @@ namespace ServerTest.Modules.Backtest.Application
             var closedPositions = 0;
             var winCount = 0;
             var lossCount = 0;
-            var blockedByMaxPosition = 0;
             var closePreviewTrades = new List<BacktestTrade>(BatchPreviewTradeLimit);
             var closePreviewLock = new object();
             IReadOnlyList<BacktestTrade> GetClosePreviewSnapshot()
@@ -737,7 +735,6 @@ namespace ServerTest.Modules.Backtest.Application
                     totalCandidates,
                     () => Volatile.Read(ref closeProcessedCandidates),
                     () => Volatile.Read(ref closedPositions),
-                    () => Volatile.Read(ref blockedByMaxPosition),
                     () => Volatile.Read(ref winCount),
                     () => Volatile.Read(ref lossCount),
                     GetClosePreviewSnapshot,
@@ -751,7 +748,7 @@ namespace ServerTest.Modules.Backtest.Application
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    var closeResult = CloseCandidatesForSymbol(
+                    context.ClosedPositions = CloseCandidatesForSymbol(
                         context.Candidates,
                         context.PriceBars,
                         context.PriceIndex,
@@ -783,11 +780,6 @@ namespace ServerTest.Modules.Backtest.Application
                         },
                         closeParallelTracker,
                         ct);
-                    context.ClosedPositions = closeResult.ClosedPositions.ToList();
-                    if (closeResult.BlockedByMaxPosition > 0)
-                    {
-                        Interlocked.Add(ref blockedByMaxPosition, closeResult.BlockedByMaxPosition);
-                    }
 
                     ApplyClosedPositions(context.Runtime, context.ClosedPositions);
                 }
@@ -808,7 +800,6 @@ namespace ServerTest.Modules.Backtest.Application
                 ? Math.Min(totalCandidates, ToSafeInt(Volatile.Read(ref closeProcessedCandidates)))
                 : 0;
             var finalClosedPositions = Math.Max(0, Volatile.Read(ref closedPositions));
-            var finalBlockedByMaxPosition = Math.Max(0, Volatile.Read(ref blockedByMaxPosition));
             var finalWins = Math.Max(0, Volatile.Read(ref winCount));
             var finalLosses = Math.Max(0, Volatile.Read(ref lossCount));
             var finalWinRate = finalClosedPositions > 0 ? finalWins / (decimal)finalClosedPositions : 0m;
@@ -833,7 +824,6 @@ namespace ServerTest.Modules.Backtest.Application
                         TotalBars = totalCandidates,
                         FoundPositions = finalClosedPositions,
                         TotalPositions = totalCandidates,
-                        BlockedPositions = finalBlockedByMaxPosition,
                         ChunkCount = finalPreviewSnapshot.Count,
                         WinCount = finalWins,
                         LossCount = finalLosses,
@@ -848,11 +838,10 @@ namespace ServerTest.Modules.Backtest.Application
                 .ConfigureAwait(false);
 
             LogSystemInfo(
-                "并行统一平仓完成：候选数={Candidates} 已处理={Processed} 成功平仓={Closed} MaxPosition阻断={BlockedByMaxPosition} 过滤淘汰={Filtered} 盈利={Win} 亏损={Loss} 胜率={WinRatePct}% 耗时={Elapsed}ms 吞吐={Throughput}/秒 平仓Top5={TopSymbols} 并行线程数={ThreadCount} 参与核心数={CoreCount} CPU核心数={CpuCount} 核心列表={CoreList}",
+                "并行统一平仓完成：候选数={Candidates} 已处理={Processed} 成功平仓={Closed} 过滤淘汰={Filtered} 盈利={Win} 亏损={Loss} 胜率={WinRatePct}% 耗时={Elapsed}ms 吞吐={Throughput}/秒 平仓Top5={TopSymbols} 并行线程数={ThreadCount} 参与核心数={CoreCount} CPU核心数={CpuCount} 核心列表={CoreList}",
                 totalCandidates,
                 finalProcessedCandidates,
                 finalClosedPositions,
-                finalBlockedByMaxPosition,
                 filteredCandidates,
                 finalWins,
                 finalLosses,
@@ -877,12 +866,11 @@ namespace ServerTest.Modules.Backtest.Application
                         EventKind = "stage",
                         Stage = "batch_close_phase",
                         StageName = "第二阶段：平仓检测",
-                        Message = $"平仓检测完成，当前胜率 {(finalWinRate * 100m):F2}%，MaxPosition阻断 {finalBlockedByMaxPosition}",
+                        Message = $"平仓检测完成，当前胜率 {(finalWinRate * 100m):F2}%",
                         ProcessedBars = finalProcessedCandidates,
                         TotalBars = totalCandidates,
                         FoundPositions = finalClosedPositions,
                         TotalPositions = totalCandidates,
-                        BlockedPositions = finalBlockedByMaxPosition,
                         WinCount = finalWins,
                         LossCount = finalLosses,
                         WinRate = finalWinRate,
@@ -971,7 +959,7 @@ namespace ServerTest.Modules.Backtest.Application
                 indicatorProvider,
                 _loggerFactory.CreateLogger<IndicatorEngine>(),
                 new OptionsWrapper<RuntimeQueueOptions>(_queueOptions),
-                _wasmPool);
+                _wasmInvoker);
             var valueResolver = new IndicatorValueResolver(
                 indicatorProvider,
                 indicatorEngine,
@@ -1093,7 +1081,7 @@ namespace ServerTest.Modules.Backtest.Application
             return true;
         }
 
-        private BatchCloseResult CloseCandidatesForSymbol(
+        private List<BatchClosedPosition> CloseCandidatesForSymbol(
             IReadOnlyList<BatchOpenCandidate> candidates,
             IReadOnlyList<OHLCV> priceBars,
             IReadOnlyDictionary<long, int> priceIndex,
@@ -1106,19 +1094,16 @@ namespace ServerTest.Modules.Backtest.Application
         {
             if (candidates.Count == 0 || priceBars.Count == 0)
             {
-                return new BatchCloseResult(new List<BatchClosedPosition>(), 0);
+                return new List<BatchClosedPosition>();
             }
 
-            var requiresPositionCapFilter = candidates.Any(item => item.MaxPositionQty > 0m);
-            // 开启最大持仓过滤时必须按开仓时间正序处理，否则无法得到正确的“在途持仓量”。
-            // 非重叠模式本身也要求按时间正序；仅在“允许重叠且无上限过滤”时使用最近优先。
-            var orderedCandidates = (!allowOverlappingPositions || requiresPositionCapFilter)
-                ? candidates.OrderBy(item => item.EntryTime).ToList()
-                : candidates.OrderByDescending(item => item.EntryTime).ToList();
+            // 非重叠模式必须按开仓时间正序处理，否则会错误过滤大量历史仓位。
+            // 重叠模式可按最近优先，便于更快出现“最近100条”预览。
+            var orderedCandidates = allowOverlappingPositions
+                ? candidates.OrderByDescending(item => item.EntryTime).ToList()
+                : candidates.OrderBy(item => item.EntryTime).ToList();
 
             var accepted = new List<BatchClosedPosition>(orderedCandidates.Count);
-            var blockedByMaxPosition = 0;
-            var openExposureByKey = new Dictionary<string, BatchOpenExposureState>(StringComparer.OrdinalIgnoreCase);
             var chunkSize = ResolveBatchCloseProgressChunkSize();
             var closeParallelOptions = new ParallelOptions
             {
@@ -1196,23 +1181,6 @@ namespace ServerTest.Modules.Backtest.Application
                     }
                 }
 
-                if (requiresPositionCapFilter && chunkAccepted.Count > 0)
-                {
-                    var filteredByMaxPosition = new List<BatchClosedPosition>(chunkAccepted.Count);
-                    foreach (var item in chunkAccepted)
-                    {
-                        if (!TryAcceptByMaxPosition(item, openExposureByKey))
-                        {
-                            blockedByMaxPosition++;
-                            continue;
-                        }
-
-                        filteredByMaxPosition.Add(item);
-                    }
-
-                    chunkAccepted = filteredByMaxPosition;
-                }
-
                 if (chunkAccepted.Count > 0)
                 {
                     accepted.AddRange(chunkAccepted);
@@ -1226,62 +1194,7 @@ namespace ServerTest.Modules.Backtest.Application
                 var compare = left.Trade.EntryTime.CompareTo(right.Trade.EntryTime);
                 return compare != 0 ? compare : left.Trade.ExitTime.CompareTo(right.Trade.ExitTime);
             });
-            return new BatchCloseResult(accepted, blockedByMaxPosition);
-        }
-
-        private static bool TryAcceptByMaxPosition(
-            BatchClosedPosition item,
-            Dictionary<string, BatchOpenExposureState> openExposureByKey)
-        {
-            if (item?.Candidate == null)
-            {
-                return false;
-            }
-
-            var maxPositionQty = item.Candidate.MaxPositionQty;
-            if (maxPositionQty <= 0m)
-            {
-                return true;
-            }
-
-            var key = BuildExposureKey(item.Candidate);
-            if (!openExposureByKey.TryGetValue(key, out var exposureState))
-            {
-                exposureState = new BatchOpenExposureState();
-                openExposureByKey[key] = exposureState;
-            }
-
-            while (exposureState.ActiveByExit.TryPeek(out var activeItem, out var exitTime))
-            {
-                if (exitTime > item.Candidate.EntryTime)
-                {
-                    break;
-                }
-
-                exposureState.ActiveByExit.Dequeue();
-                exposureState.OpenQty -= activeItem.Candidate.Qty;
-            }
-
-            if (exposureState.OpenQty < 0m)
-            {
-                exposureState.OpenQty = 0m;
-            }
-
-            var nextOpenQty = exposureState.OpenQty + item.Candidate.Qty;
-            if (nextOpenQty > maxPositionQty)
-            {
-                return false;
-            }
-
-            exposureState.OpenQty = nextOpenQty;
-            exposureState.ActiveByExit.Enqueue(item, item.Trade.ExitTime);
-            return true;
-        }
-
-        private static string BuildExposureKey(BatchOpenCandidate candidate)
-        {
-            var scope = string.IsNullOrWhiteSpace(candidate.StrategyScopeKey) ? "single:primary" : candidate.StrategyScopeKey.Trim();
-            return $"{scope}|{candidate.Symbol}|{candidate.Side}";
+            return accepted;
         }
 
         private static BatchClosedPosition? SimulateBatchClose(
@@ -1387,8 +1300,6 @@ namespace ServerTest.Modules.Backtest.Application
             var trade = new BacktestTrade
             {
                 Symbol = candidate.Symbol,
-                StrategyScopeKey = candidate.StrategyScopeKey,
-                StrategyIndex = candidate.StrategyIndex > 0 ? candidate.StrategyIndex : null,
                 Side = candidate.Side,
                 EntryTime = candidate.EntryTime,
                 ExitTime = exitTime,
@@ -1596,7 +1507,6 @@ namespace ServerTest.Modules.Backtest.Application
             int totalCandidates,
             Func<long> processedAccessor,
             Func<int> closedAccessor,
-            Func<int> blockedAccessor,
             Func<int> winAccessor,
             Func<int> lossAccessor,
             Func<IReadOnlyList<BacktestTrade>> previewAccessor,
@@ -1607,7 +1517,6 @@ namespace ServerTest.Modules.Backtest.Application
             {
                 var processed = Math.Min(Math.Max(processedAccessor(), 0L), Math.Max(totalCandidates, 0));
                 var closed = Math.Max(0, closedAccessor());
-                var blocked = Math.Max(0, blockedAccessor());
                 var wins = Math.Max(0, winAccessor());
                 var losses = Math.Max(0, lossAccessor());
                 var winRate = closed > 0 ? wins / (decimal)closed : 0m;
@@ -1623,12 +1532,11 @@ namespace ServerTest.Modules.Backtest.Application
                             EventKind = "positions",
                             Stage = "batch_close_phase",
                             StageName = "第二阶段：平仓检测",
-                            Message = $"平仓检测中：已处理 {processed}/{totalCandidates}，当前平仓 {closed}，MaxPosition阻断 {blocked}，胜率 {(winRate * 100m):F2}%",
+                            Message = $"平仓检测中：已处理 {processed}/{totalCandidates}，当前平仓 {closed}，胜率 {(winRate * 100m):F2}%",
                             ProcessedBars = ToSafeInt(processed),
                             TotalBars = totalCandidates,
                             FoundPositions = closed,
                             TotalPositions = totalCandidates,
-                            BlockedPositions = blocked,
                             ChunkCount = previewCount,
                             WinCount = wins,
                             LossCount = losses,
@@ -2016,14 +1924,11 @@ namespace ServerTest.Modules.Backtest.Application
 
         private sealed class BatchOpenCandidate
         {
-            public string StrategyScopeKey { get; set; } = "single:primary";
-            public int StrategyIndex { get; set; }
             public string Symbol { get; set; } = string.Empty;
             public string Side { get; set; } = string.Empty;
             public long EntryTime { get; set; }
             public decimal EntryPrice { get; set; }
             public decimal Qty { get; set; }
-            public decimal MaxPositionQty { get; set; }
             public decimal ContractSize { get; set; }
             public decimal EntryFee { get; set; }
             public decimal? StopLossPrice { get; set; }
@@ -2031,24 +1936,6 @@ namespace ServerTest.Modules.Backtest.Application
             public decimal FeeRate { get; set; }
             public decimal FundingRate { get; set; }
             public int SlippageBps { get; set; }
-        }
-
-        private sealed class BatchCloseResult
-        {
-            public BatchCloseResult(IReadOnlyList<BatchClosedPosition> closedPositions, int blockedByMaxPosition)
-            {
-                ClosedPositions = closedPositions ?? Array.Empty<BatchClosedPosition>();
-                BlockedByMaxPosition = Math.Max(0, blockedByMaxPosition);
-            }
-
-            public IReadOnlyList<BatchClosedPosition> ClosedPositions { get; }
-            public int BlockedByMaxPosition { get; }
-        }
-
-        private sealed class BatchOpenExposureState
-        {
-            public decimal OpenQty { get; set; }
-            public PriorityQueue<BatchClosedPosition, long> ActiveByExit { get; } = new();
         }
 
         private sealed class BatchClosedPosition
@@ -2136,14 +2023,11 @@ namespace ServerTest.Modules.Backtest.Application
 
                 Candidates.Add(new BatchOpenCandidate
                 {
-                    StrategyScopeKey = _state.StrategyScopeKey,
-                    StrategyIndex = _state.StrategyIndex,
                     Symbol = _state.Symbol,
                     Side = positionSide,
                     EntryTime = _currentTimestamp,
                     EntryPrice = entryPrice,
                     Qty = qty,
-                    MaxPositionQty = _state.MaxPositionQty,
                     ContractSize = _state.ContractSize,
                     EntryFee = entryFee,
                     StopLossPrice = BuildBatchStopLossPrice(entryPrice, _state.StopLossPct, _state.Leverage, positionSide),

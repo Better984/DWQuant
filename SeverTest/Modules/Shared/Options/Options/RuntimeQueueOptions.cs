@@ -36,14 +36,6 @@ namespace ServerTest.Options
             WarningThresholdPercent = 80,
             WarningIntervalSeconds = 10
         };
-
-        public QueueOptions StrategyTaskTraceLog { get; set; } = new QueueOptions
-        {
-            Capacity = 20000,
-            FullMode = "DropWrite",
-            WarningThresholdPercent = 80,
-            WarningIntervalSeconds = 10
-        };
     }
 
     /// <summary>

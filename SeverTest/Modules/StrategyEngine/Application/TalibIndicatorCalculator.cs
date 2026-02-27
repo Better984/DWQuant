@@ -1,5 +1,4 @@
-using ccxt;
-using Microsoft.Extensions.Logging;
+﻿using ccxt;
 using ServerTest.Models.Indicator;
 using TALib;
 
@@ -8,12 +7,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
     internal sealed class TalibIndicatorCalculator
     {
         private readonly TalibIndicatorCatalog? _catalog;
-        private readonly TalibWasmNodePool? _wasmPool;
+        private readonly TalibWasmNodeInvoker? _wasmInvoker;
 
-        public TalibIndicatorCalculator(TalibIndicatorCatalog? catalog, TalibWasmNodePool? wasmPool = null)
+        public TalibIndicatorCalculator(TalibIndicatorCatalog? catalog, TalibWasmNodeInvoker? wasmInvoker = null)
         {
             _catalog = catalog;
-            _wasmPool = wasmPool;
+            _wasmInvoker = wasmInvoker;
         }
 
         public Abstract.IndicatorFunction? ResolveFunction(string indicator)
@@ -55,21 +54,16 @@ namespace ServerTest.Modules.StrategyEngine.Application
             double[] parameters,
             List<OHLCV> candles,
             int maxPoints,
-            out List<IndicatorPoint> points,
-            out string computeCore,
-            ILogger? logger = null)
+            out List<IndicatorPoint> points)
         {
             points = new List<IndicatorPoint>();
-            computeCore = "未知";
             if (candles == null || candles.Count == 0)
             {
-                computeCore = "无K线";
                 return false;
             }
 
             if (!TryBuildInputs(func, key.Input, candles, out var inputs))
             {
-                computeCore = "输入构建失败";
                 return false;
             }
 
@@ -79,9 +73,10 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 outputIndex = 0;
             }
 
-            if (_wasmPool is { IsEnabled: true })
+            // 优先走同核心（Node + talib-web + talib.wasm），确保与前端计算核心一致。
+            if (_wasmInvoker is { IsEnabled: true })
             {
-                if (_wasmPool.TryCompute(
+                if (_wasmInvoker.TryCompute(
                     key.Indicator,
                     inputs,
                     parameters,
@@ -89,7 +84,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     out var wasmOutputs,
                     out var wasmError))
                 {
-                    computeCore = "WASM";
                     return TryBuildPointsFromAlignedOutputs(
                         candles,
                         outputIndex,
@@ -98,16 +92,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         out points);
                 }
 
-                computeCore = "WASM失败回退TALib";
-                logger?.LogWarning(
-                    "同核心计算失败，指标={Indicator}，错误={Error}",
-                    key.Indicator,
-                    wasmError);
-                // 极简稳定模式：WASM 失败后继续使用本地 TALib 兜底，避免任务直接失败。
-            }
-            else
-            {
-                computeCore = "TALib";
+                Console.WriteLine($"同核心计算失败，指标={key.Indicator}，错误={wasmError}");
+                if (_wasmInvoker.StrictWasmCore)
+                {
+                    return false;
+                }
             }
 
             var outputs = new double[func.Outputs.Length][];
@@ -125,8 +114,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (retCode != Core.RetCode.Success)
             {
-                computeCore = $"{computeCore}-失败:{retCode}";
-                logger?.LogWarning("更新指标出错: {RetCode}", retCode);
+                Console.WriteLine("更新指标出错：" + retCode);
                 return false;
             }
 
@@ -139,7 +127,6 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var outEnd = outRange.End.Value;
             if (outEnd <= outStart)
             {
-                computeCore = $"{computeCore}-无输出范围";
                 return false;
             }
 
@@ -166,13 +153,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 points.Add(new IndicatorPoint(timestamp, value));
             }
 
-            if (points.Count == 0)
-            {
-                computeCore = $"{computeCore}-无有效点";
-                return false;
-            }
-
-            return true;
+            return points.Count > 0;
         }
 
         private static bool TryBuildPointsFromAlignedOutputs(

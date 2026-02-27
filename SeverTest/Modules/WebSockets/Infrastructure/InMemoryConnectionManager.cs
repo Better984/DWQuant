@@ -85,17 +85,6 @@ namespace ServerTest.WebSockets
             // 单机模式不需要分布式踢下线广播
         }
 
-        public void ClearStaleEntriesForCurrentNode()
-        {
-            // 内存模式无 Redis 残留，无需清理
-        }
-
-        public long ClearStaleEntriesForCurrentNode(string userId, string system)
-        {
-            // 内存模式无 Redis 残留，无需清理
-            return 0;
-        }
-
         public IReadOnlyList<WebSocketConnection> GetConnections(string userId)
         {
             return _connections.Values

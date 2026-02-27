@@ -17,20 +17,7 @@ namespace ServerTest.Modules.Backtest.Application
         internal sealed class SymbolState
         {
             public string Symbol { get; set; } = string.Empty;
-            /// <summary>
-            /// 策略作用域键（为多策略组合回测预留）。
-            /// 单策略默认 `single:primary`。
-            /// </summary>
-            public string StrategyScopeKey { get; set; } = "single:primary";
-            /// <summary>
-            /// 多策略组合时的策略序号（从 1 开始）。
-            /// </summary>
-            public int StrategyIndex { get; set; }
             public decimal OrderQty { get; set; }
-            /// <summary>
-            /// 最大同向持仓上限（执行前风控口径）。
-            /// </summary>
-            public decimal MaxPositionQty { get; set; }
             public int Leverage { get; set; } = 1;
             public decimal? StopLossPct { get; set; }
             public decimal? TakeProfitPct { get; set; }
@@ -291,8 +278,6 @@ namespace ServerTest.Modules.Backtest.Application
             state.Trades.Add(new BacktestTrade
             {
                 Symbol = state.Symbol,
-                StrategyScopeKey = state.StrategyScopeKey,
-                StrategyIndex = state.StrategyIndex > 0 ? state.StrategyIndex : null,
                 Side = position.Side,
                 EntryTime = position.EntryTime,
                 ExitTime = timestamp,

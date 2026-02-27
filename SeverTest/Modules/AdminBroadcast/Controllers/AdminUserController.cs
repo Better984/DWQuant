@@ -3,8 +3,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Modules.Accounts.Application;
 using ServerTest.Modules.Accounts.Infrastructure;
-using ServerTest.Modules.Backtest.Application;
-using ServerTest.Modules.Backtest.Domain;
 using ServerTest.Modules.StrategyManagement.Infrastructure;
 using ServerTest.Modules.ExchangeApiKeys.Infrastructure;
 using ServerTest.Modules.Notifications.Infrastructure;
@@ -15,8 +13,6 @@ using ServerTest.Services;
 using ServerTest.Protocol;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Options;
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Linq;
 using System.Net.Mail;
 using System.Reflection;
@@ -35,7 +31,6 @@ namespace ServerTest.Controllers
         private readonly UserExchangeApiKeyRepository _apiKeyRepository;
         private readonly UserNotifyChannelRepository _notifyChannelRepository;
         private readonly StrategyPositionRepository _positionRepository;
-        private readonly BacktestTaskService _backtestTaskService;
         private readonly IDbManager _db;
         private readonly BusinessRulesOptions _businessRules;
         private static readonly string[] RandomMethodPool = { "GreaterThan", "LessThan", "CrossUp", "CrossDown", "CrossAny" };
@@ -44,29 +39,15 @@ namespace ServerTest.Controllers
         private static readonly int[] TradeTimeframeSecPool = { 60, 300, 900, 3600, 14400 };
         private static readonly string[] InputSourcePool = { "Open", "High", "Low", "Close", "Volume", "HL2", "HLC3", "OHLC4", "OC2", "HLCC4" };
         // 随机策略仅从常用指标池抽样，避免策略过于分散和难以调试。
-        // 当前常用池：趋势 + 动量 + 波动 + 成交量 共 17 个。
         private static readonly HashSet<string> PreferredRandomIndicatorSet = new(new[]
         {
-            // 均线与通道类
             "MA",
             "SMA",
             "EMA",
-            "BBANDS",
-            "KAMA",
-            "WMA",
-            // 动量与摆动类
             "MACD",
             "RSI",
-            "STOCH",
-            "STOCHRSI",
-            "MOM",
-            "ROC",
-            "ROCR100",
-            "CCI",
-            // 波动与成交量类
+            "BBANDS",
             "ATR",
-            "MFI",
-            "OBV",
         }, StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, string> TalibCodeAlias = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -95,7 +76,6 @@ namespace ServerTest.Controllers
             UserExchangeApiKeyRepository apiKeyRepository,
             UserNotifyChannelRepository notifyChannelRepository,
             StrategyPositionRepository positionRepository,
-            BacktestTaskService backtestTaskService,
             IDbManager db,
             IOptions<BusinessRulesOptions> businessRules)
             : base(logger)
@@ -106,7 +86,6 @@ namespace ServerTest.Controllers
             _apiKeyRepository = apiKeyRepository ?? throw new ArgumentNullException(nameof(apiKeyRepository));
             _notifyChannelRepository = notifyChannelRepository ?? throw new ArgumentNullException(nameof(notifyChannelRepository));
             _positionRepository = positionRepository ?? throw new ArgumentNullException(nameof(positionRepository));
-            _backtestTaskService = backtestTaskService ?? throw new ArgumentNullException(nameof(backtestTaskService));
             _db = db ?? throw new ArgumentNullException(nameof(db));
             _businessRules = businessRules?.Value ?? new BusinessRulesOptions();
         }
@@ -407,11 +386,9 @@ SELECT creator_uid FROM strategy_def WHERE name LIKE @name LIMIT 1;";
             }
 
             var autoSwitchToTesting = payload.AutoSwitchToTesting ?? true;
-            var conditionCount = ResolveConditionCount(payload.ConditionCount);
             try
             {
                 var randomSpec = BuildRandomStrategySpec(
-                    conditionCount,
                     payload.PreferredExchange,
                     payload.PreferredSymbol,
                     payload.PreferredTimeframeSec);
@@ -518,517 +495,6 @@ SELECT creator_uid FROM strategy_def WHERE name LIKE @name LIMIT 1;";
             }
         }
 
-        [ProtocolType("admin.user.test.batch-create-testing-strategies")]
-        [HttpPost("test/batch-create-testing-strategies")]
-        public async Task<IActionResult> BatchCreateTestingStrategies([FromBody] ProtocolRequest<TestBatchCreateTestingStrategiesRequest> request)
-        {
-            var payload = request.Data;
-            if (payload == null || payload.TargetUid <= 0)
-            {
-                return BadRequest(ApiResponse<object>.Error("目标用户ID无效"));
-            }
-
-            var auth = await EnsureSuperAdminAndTestToolsEnabledAsync().ConfigureAwait(false);
-            if (!auth.Passed)
-            {
-                return auth.Error!;
-            }
-
-            var strategyCount = payload.StrategyCount <= 0 ? 10 : Math.Min(payload.StrategyCount, 1000);
-            var conditionCount = ResolveConditionCount(payload.ConditionCount);
-            var targetUid = (ulong)payload.TargetUid;
-            var targetAccount = await _accountRepository.GetByUidAsync(targetUid, null, HttpContext.RequestAborted).ConfigureAwait(false);
-            if (targetAccount == null)
-            {
-                return NotFound(ApiResponse<object>.Error("目标用户不存在"));
-            }
-
-            var ct = HttpContext.RequestAborted;
-            var created = 0;
-            var failed = 0;
-            var switchSuccess = 0;
-            var switchFailed = 0;
-            var failures = new List<object>();
-            var createStopwatch = Stopwatch.StartNew();
-
-            for (var i = 0; i < strategyCount; i++)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                try
-                {
-                    var randomSpec = BuildRandomStrategySpec(
-                        conditionCount,
-                        payload.PreferredExchange,
-                        payload.PreferredSymbol,
-                        payload.PreferredTimeframeSec);
-                    var strategyName = $"批量测试策略_{DateTime.Now:yyyyMMddHHmmss}_{i + 1}_{GenerateRandomSuffix(4)}";
-                    var createRequest = new StrategyCreateRequest
-                    {
-                        Name = strategyName,
-                        AliasName = strategyName,
-                        Description = "超级管理员批量创建测试策略",
-                        ConfigJson = JsonSerializer.SerializeToElement(randomSpec.Config, JsonCamelCaseOptions)
-                    };
-
-                    var createActionResult = await _strategyRepository.Create(payload.TargetUid, createRequest).ConfigureAwait(false);
-                    var createResult = ParseActionResult(createActionResult);
-                    if (!createResult.Success)
-                    {
-                        failed++;
-                        failures.Add(new { phase = "create", strategyName, error = createResult.Message });
-                        continue;
-                    }
-
-                    var usId = ReadLongProperty(createResult.Data, "usId", "UsId");
-                    if (usId <= 0)
-                    {
-                        failed++;
-                        failures.Add(new { phase = "create", strategyName, error = "未返回有效 usId" });
-                        continue;
-                    }
-
-                    created++;
-
-                    var updateRequest = new StrategyInstanceStateRequest { State = "testing" };
-                    var updateActionResult = await _strategyRepository.UpdateInstanceState(
-                        payload.TargetUid,
-                        usId,
-                        updateRequest,
-                        HttpContext.RequestAborted).ConfigureAwait(false);
-
-                    var updateResult = ParseActionResult(updateActionResult);
-                    if (updateResult.Success)
-                    {
-                        switchSuccess++;
-                    }
-                    else
-                    {
-                        switchFailed++;
-                        failures.Add(new { phase = "switch_testing", strategyName, usId, error = updateResult.Message });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    Logger.LogWarning(ex, "批量创建测试策略失败: targetUid={TargetUid} index={Index}", payload.TargetUid, i + 1);
-                    failures.Add(new { phase = "create", index = i + 1, error = ex.Message });
-                }
-            }
-
-            createStopwatch.Stop();
-
-            var response = new
-            {
-                targetUid = payload.TargetUid,
-                requested = strategyCount,
-                created,
-                failed,
-                switchSuccess,
-                switchFailed,
-                elapsedMs = createStopwatch.ElapsedMilliseconds,
-                failures = failures.Take(10).ToList()
-            };
-
-            Logger.LogInformation(
-                "超级测试台批量创建测试策略完成: targetUid={TargetUid} 请求={Requested} 创建成功={Created} 创建失败={Failed} 切换testing成功={SwitchSuccess} 切换失败={SwitchFailed} 耗时={Elapsed}ms",
-                payload.TargetUid, strategyCount, created, failed, switchSuccess, switchFailed, createStopwatch.ElapsedMilliseconds);
-
-            return Ok(ApiResponse<object>.Ok(response, "批量创建测试策略完成"));
-        }
-
-        [ProtocolType("admin.user.test.delete-test-strategies")]
-        [HttpPost("test/delete-test-strategies")]
-        public async Task<IActionResult> DeleteTestStrategies([FromBody] ProtocolRequest<TestDeleteTestStrategiesRequest> request)
-        {
-            var payload = request.Data;
-            if (payload == null || payload.TargetUid <= 0)
-            {
-                return BadRequest(ApiResponse<object>.Error("目标用户ID无效"));
-            }
-
-            var auth = await EnsureSuperAdminAndTestToolsEnabledAsync().ConfigureAwait(false);
-            if (!auth.Passed)
-            {
-                return auth.Error!;
-            }
-
-            var targetUid = (ulong)payload.TargetUid;
-            var targetAccount = await _accountRepository.GetByUidAsync(targetUid, null, HttpContext.RequestAborted).ConfigureAwait(false);
-            if (targetAccount == null)
-            {
-                return NotFound(ApiResponse<object>.Error("目标用户不存在"));
-            }
-
-            var usIds = await _strategyRepository.GetTestStrategyUsIdsForUserAsync(payload.TargetUid, HttpContext.RequestAborted).ConfigureAwait(false);
-            var deleted = 0;
-            var failed = 0;
-            var failures = new List<object>();
-            var stopwatch = Stopwatch.StartNew();
-
-            foreach (var usId in usIds)
-            {
-                try
-                {
-                    var deleteResult = await _strategyRepository.Delete(payload.TargetUid, new StrategyDeleteRequest { UsId = usId }).ConfigureAwait(false);
-                    if (deleteResult is OkObjectResult)
-                    {
-                        deleted++;
-                    }
-                    else
-                    {
-                        failed++;
-                        var errMsg = deleteResult is ObjectResult obj && obj.Value is ApiResponse<object> api ? api.Message : "删除失败";
-                        failures.Add(new { usId, error = errMsg });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    Logger.LogWarning(ex, "删除测试策略失败: targetUid={TargetUid} usId={UsId}", payload.TargetUid, usId);
-                    failures.Add(new { usId, error = ex.Message });
-                }
-            }
-
-            stopwatch.Stop();
-
-            var response = new
-            {
-                targetUid = payload.TargetUid,
-                deleted,
-                failed,
-                elapsedMs = stopwatch.ElapsedMilliseconds,
-                failures = failures.Take(10).ToList()
-            };
-
-            Logger.LogInformation(
-                "超级测试台一键删除测试策略完成: targetUid={TargetUid} 删除={Deleted} 失败={Failed} 耗时={Elapsed}ms",
-                payload.TargetUid, deleted, failed, stopwatch.ElapsedMilliseconds);
-
-            return Ok(ApiResponse<object>.Ok(response, "删除完成"));
-        }
-
-        [ProtocolType("admin.user.test.backtest-stress")]
-        [HttpPost("test/backtest-stress")]
-        public async Task<IActionResult> RunBacktestStress([FromBody] ProtocolRequest<TestBacktestStressRequest> request)
-        {
-            var payload = request.Data;
-            if (payload == null || payload.TargetUid <= 0)
-            {
-                return BadRequest(ApiResponse<object>.Error("目标用户ID无效"));
-            }
-
-            var auth = await EnsureSuperAdminAndTestToolsEnabledAsync().ConfigureAwait(false);
-            if (!auth.Passed)
-            {
-                return auth.Error!;
-            }
-
-            var strategyCount = payload.StrategyCount <= 0 ? 20 : payload.StrategyCount;
-            var tasksPerStrategy = payload.TasksPerStrategy <= 0 ? 1 : payload.TasksPerStrategy;
-            var submitParallelism = payload.SubmitParallelism <= 0 ? 4 : payload.SubmitParallelism;
-            var barCount = payload.BarCount <= 0 ? 1500 : payload.BarCount;
-            var initialCapital = payload.InitialCapital <= 0m ? 10000m : payload.InitialCapital;
-            var pollAfterSubmitSeconds = payload.PollAfterSubmitSeconds < 0 ? 0 : payload.PollAfterSubmitSeconds;
-
-            if (strategyCount > 500)
-            {
-                return BadRequest(ApiResponse<object>.Error("strategyCount 不能超过 500"));
-            }
-
-            if (tasksPerStrategy > 20)
-            {
-                return BadRequest(ApiResponse<object>.Error("tasksPerStrategy 不能超过 20"));
-            }
-
-            if (submitParallelism > 64)
-            {
-                return BadRequest(ApiResponse<object>.Error("submitParallelism 不能超过 64"));
-            }
-
-            if (barCount < 100 || barCount > 500000)
-            {
-                return BadRequest(ApiResponse<object>.Error("barCount 需在 100 ~ 500000 之间"));
-            }
-
-            if (pollAfterSubmitSeconds > 120)
-            {
-                return BadRequest(ApiResponse<object>.Error("pollAfterSubmitSeconds 不能超过 120"));
-            }
-
-            var executionMode = NormalizeBacktestExecutionMode(payload.ExecutionMode);
-            if (executionMode == null)
-            {
-                return BadRequest(ApiResponse<object>.Error("executionMode 仅支持 batch_open_close 或 timeline"));
-            }
-
-            var conditionCount = ResolveConditionCount(payload.ConditionCount);
-            var targetUid = (ulong)payload.TargetUid;
-            var targetAccount = await _accountRepository.GetByUidAsync(targetUid, null, HttpContext.RequestAborted).ConfigureAwait(false);
-            if (targetAccount == null)
-            {
-                return NotFound(ApiResponse<object>.Error("目标用户不存在"));
-            }
-
-            var ct = HttpContext.RequestAborted;
-            try
-            {
-                var runtimeBefore = CaptureRuntimeSnapshot();
-                var createLatencyMs = new List<long>(strategyCount);
-                var createFailures = new List<BacktestStressFailureItem>();
-                var createdStrategies = new List<BacktestStressStrategyContext>(strategyCount);
-                var createStopwatch = Stopwatch.StartNew();
-
-                for (var i = 0; i < strategyCount; i++)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    var createSingleStopwatch = Stopwatch.StartNew();
-                    try
-                    {
-                        var randomSpec = BuildRandomStrategySpec(
-                            conditionCount,
-                            payload.PreferredExchange,
-                            payload.PreferredSymbol,
-                            payload.PreferredTimeframeSec);
-                        var strategyName = $"回测压测策略_{DateTime.Now:yyyyMMddHHmmss}_{i + 1}_{GenerateRandomSuffix(4)}";
-                        var createRequest = new StrategyCreateRequest
-                        {
-                            Name = strategyName,
-                            AliasName = strategyName,
-                            Description = "超级管理员回测压测自动生成策略",
-                            ConfigJson = JsonSerializer.SerializeToElement(randomSpec.Config, JsonCamelCaseOptions)
-                        };
-
-                        var createActionResult = await _strategyRepository.Create(payload.TargetUid, createRequest).ConfigureAwait(false);
-                        var createResult = ParseActionResult(createActionResult);
-                        if (!createResult.Success)
-                        {
-                            createFailures.Add(new BacktestStressFailureItem
-                            {
-                                Phase = "create_strategy",
-                                StrategyName = strategyName,
-                                Error = createResult.Message,
-                                ElapsedMs = createSingleStopwatch.ElapsedMilliseconds
-                            });
-                            continue;
-                        }
-
-                        var usId = ReadLongProperty(createResult.Data, "usId", "UsId");
-                        if (usId <= 0)
-                        {
-                            createFailures.Add(new BacktestStressFailureItem
-                            {
-                                Phase = "create_strategy",
-                                StrategyName = strategyName,
-                                Error = "创建成功但未返回有效 usId",
-                                ElapsedMs = createSingleStopwatch.ElapsedMilliseconds
-                            });
-                            continue;
-                        }
-
-                        createdStrategies.Add(new BacktestStressStrategyContext
-                        {
-                            UsId = usId,
-                            StrategyName = strategyName,
-                            Exchange = randomSpec.Exchange,
-                            Symbol = randomSpec.Symbol,
-                            Timeframe = randomSpec.Timeframe
-                        });
-                        createLatencyMs.Add(createSingleStopwatch.ElapsedMilliseconds);
-                    }
-                    catch (ArgumentException ex)
-                    {
-                        createFailures.Add(new BacktestStressFailureItem
-                        {
-                            Phase = "create_strategy",
-                            Error = ex.Message,
-                            ElapsedMs = createSingleStopwatch.ElapsedMilliseconds
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogWarning(ex, "回测压测创建策略失败: targetUid={TargetUid} index={Index}", payload.TargetUid, i + 1);
-                        createFailures.Add(new BacktestStressFailureItem
-                        {
-                            Phase = "create_strategy",
-                            Error = ex.Message,
-                            ElapsedMs = createSingleStopwatch.ElapsedMilliseconds
-                        });
-                    }
-                }
-
-                createStopwatch.Stop();
-
-                if (createdStrategies.Count == 0)
-                {
-                    return StatusCode(500, ApiResponse<object>.Error("未创建任何可用策略，无法执行回测压测"));
-                }
-
-                var submitLatencyMs = new ConcurrentBag<long>();
-                var submitSuccesses = new ConcurrentBag<BacktestStressSubmitSuccessItem>();
-                var submitFailures = new ConcurrentBag<BacktestStressFailureItem>();
-                var submitThreadIds = new ConcurrentDictionary<int, byte>();
-                var submitStopwatch = Stopwatch.StartNew();
-
-                using var submitSemaphore = new SemaphoreSlim(submitParallelism, submitParallelism);
-                var submitTasks = new List<Task>(createdStrategies.Count * tasksPerStrategy);
-                foreach (var strategy in createdStrategies)
-                {
-                    for (var submitRound = 1; submitRound <= tasksPerStrategy; submitRound++)
-                    {
-                        var roundCopy = submitRound;
-                        submitTasks.Add(SubmitBacktestStressTaskAsync(
-                            payload.TargetUid,
-                            strategy,
-                            roundCopy,
-                            barCount,
-                            initialCapital,
-                            payload.IncludeDetailedOutput,
-                            executionMode,
-                            submitSemaphore,
-                            submitLatencyMs,
-                            submitSuccesses,
-                            submitFailures,
-                            submitThreadIds,
-                            ct));
-                    }
-                }
-
-                await Task.WhenAll(submitTasks).ConfigureAwait(false);
-                submitStopwatch.Stop();
-
-                var runtimeAfterSubmit = CaptureRuntimeSnapshot();
-                var submittedTaskIds = submitSuccesses
-                    .Select(item => item.TaskId)
-                    .Distinct()
-                    .ToArray();
-                var statusDistributionImmediate = await QueryBacktestTaskStatusDistributionAsync(payload.TargetUid, submittedTaskIds, ct).ConfigureAwait(false);
-
-                Dictionary<string, int>? statusDistributionAfterWait = null;
-                if (pollAfterSubmitSeconds > 0 && submittedTaskIds.Length > 0)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(pollAfterSubmitSeconds), ct).ConfigureAwait(false);
-                    statusDistributionAfterWait = await QueryBacktestTaskStatusDistributionAsync(payload.TargetUid, submittedTaskIds, ct).ConfigureAwait(false);
-                }
-
-                var runtimeAfterPoll = CaptureRuntimeSnapshot();
-                var totalSubmitRequested = createdStrategies.Count * tasksPerStrategy;
-                var submitSuccessCount = submitSuccesses.Count;
-                var submitFailureCount = submitFailures.Count;
-                var submitSuccessRatePct = totalSubmitRequested <= 0
-                    ? 0d
-                    : Math.Round(submitSuccessCount * 100d / totalSubmitRequested, 2);
-                var threadIds = submitThreadIds.Keys.OrderBy(id => id).ToList();
-
-                var response = new
-                {
-                    requested = new
-                    {
-                        targetUid = payload.TargetUid,
-                        strategyCount,
-                        tasksPerStrategy,
-                        totalSubmitRequested,
-                        submitParallelism,
-                        barCount,
-                        initialCapital,
-                        executionMode,
-                        includeDetailedOutput = payload.IncludeDetailedOutput,
-                        pollAfterSubmitSeconds
-                    },
-                    strategies = new
-                    {
-                        created = createdStrategies.Count,
-                        failed = createFailures.Count,
-                        createElapsedMs = createStopwatch.ElapsedMilliseconds,
-                        createLatency = BuildLatencySummary(createLatencyMs),
-                        sample = createdStrategies
-                            .Take(10)
-                            .Select(item => new
-                            {
-                                item.UsId,
-                                item.StrategyName,
-                                item.Exchange,
-                                item.Symbol,
-                                item.Timeframe
-                            })
-                            .ToList(),
-                        failures = createFailures
-                            .Take(20)
-                            .Select(item => new
-                            {
-                                item.Phase,
-                                item.StrategyName,
-                                item.Error,
-                                item.ElapsedMs
-                            })
-                            .ToList()
-                    },
-                    submissions = new
-                    {
-                        success = submitSuccessCount,
-                        failed = submitFailureCount,
-                        successRatePct = submitSuccessRatePct,
-                        submitElapsedMs = submitStopwatch.ElapsedMilliseconds,
-                        submitLatency = BuildLatencySummary(submitLatencyMs),
-                        submittedTaskIdsSample = submittedTaskIds
-                            .OrderBy(id => id)
-                            .Take(30)
-                            .ToList(),
-                        workerThreadParticipation = new
-                        {
-                            distinctThreadCount = threadIds.Count,
-                            threadIds = threadIds.Take(30).ToList()
-                        },
-                        failures = submitFailures
-                            .Take(30)
-                            .Select(item => new
-                            {
-                                item.Phase,
-                                item.UsId,
-                                item.SubmitRound,
-                                item.Error,
-                                item.ElapsedMs
-                            })
-                            .ToList()
-                    },
-                    taskStatus = new
-                    {
-                        immediate = statusDistributionImmediate,
-                        afterWaitSeconds = pollAfterSubmitSeconds,
-                        afterWait = statusDistributionAfterWait
-                    },
-                    runtime = new
-                    {
-                        before = runtimeBefore,
-                        afterSubmit = runtimeAfterSubmit,
-                        afterPoll = runtimeAfterPoll
-                    }
-                };
-
-                Logger.LogInformation(
-                    "超级测试台回测压测完成: targetUid={TargetUid} 策略创建={CreatedStrategies}/{RequestedStrategies} 任务提交={SubmitSuccess}/{SubmitRequested} 失败={SubmitFailed} 提交耗时={SubmitElapsed}ms",
-                    payload.TargetUid,
-                    createdStrategies.Count,
-                    strategyCount,
-                    submitSuccessCount,
-                    totalSubmitRequested,
-                    submitFailureCount,
-                    submitStopwatch.ElapsedMilliseconds);
-
-                return Ok(ApiResponse<object>.Ok(response, "回测压测执行完成"));
-            }
-            catch (OperationCanceledException)
-            {
-                return BadRequest(ApiResponse<object>.Error("回测压测已取消"));
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "执行回测压测失败: targetUid={TargetUid}", payload.TargetUid);
-                return StatusCode(500, ApiResponse<object>.Error("执行回测压测失败，请稍后重试"));
-            }
-        }
-
         private async Task<AuthCheckResult> EnsureSuperAdminAsync()
         {
             var uid = await GetUserIdAsync().ConfigureAwait(false);
@@ -1062,233 +528,6 @@ SELECT creator_uid FROM strategy_def WHERE name LIKE @name LIMIT 1;";
             return auth;
         }
 
-        private async Task SubmitBacktestStressTaskAsync(
-            long targetUid,
-            BacktestStressStrategyContext strategy,
-            int submitRound,
-            int barCount,
-            decimal initialCapital,
-            bool includeDetailedOutput,
-            string executionMode,
-            SemaphoreSlim submitSemaphore,
-            ConcurrentBag<long> submitLatencyMs,
-            ConcurrentBag<BacktestStressSubmitSuccessItem> submitSuccesses,
-            ConcurrentBag<BacktestStressFailureItem> submitFailures,
-            ConcurrentDictionary<int, byte> submitThreadIds,
-            CancellationToken ct)
-        {
-            await submitSemaphore.WaitAsync(ct).ConfigureAwait(false);
-            var threadId = Environment.CurrentManagedThreadId;
-            submitThreadIds.TryAdd(threadId, 0);
-
-            var stopwatch = Stopwatch.StartNew();
-            try
-            {
-                var submitRequest = BuildBacktestStressRunRequest(
-                    strategy,
-                    barCount,
-                    initialCapital,
-                    includeDetailedOutput,
-                    executionMode);
-                var reqId = $"admin_backtest_stress_{DateTime.UtcNow:yyyyMMddHHmmssfff}_{strategy.UsId}_{submitRound}_{GenerateRandomSuffix(3)}";
-                var summary = await _backtestTaskService
-                    .SubmitAsync(submitRequest, targetUid, reqId, ct)
-                    .ConfigureAwait(false);
-
-                var elapsedMs = stopwatch.ElapsedMilliseconds;
-                submitLatencyMs.Add(elapsedMs);
-                submitThreadIds.TryAdd(Environment.CurrentManagedThreadId, 0);
-                submitSuccesses.Add(new BacktestStressSubmitSuccessItem
-                {
-                    TaskId = summary.TaskId,
-                    UsId = strategy.UsId,
-                    SubmitRound = submitRound,
-                    ElapsedMs = elapsedMs
-                });
-            }
-            catch (Exception ex)
-            {
-                submitThreadIds.TryAdd(Environment.CurrentManagedThreadId, 0);
-                submitFailures.Add(new BacktestStressFailureItem
-                {
-                    Phase = "submit_backtest",
-                    UsId = strategy.UsId,
-                    SubmitRound = submitRound,
-                    Error = ex.Message,
-                    ElapsedMs = stopwatch.ElapsedMilliseconds
-                });
-            }
-            finally
-            {
-                submitSemaphore.Release();
-            }
-        }
-
-        private static BacktestRunRequest BuildBacktestStressRunRequest(
-            BacktestStressStrategyContext strategy,
-            int barCount,
-            decimal initialCapital,
-            bool includeDetailedOutput,
-            string executionMode)
-        {
-            return new BacktestRunRequest
-            {
-                UsId = strategy.UsId,
-                Exchange = strategy.Exchange,
-                Symbols = new List<string> { strategy.Symbol },
-                Timeframe = strategy.Timeframe,
-                BarCount = barCount,
-                InitialCapital = initialCapital,
-                FeeRate = 0.0004m,
-                FundingRate = 0m,
-                SlippageBps = 0,
-                UseStrategyRuntime = true,
-                ExecutionMode = executionMode,
-                Output = new BacktestOutputOptions
-                {
-                    IncludeTrades = includeDetailedOutput,
-                    IncludeEquityCurve = includeDetailedOutput,
-                    IncludeEvents = includeDetailedOutput,
-                    EquityCurveGranularity = "1m"
-                }
-            };
-        }
-
-        private async Task<Dictionary<string, int>> QueryBacktestTaskStatusDistributionAsync(
-            long userId,
-            IReadOnlyCollection<long> taskIds,
-            CancellationToken ct)
-        {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (taskIds.Count == 0)
-            {
-                return result;
-            }
-
-            const string sql = @"
-SELECT status AS Status, COUNT(1) AS Cnt
-FROM backtest_task
-WHERE user_id = @userId
-  AND task_id IN @taskIds
-GROUP BY status;";
-
-            foreach (var chunk in taskIds.Distinct().Chunk(500))
-            {
-                var rows = await _db.QueryAsync<dynamic>(sql, new { userId, taskIds = chunk }, null, ct).ConfigureAwait(false);
-                foreach (var row in rows)
-                {
-                    string? status = Convert.ToString(row.Status);
-                    if (string.IsNullOrWhiteSpace(status))
-                    {
-                        continue;
-                    }
-
-                    var count = Convert.ToInt32(row.Cnt);
-                    if (result.TryGetValue(status, out int existing))
-                    {
-                        result[status] = existing + count;
-                    }
-                    else
-                    {
-                        result[status] = count;
-                    }
-                }
-            }
-
-            return result
-                .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
-        }
-
-        private static string? NormalizeBacktestExecutionMode(string? executionMode)
-        {
-            var normalized = (executionMode ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(normalized))
-            {
-                return BacktestExecutionModes.BatchOpenClose;
-            }
-
-            if (string.Equals(normalized, BacktestExecutionModes.BatchOpenClose, StringComparison.OrdinalIgnoreCase))
-            {
-                return BacktestExecutionModes.BatchOpenClose;
-            }
-
-            if (string.Equals(normalized, BacktestExecutionModes.Timeline, StringComparison.OrdinalIgnoreCase))
-            {
-                return BacktestExecutionModes.Timeline;
-            }
-
-            return null;
-        }
-
-        private static object BuildLatencySummary(IEnumerable<long> source)
-        {
-            var sorted = source
-                .Where(value => value >= 0)
-                .OrderBy(value => value)
-                .ToList();
-            if (sorted.Count == 0)
-            {
-                return new
-                {
-                    count = 0,
-                    minMs = 0L,
-                    maxMs = 0L,
-                    avgMs = 0d,
-                    p50Ms = 0L,
-                    p95Ms = 0L,
-                    p99Ms = 0L
-                };
-            }
-
-            static long ReadPercentile(IReadOnlyList<long> values, double percentile)
-            {
-                var index = (int)Math.Ceiling(values.Count * percentile) - 1;
-                index = Math.Clamp(index, 0, values.Count - 1);
-                return values[index];
-            }
-
-            return new
-            {
-                count = sorted.Count,
-                minMs = sorted[0],
-                maxMs = sorted[^1],
-                avgMs = Math.Round(sorted.Average(), 2),
-                p50Ms = ReadPercentile(sorted, 0.50d),
-                p95Ms = ReadPercentile(sorted, 0.95d),
-                p99Ms = ReadPercentile(sorted, 0.99d)
-            };
-        }
-
-        private static object CaptureRuntimeSnapshot()
-        {
-            ThreadPool.GetMaxThreads(out var maxWorkerThreads, out var maxIoThreads);
-            ThreadPool.GetAvailableThreads(out var availableWorkerThreads, out var availableIoThreads);
-
-            using var process = Process.GetCurrentProcess();
-            process.Refresh();
-
-            return new
-            {
-                capturedAt = DateTime.UtcNow.ToString("O"),
-                cpuCores = Environment.ProcessorCount,
-                processThreadCount = process.Threads.Count,
-                workingSetMb = Math.Round(process.WorkingSet64 / 1024d / 1024d, 2),
-                privateMemoryMb = Math.Round(process.PrivateMemorySize64 / 1024d / 1024d, 2),
-                gcHeapMb = Math.Round(GC.GetTotalMemory(false) / 1024d / 1024d, 2),
-                totalAllocatedMb = Math.Round(GC.GetTotalAllocatedBytes(false) / 1024d / 1024d, 2),
-                threadPool = new
-                {
-                    maxWorkerThreads,
-                    availableWorkerThreads,
-                    busyWorkerThreads = Math.Max(0, maxWorkerThreads - availableWorkerThreads),
-                    maxIoThreads,
-                    availableIoThreads,
-                    busyIoThreads = Math.Max(0, maxIoThreads - availableIoThreads)
-                }
-            };
-        }
-
         private static bool IsValidEmail(string email)
         {
             try
@@ -1319,22 +558,7 @@ GROUP BY status;";
             return new string(chars);
         }
 
-        private const int DefaultConditionCount = 5;
-        private const int MinConditionCount = 1;
-        private const int MaxConditionCount = 20;
-
-        private static int ResolveConditionCount(int? value)
-        {
-            if (!value.HasValue || value.Value <= 0)
-            {
-                return DefaultConditionCount;
-            }
-
-            return Math.Clamp(value.Value, MinConditionCount, MaxConditionCount);
-        }
-
         private static RandomStrategySpec BuildRandomStrategySpec(
-            int conditionCount,
             string? preferredExchange,
             string? preferredSymbol,
             int? preferredTimeframeSec)
@@ -1345,52 +569,6 @@ GROUP BY status;";
                 throw new InvalidOperationException("未加载到可用指标定义");
             }
 
-            var exchange = ResolvePreferredStringOrRandom(preferredExchange, TradeExchangePool, "交易所");
-            var symbol = ResolvePreferredStringOrRandom(preferredSymbol, TradeSymbolPool, "交易对");
-            var timeframeSec = ResolvePreferredIntOrRandom(preferredTimeframeSec, TradeTimeframeSecPool, "时间周期");
-            var timeframe = MarketDataKeyNormalizer.TimeframeFromSeconds(timeframeSec);
-            if (string.IsNullOrWhiteSpace(timeframe))
-            {
-                timeframe = "1m";
-            }
-
-            var entryLongConditions = new List<StrategyMethod>();
-            var exitLongConditions = new List<StrategyMethod>();
-            var entryShortConditions = new List<StrategyMethod>();
-            var exitShortConditions = new List<StrategyMethod>();
-
-            for (var i = 0; i < conditionCount; i++)
-            {
-                var (entryLong, exitLong) = BuildOneRandomCondition(catalog, timeframe);
-                entryLongConditions.Add(entryLong);
-                exitLongConditions.Add(exitLong);
-
-                var (entryShort, exitShort) = BuildOneRandomCondition(catalog, timeframe);
-                entryShortConditions.Add(entryShort);
-                exitShortConditions.Add(exitShort);
-            }
-
-            var config = BuildRandomStrategyConfig(exchange, symbol, timeframeSec, entryLongConditions, exitLongConditions, entryShortConditions, exitShortConditions);
-
-            var firstLong = entryLongConditions[0];
-            var leftCode = firstLong.Args.Count > 0 ? firstLong.Args[0].Indicator : "";
-            var rightCode = firstLong.Args.Count > 1 ? firstLong.Args[1].Indicator : "";
-
-            return new RandomStrategySpec
-            {
-                Config = config,
-                EntryMethod = firstLong.Method,
-                ExitMethod = exitLongConditions[0].Method,
-                LeftIndicatorCode = leftCode,
-                RightIndicatorCode = rightCode,
-                Timeframe = timeframe,
-                Exchange = exchange,
-                Symbol = symbol
-            };
-        }
-
-        private static (StrategyMethod entry, StrategyMethod exit) BuildOneRandomCondition(RandomIndicatorCatalog catalog, string timeframe)
-        {
             var leftIndicator = PickRandom(catalog.Indicators);
             var rightIndicator = PickRandom(catalog.Indicators);
             if (catalog.Indicators.Count > 1)
@@ -1405,11 +583,30 @@ GROUP BY status;";
 
             var entryMethod = PickRandom(RandomMethodPool);
             var exitMethod = ResolveReverseMethod(entryMethod);
+            var exchange = ResolvePreferredStringOrRandom(preferredExchange, TradeExchangePool, "交易所");
+            var symbol = ResolvePreferredStringOrRandom(preferredSymbol, TradeSymbolPool, "交易对");
+            var timeframeSec = ResolvePreferredIntOrRandom(preferredTimeframeSec, TradeTimeframeSecPool, "时间周期");
+            var timeframe = MarketDataKeyNormalizer.TimeframeFromSeconds(timeframeSec);
+            if (string.IsNullOrWhiteSpace(timeframe))
+            {
+                timeframe = "1m";
+            }
+
             var leftRef = BuildIndicatorReference(leftIndicator, timeframe);
             var rightRef = BuildIndicatorReference(rightIndicator, timeframe);
-            var entry = BuildCompareMethod(entryMethod, leftRef, rightRef);
-            var exit = BuildCompareMethod(exitMethod, leftRef, rightRef);
-            return (entry, exit);
+            var config = BuildRandomStrategyConfig(exchange, symbol, timeframeSec, entryMethod, exitMethod, leftRef, rightRef);
+
+            return new RandomStrategySpec
+            {
+                Config = config,
+                EntryMethod = entryMethod,
+                ExitMethod = exitMethod,
+                LeftIndicatorCode = leftIndicator.IndicatorCode,
+                RightIndicatorCode = rightIndicator.IndicatorCode,
+                Timeframe = timeframe,
+                Exchange = exchange,
+                Symbol = symbol
+            };
         }
 
         private static string ResolvePreferredStringOrRandom(
@@ -1454,11 +651,14 @@ GROUP BY status;";
             string exchange,
             string symbol,
             int timeframeSec,
-            IReadOnlyList<StrategyMethod> entryLongConditions,
-            IReadOnlyList<StrategyMethod> exitLongConditions,
-            IReadOnlyList<StrategyMethod> entryShortConditions,
-            IReadOnlyList<StrategyMethod> exitShortConditions)
+            string entryMethod,
+            string exitMethod,
+            StrategyValueRef leftRef,
+            StrategyValueRef rightRef)
         {
+            var entryCondition = BuildCompareMethod(entryMethod, leftRef, rightRef);
+            var exitCondition = BuildCompareMethod(exitMethod, leftRef, rightRef);
+
             return new StrategyConfig
             {
                 Trade = new TradeConfig
@@ -1490,13 +690,13 @@ GROUP BY status;";
                 {
                     Entry = new StrategyLogicSide
                     {
-                        Long = BuildLogicBranch(true, "Long", entryLongConditions),
-                        Short = BuildLogicBranch(true, "Short", entryShortConditions)
+                        Long = BuildLogicBranch(true, "Long", entryCondition),
+                        Short = BuildLogicBranch(false, "Short", null)
                     },
                     Exit = new StrategyLogicSide
                     {
-                        Long = BuildLogicBranch(true, "CloseLong", exitLongConditions),
-                        Short = BuildLogicBranch(true, "CloseShort", exitShortConditions)
+                        Long = BuildLogicBranch(true, "CloseLong", exitCondition),
+                        Short = BuildLogicBranch(false, "CloseShort", null)
                     }
                 },
                 Runtime = new StrategyRuntimeConfig
@@ -1510,16 +710,16 @@ GROUP BY status;";
             };
         }
 
-        private static StrategyLogicBranch BuildLogicBranch(bool enabled, string action, IReadOnlyList<StrategyMethod> conditions)
+        private static StrategyLogicBranch BuildLogicBranch(bool enabled, string action, StrategyMethod? condition)
         {
             var groups = new List<ConditionGroup>();
-            if (conditions.Count > 0)
+            if (condition != null)
             {
                 groups.Add(new ConditionGroup
                 {
                     Enabled = true,
-                    MinPassConditions = conditions.Count,
-                    Conditions = conditions.ToList()
+                    MinPassConditions = 1,
+                    Conditions = new List<StrategyMethod> { condition }
                 });
             }
 
@@ -2251,33 +1451,6 @@ GROUP BY status;";
 
         private sealed record ActionResultSnapshot(int StatusCode, bool Success, string Message, object? Data);
 
-        private sealed class BacktestStressStrategyContext
-        {
-            public long UsId { get; set; }
-            public string StrategyName { get; set; } = string.Empty;
-            public string Exchange { get; set; } = string.Empty;
-            public string Symbol { get; set; } = string.Empty;
-            public string Timeframe { get; set; } = string.Empty;
-        }
-
-        private sealed class BacktestStressSubmitSuccessItem
-        {
-            public long TaskId { get; set; }
-            public long UsId { get; set; }
-            public int SubmitRound { get; set; }
-            public long ElapsedMs { get; set; }
-        }
-
-        private sealed class BacktestStressFailureItem
-        {
-            public string Phase { get; set; } = string.Empty;
-            public string? StrategyName { get; set; }
-            public long? UsId { get; set; }
-            public int? SubmitRound { get; set; }
-            public string Error { get; set; } = string.Empty;
-            public long ElapsedMs { get; set; }
-        }
-
         private sealed class RandomStrategySpec
         {
             public StrategyConfig Config { get; set; } = new();
@@ -2717,39 +1890,6 @@ ORDER BY created_at DESC;";
     {
         public long TargetUid { get; set; }
         public bool? AutoSwitchToTesting { get; set; } = true;
-        public int? ConditionCount { get; set; }
-        public string? PreferredExchange { get; set; }
-        public string? PreferredSymbol { get; set; }
-        public int? PreferredTimeframeSec { get; set; }
-    }
-
-    public sealed class TestBatchCreateTestingStrategiesRequest
-    {
-        public long TargetUid { get; set; }
-        public int StrategyCount { get; set; } = 10;
-        public int? ConditionCount { get; set; }
-        public string? PreferredExchange { get; set; }
-        public string? PreferredSymbol { get; set; }
-        public int? PreferredTimeframeSec { get; set; }
-    }
-
-    public sealed class TestDeleteTestStrategiesRequest
-    {
-        public long TargetUid { get; set; }
-    }
-
-    public sealed class TestBacktestStressRequest
-    {
-        public long TargetUid { get; set; }
-        public int StrategyCount { get; set; } = 20;
-        public int? ConditionCount { get; set; }
-        public int TasksPerStrategy { get; set; } = 1;
-        public int SubmitParallelism { get; set; } = 4;
-        public int BarCount { get; set; } = 1500;
-        public decimal InitialCapital { get; set; } = 10000m;
-        public string? ExecutionMode { get; set; } = BacktestExecutionModes.BatchOpenClose;
-        public bool IncludeDetailedOutput { get; set; }
-        public int PollAfterSubmitSeconds { get; set; } = 5;
         public string? PreferredExchange { get; set; }
         public string? PreferredSymbol { get; set; }
         public int? PreferredTimeframeSec { get; set; }

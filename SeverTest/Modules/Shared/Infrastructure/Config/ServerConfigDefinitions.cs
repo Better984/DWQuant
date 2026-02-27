@@ -33,20 +33,6 @@ namespace ServerTest.Infrastructure.Config
             new ServerConfigDefinition("HistoricalData:MaxCacheBars", "历史数据", "int", "单品种缓存 K 线数量（需重启）", false),
 
             new ServerConfigDefinition("ConditionCache:CleanupIntervalSeconds", "策略运行", "int", "条件缓存清理间隔（秒，需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:EnableRunProfileLog", "策略运行", "bool", "是否启用策略运行画像日志（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:LogEveryRunTask", "策略运行", "bool", "是否输出每条策略任务画像（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:SlowRunThresholdMs", "策略运行", "int", "策略任务慢日志阈值（毫秒，需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:SlowIndicatorRefreshThresholdMs", "策略运行", "int", "指标刷新慢日志阈值（毫秒，需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:PersistRunProfileExtraJson", "策略运行", "bool", "是否将运行画像写入 extra_json（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:EnableMarketDispatchLog", "策略运行", "bool", "是否启用行情分发耗时日志（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:LogEveryMarketDispatch", "策略运行", "bool", "是否输出每条行情分发耗时（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:SlowMarketDispatchThresholdMs", "策略运行", "int", "行情分发慢日志阈值（毫秒，需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:EnableActionEnqueueLog", "策略运行", "bool", "是否启用动作入队耗时日志（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:LogEveryActionEnqueue", "策略运行", "bool", "是否输出每次动作入队耗时（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:SlowActionEnqueueThresholdMs", "策略运行", "int", "动作入队慢日志阈值（毫秒，需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:EnableTradeConsumeLog", "策略运行", "bool", "是否启用交易动作消费耗时日志（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:LogEveryTradeAction", "策略运行", "bool", "是否输出每条交易动作消费耗时（需重启）", false),
-            new ServerConfigDefinition("StrategyDiagnostics:SlowTradeActionThresholdMs", "策略运行", "int", "交易动作消费慢日志阈值（毫秒，需重启）", false),
 
             new ServerConfigDefinition("Startup:MarketDataInitTimeoutSeconds", "启动", "int", "行情初始化超时（秒，需重启）", false),
             new ServerConfigDefinition("Startup:StrategyRuntimeWarmupSeconds", "启动", "int", "策略运行预热等待（秒，需重启）", false),
@@ -59,7 +45,6 @@ namespace ServerTest.Infrastructure.Config
 
             new ServerConfigDefinition("WebSocket:KickPolicy", "WebSocket", "string", "连接挤出策略（需重启）", false),
             new ServerConfigDefinition("WebSocket:KeepAliveSeconds", "WebSocket", "int", "心跳间隔（秒，需重启）", false),
-            new ServerConfigDefinition("WebSocket:NodeId", "WebSocket", "string", "节点标识后缀（会自动拼接机器名前缀，需重启）", false),
             new ServerConfigDefinition("WebSocket:MaxConnectionsPerSystem", "WebSocket", "int", "同系统最大连接数（需重启）", false),
             new ServerConfigDefinition("WebSocket:ConnectionKeyTtlSeconds", "WebSocket", "int", "连接键过期时间（秒，需重启）", false),
             new ServerConfigDefinition("WebSocket:ConnectionKeyRefreshSeconds", "WebSocket", "int", "连接键刷新间隔（秒，需重启）", false),

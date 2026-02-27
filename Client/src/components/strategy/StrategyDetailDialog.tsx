@@ -208,7 +208,6 @@ type BacktestProgressPayload = {
   elapsedMs?: number;
   foundPositions?: number;
   totalPositions?: number;
-  blockedPositions?: number;
   chunkCount?: number;
   winCount?: number;
   lossCount?: number;
@@ -217,32 +216,6 @@ type BacktestProgressPayload = {
   symbol?: string;
   positions?: BacktestTrade[];
   replacePositions?: boolean;
-};
-
-type BacktestStageSnapshot = {
-  stageCode: string;
-  stageName: string;
-  message: string;
-  elapsedMs: number | null;
-  progress: number | null;
-  processedBars: number | null;
-  totalBars: number | null;
-  foundPositions: number | null;
-  totalPositions: number | null;
-  blockedPositions: number | null;
-  winCount: number | null;
-  lossCount: number | null;
-  winRate: number | null;
-  completed: boolean;
-  updatedAtMs: number;
-  updateCount: number;
-};
-
-type BacktestBottleneckHint = {
-  level: '高' | '中' | '提示';
-  title: string;
-  description: string;
-  suggestion: string;
 };
 
 type BacktestTradeFocusRange = {
@@ -670,13 +643,10 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   const [backtestProgressPercent, setBacktestProgressPercent] = useState<number | null>(null);
   const [backtestFoundPositions, setBacktestFoundPositions] = useState(0);
   const [backtestTotalPositions, setBacktestTotalPositions] = useState(0);
-  const [backtestBlockedPositions, setBacktestBlockedPositions] = useState(0);
   const [backtestWinCount, setBacktestWinCount] = useState(0);
   const [backtestLossCount, setBacktestLossCount] = useState(0);
   const [backtestWinRate, setBacktestWinRate] = useState<number | null>(null);
   const [backtestStreamingTrades, setBacktestStreamingTrades] = useState<BacktestTrade[]>([]);
-  const [backtestStageOrder, setBacktestStageOrder] = useState<string[]>([]);
-  const [backtestStageSnapshots, setBacktestStageSnapshots] = useState<Record<string, BacktestStageSnapshot>>({});
   const [backtestTradeFocusRange, setBacktestTradeFocusRange] = useState<BacktestTradeFocusRange | null>(null);
   const [selectedBacktestTradeKey, setSelectedBacktestTradeKey] = useState<string | null>(null);
   const [cacheSnapshots, setCacheSnapshots] = useState<Array<{
@@ -967,13 +937,10 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     setBacktestProgressPercent(null);
     setBacktestFoundPositions(0);
     setBacktestTotalPositions(0);
-    setBacktestBlockedPositions(0);
     setBacktestWinCount(0);
     setBacktestLossCount(0);
     setBacktestWinRate(null);
     setBacktestStreamingTrades([]);
-    setBacktestStageOrder([]);
-    setBacktestStageSnapshots({});
   }, [defaultBacktestForm, strategy?.usId]);
 
   const handleUpdateStatus = async (newStatus: 'running' | 'paused' | 'paused_open_position' | 'testing' | 'completed') => {
@@ -1635,13 +1602,10 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     setBacktestProgressPercent(null);
     setBacktestFoundPositions(0);
     setBacktestTotalPositions(0);
-    setBacktestBlockedPositions(0);
     setBacktestWinCount(0);
     setBacktestLossCount(0);
     setBacktestWinRate(null);
     setBacktestStreamingTrades([]);
-    setBacktestStageOrder([]);
-    setBacktestStageSnapshots({});
     setBacktestTradeFocusRange(null);
     setSelectedBacktestTradeKey(null);
   };
@@ -1830,9 +1794,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
       if (typeof payload.totalPositions === 'number') {
         setBacktestTotalPositions(payload.totalPositions);
       }
-      if (typeof payload.blockedPositions === 'number') {
-        setBacktestBlockedPositions(payload.blockedPositions);
-      }
       if (typeof payload.winCount === 'number') {
         setBacktestWinCount(payload.winCount);
       }
@@ -1841,43 +1802,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
       }
       if (typeof payload.winRate === 'number') {
         setBacktestWinRate(payload.winRate);
-      }
-
-      const stageCode = (payload.stage ?? '').trim();
-      const stageName = (payload.stageName ?? '').trim();
-      const stageKey = stageCode || stageName;
-      if (stageKey) {
-        const nowMs = Date.now();
-        setBacktestStageOrder((prev) => (prev.includes(stageKey) ? prev : [...prev, stageKey]));
-        setBacktestStageSnapshots((prev) => {
-          const current = prev[stageKey];
-          const nextSnapshot: BacktestStageSnapshot = {
-            stageCode: stageCode || current?.stageCode || stageKey,
-            stageName: stageName || current?.stageName || stageKey,
-            message: payload.message ?? current?.message ?? '',
-            elapsedMs: typeof payload.elapsedMs === 'number' ? payload.elapsedMs : current?.elapsedMs ?? null,
-            progress: typeof payload.progress === 'number' ? payload.progress : current?.progress ?? null,
-            processedBars: typeof payload.processedBars === 'number' ? payload.processedBars : current?.processedBars ?? null,
-            totalBars: typeof payload.totalBars === 'number' ? payload.totalBars : current?.totalBars ?? null,
-            foundPositions:
-              typeof payload.foundPositions === 'number' ? payload.foundPositions : current?.foundPositions ?? null,
-            totalPositions:
-              typeof payload.totalPositions === 'number' ? payload.totalPositions : current?.totalPositions ?? null,
-            blockedPositions:
-              typeof payload.blockedPositions === 'number' ? payload.blockedPositions : current?.blockedPositions ?? null,
-            winCount: typeof payload.winCount === 'number' ? payload.winCount : current?.winCount ?? null,
-            lossCount: typeof payload.lossCount === 'number' ? payload.lossCount : current?.lossCount ?? null,
-            winRate: typeof payload.winRate === 'number' ? payload.winRate : current?.winRate ?? null,
-            completed: typeof payload.completed === 'boolean' ? payload.completed : current?.completed ?? false,
-            updatedAtMs: nowMs,
-            updateCount: (current?.updateCount ?? 0) + 1,
-          };
-
-          return {
-            ...prev,
-            [stageKey]: nextSnapshot,
-          };
-        });
       }
 
       if (Array.isArray(payload.positions) && payload.positions.length > 0) {
@@ -1903,13 +1827,10 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     setBacktestProgressPercent(0);
     setBacktestFoundPositions(0);
     setBacktestTotalPositions(0);
-    setBacktestBlockedPositions(0);
     setBacktestWinCount(0);
     setBacktestLossCount(0);
     setBacktestWinRate(null);
     setBacktestStreamingTrades([]);
-    setBacktestStageOrder([]);
-    setBacktestStageSnapshots({});
     setBacktestTradeFocusRange(null);
     setSelectedBacktestTradeKey(null);
     try {
@@ -1976,158 +1897,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
   const backtestProgressCountValue = backtestTotalPositions > 0
     ? `${backtestFoundPositions} / ${backtestTotalPositions}`
     : `${backtestFoundPositions}`;
-
-  const backtestStageSnapshotsList = useMemo(() => {
-    return backtestStageOrder
-      .map((stageKey) => backtestStageSnapshots[stageKey])
-      .filter((item): item is BacktestStageSnapshot => Boolean(item))
-      .sort((left, right) => left.updatedAtMs - right.updatedAtMs);
-  }, [backtestStageOrder, backtestStageSnapshots]);
-
-  const backtestPerformanceReport = useMemo(() => {
-    if (!backtestResult) {
-      return null;
-    }
-
-    const durationMs = Math.max(0, backtestResult.durationMs ?? 0);
-    const totalBars = Math.max(0, backtestResult.totalBars ?? 0);
-    const tradeCount = Math.max(0, backtestResult.totalStats?.tradeCount ?? 0);
-    const symbolCount = Math.max(0, backtestResult.symbols?.length ?? 0);
-    const barsPerSecond = durationMs > 0 ? (totalBars * 1000) / durationMs : 0;
-    const tradesPerSecond = durationMs > 0 ? (tradeCount * 1000) / durationMs : 0;
-    const msPerBar = totalBars > 0 ? durationMs / totalBars : 0;
-    const msPerTrade = tradeCount > 0 ? durationMs / tradeCount : 0;
-
-    const rawTradeRows = backtestResult.symbols.reduce((sum, item) => sum + (item.tradesRaw?.length ?? 0), 0);
-    const rawEquityRows = backtestResult.symbols.reduce((sum, item) => sum + (item.equityCurveRaw?.length ?? 0), 0);
-    const rawEventRows = backtestResult.symbols.reduce((sum, item) => sum + (item.eventsRaw?.length ?? 0), 0);
-
-    const stageRows = backtestStageSnapshotsList.map((item) => {
-      const elapsed = item.elapsedMs ?? 0;
-      return {
-        ...item,
-        elapsedMs: item.elapsedMs,
-        durationRatio: durationMs > 0 && elapsed > 0 ? elapsed / durationMs : 0,
-      };
-    });
-
-    const analysisRows = stageRows.filter(
-      (item) =>
-        item.elapsedMs !== null &&
-        item.elapsedMs > 0 &&
-        item.stageCode !== 'start' &&
-        item.stageCode !== 'completed',
-    );
-
-    const hints: BacktestBottleneckHint[] = [];
-    const topStage = analysisRows
-      .slice()
-      .sort((left, right) => (right.elapsedMs ?? 0) - (left.elapsedMs ?? 0))[0];
-
-    if (topStage && durationMs > 0 && topStage.elapsedMs !== null) {
-      const ratio = topStage.elapsedMs / durationMs;
-      const stageName = topStage.stageName || topStage.stageCode;
-      if (ratio >= 0.45) {
-        hints.push({
-          level: '高',
-          title: `主要瓶颈在「${stageName}」`,
-          description: `该阶段耗时 ${formatDuration(topStage.elapsedMs)}，占总耗时 ${(ratio * 100).toFixed(1)}%。`,
-          suggestion: '优先针对该阶段优化参数或执行模式，收益最大。',
-        });
-      } else if (ratio >= 0.3) {
-        hints.push({
-          level: '中',
-          title: `耗时集中在「${stageName}」`,
-          description: `该阶段占总耗时 ${(ratio * 100).toFixed(1)}%，已是主要慢点。`,
-          suggestion: '建议结合阶段明细继续拆分该阶段的子步骤。',
-        });
-      }
-    }
-
-    const ioElapsedMs = analysisRows
-      .filter((item) => item.stageCode === 'load_primary' || item.stageCode === 'load_supplementary' || item.stageCode === 'build_intersection')
-      .reduce((sum, item) => sum + (item.elapsedMs ?? 0), 0);
-    if (durationMs > 0 && ioElapsedMs / durationMs >= 0.35) {
-      hints.push({
-        level: '中',
-        title: '行情加载开销偏高',
-        description: `数据加载与交集构建耗时 ${formatDuration(ioElapsedMs)}，占比 ${((ioElapsedMs / durationMs) * 100).toFixed(1)}%。`,
-        suggestion: '优先检查历史K线缓存命中率、回测范围和标的数量。',
-      });
-    }
-
-    const collectStage = analysisRows.find((item) => item.stageCode === 'collect_positions');
-    if (collectStage?.elapsedMs && durationMs > 0 && collectStage.elapsedMs / durationMs >= 0.25) {
-      hints.push({
-        level: '中',
-        title: '结果汇总与序列化耗时偏高',
-        description: `仓位汇总阶段耗时 ${formatDuration(collectStage.elapsedMs)}，输出行数较大（交易${rawTradeRows} / 曲线${rawEquityRows} / 事件${rawEventRows}）。`,
-        suggestion: '可关闭不必要的输出项，或使用更粗的资金曲线粒度降低结果体积。',
-      });
-    }
-
-    const stageBlockedPositions = stageRows.reduce((max, item) => {
-      const value = item.blockedPositions ?? 0;
-      return value > max ? value : max;
-    }, 0);
-    const effectiveBlockedPositions = Math.max(backtestBlockedPositions, stageBlockedPositions);
-    const effectiveTotalPositions =
-      backtestTotalPositions > 0
-        ? backtestTotalPositions
-        : stageRows.reduce((max, item) => {
-            const value = item.totalPositions ?? 0;
-            return value > max ? value : max;
-          }, 0);
-    if (effectiveBlockedPositions > 0) {
-      const blockedRatio = effectiveTotalPositions > 0 ? effectiveBlockedPositions / effectiveTotalPositions : 0;
-      hints.push({
-        level: blockedRatio >= 0.2 ? '中' : '提示',
-        title: '存在 MaxPosition 阻断',
-        description: `阻断仓位 ${effectiveBlockedPositions}${effectiveTotalPositions > 0 ? ` / ${effectiveTotalPositions}` : ''}。`,
-        suggestion: '若阻断比例过高，可检查开仓条件密度、orderQty 与 maxPositionQty 配置。',
-      });
-    }
-
-    if (totalBars >= 2000 && barsPerSecond > 0 && barsPerSecond < 200) {
-      hints.push({
-        level: '高',
-        title: '整体吞吐偏低',
-        description: `本次吞吐约 ${barsPerSecond.toFixed(2)} bars/s，样本规模 ${totalBars} bars。`,
-        suggestion: '优先减少标的/时间范围，或检查是否命中 batch_open_close 与并行执行。',
-      });
-    }
-
-    if (hints.length === 0) {
-      hints.push({
-        level: '提示',
-        title: '未发现明显单点瓶颈',
-        description: '各阶段耗时分布相对均衡。',
-        suggestion: '如需继续提速，建议从总样本规模和输出体积两个方向做压缩。',
-      });
-    }
-
-    return {
-      durationMs,
-      totalBars,
-      tradeCount,
-      symbolCount,
-      barsPerSecond,
-      tradesPerSecond,
-      msPerBar,
-      msPerTrade,
-      rawTradeRows,
-      rawEquityRows,
-      rawEventRows,
-      stageRows,
-      hints,
-    };
-  }, [
-    backtestBlockedPositions,
-    backtestResult,
-    backtestStageSnapshotsList,
-    backtestTotalPositions,
-    formatDuration,
-  ]);
 
   const renderStats = (stats: BacktestStats) => (
     <>
@@ -2267,127 +2036,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
     );
   };
 
-  const renderBacktestPerformanceReport = () => {
-    if (!backtestPerformanceReport) {
-      return null;
-    }
-
-    return (
-      <div className="backtest-section">
-        <div className="backtest-section-title">性能报告</div>
-        <div className="backtest-performance-grid">
-          <div className="backtest-performance-card">
-            <span className="backtest-performance-label">总耗时</span>
-            <span className="backtest-performance-value">{formatDuration(backtestPerformanceReport.durationMs)}</span>
-          </div>
-          <div className="backtest-performance-card">
-            <span className="backtest-performance-label">Bar吞吐</span>
-            <span className="backtest-performance-value">
-              {backtestPerformanceReport.barsPerSecond > 0 ? `${backtestPerformanceReport.barsPerSecond.toFixed(2)} bars/s` : '-'}
-            </span>
-          </div>
-          <div className="backtest-performance-card">
-            <span className="backtest-performance-label">交易吞吐</span>
-            <span className="backtest-performance-value">
-              {backtestPerformanceReport.tradesPerSecond > 0 ? `${backtestPerformanceReport.tradesPerSecond.toFixed(2)} trades/s` : '-'}
-            </span>
-          </div>
-          <div className="backtest-performance-card">
-            <span className="backtest-performance-label">平均每Bar耗时</span>
-            <span className="backtest-performance-value">
-              {backtestPerformanceReport.msPerBar > 0 ? `${backtestPerformanceReport.msPerBar.toFixed(3)} ms` : '-'}
-            </span>
-          </div>
-          <div className="backtest-performance-card">
-            <span className="backtest-performance-label">平均每笔交易耗时</span>
-            <span className="backtest-performance-value">
-              {backtestPerformanceReport.msPerTrade > 0 ? `${backtestPerformanceReport.msPerTrade.toFixed(3)} ms` : '-'}
-            </span>
-          </div>
-          <div className="backtest-performance-card">
-            <span className="backtest-performance-label">输出体积</span>
-            <span className="backtest-performance-value">
-              交易{backtestPerformanceReport.rawTradeRows} / 曲线{backtestPerformanceReport.rawEquityRows} / 事件{backtestPerformanceReport.rawEventRows}
-            </span>
-          </div>
-        </div>
-
-        {backtestPerformanceReport.stageRows.length > 0 && (
-          <details className="backtest-details" open>
-            <summary>阶段耗时明细（{backtestPerformanceReport.stageRows.length}）</summary>
-            <div className="backtest-table-wrapper ui-scrollable">
-              <table className="backtest-table backtest-table--performance">
-                <thead>
-                  <tr>
-                    <th>阶段</th>
-                    <th>耗时</th>
-                    <th>占比</th>
-                    <th>进度</th>
-                    <th>关键计数</th>
-                    <th>状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {backtestPerformanceReport.stageRows.map((item) => {
-                    const progressText =
-                      item.progress !== null && item.progress !== undefined
-                        ? formatPercent(item.progress)
-                        : item.processedBars !== null && item.totalBars && item.totalBars > 0
-                          ? `${item.processedBars}/${item.totalBars}`
-                          : '-';
-                    const counters = [
-                      item.processedBars !== null || item.totalBars !== null
-                        ? `处理${item.processedBars ?? '-'}${item.totalBars !== null ? `/${item.totalBars}` : ''}`
-                        : '',
-                      item.foundPositions !== null ? `仓位${item.foundPositions}` : '',
-                      item.totalPositions !== null ? `总仓位${item.totalPositions}` : '',
-                      item.blockedPositions !== null ? `阻断${item.blockedPositions}` : '',
-                      item.winCount !== null || item.lossCount !== null
-                        ? `胜负${item.winCount ?? '-'} / ${item.lossCount ?? '-'}`
-                        : '',
-                    ]
-                      .filter((text) => text.length > 0)
-                      .join(' | ');
-
-                    return (
-                      <tr key={`${item.stageCode}-${item.updatedAtMs}`}>
-                        <td>
-                          <div>{item.stageName || item.stageCode}</div>
-                          <div className="backtest-table-subtext">{item.message || '-'}</div>
-                        </td>
-                        <td>{item.elapsedMs !== null ? formatDuration(item.elapsedMs) : '-'}</td>
-                        <td>{item.durationRatio > 0 ? `${(item.durationRatio * 100).toFixed(1)}%` : '-'}</td>
-                        <td>{progressText}</td>
-                        <td>{counters || '-'}</td>
-                        <td>{item.completed ? '完成' : '进行中'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        )}
-
-        <details className="backtest-details" open>
-          <summary>瓶颈分析（{backtestPerformanceReport.hints.length}）</summary>
-          <div className="backtest-bottleneck-list">
-            {backtestPerformanceReport.hints.map((hint, index) => (
-              <div key={`${hint.title}-${index}`} className={`backtest-bottleneck-item level-${hint.level}`}>
-                <div className="backtest-bottleneck-title">
-                  <span className="backtest-bottleneck-level">{hint.level}</span>
-                  <span>{hint.title}</span>
-                </div>
-                <div className="backtest-bottleneck-text">{hint.description}</div>
-                <div className="backtest-bottleneck-text">建议：{hint.suggestion}</div>
-              </div>
-            ))}
-          </div>
-        </details>
-      </div>
-    );
-  };
-
   const renderBacktestFullscreenIcon = (expanded: boolean) => (
     expanded ? (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2430,9 +2078,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
             )}
             {backtestProgressStageCode === 'batch_close_phase' && (
               <span>胜/负：{backtestWinCount}/{backtestLossCount}</span>
-            )}
-            {backtestProgressStageCode === 'batch_close_phase' && (
-              <span>阻断：{backtestBlockedPositions}</span>
             )}
           </div>
           {backtestStreamingTrades.length > 0 && (
@@ -2493,8 +2138,6 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
           <span>总Bar：{backtestResult.totalBars}</span>
           <span>耗时：{formatDuration(backtestResult.durationMs)}</span>
         </div>
-
-        {renderBacktestPerformanceReport()}
 
         <div className="backtest-section">
           <div className="backtest-section-title">汇总统计</div>

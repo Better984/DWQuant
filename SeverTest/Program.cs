@@ -33,8 +33,6 @@ using ServerTest.Modules.Planet.Application;
 using ServerTest.Modules.Planet.Infrastructure;
 using ServerTest.Modules.Positions.Application;
 using ServerTest.Modules.Positions.Infrastructure;
-using ServerTest.Modules.Shared.Application.Diagnostics;
-using ServerTest.Modules.Shared.Infrastructure.Diagnostics;
 using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.StrategyEngine.Application.RunChecks;
 using ServerTest.Modules.StrategyEngine.Application.RunChecks.Checks;
@@ -69,8 +67,7 @@ ConfigureOptions(builder.Services, builder.Configuration);
 
 var enableHttpApi = selectedRole == ServerRole.Core || selectedRole == ServerRole.Full;
 var enableUserWebSocket = enableHttpApi;
-var enableBacktestWorkerGateway = selectedRole == ServerRole.Core || selectedRole == ServerRole.Full;
-var enableLiveTradingWorkerGateway = selectedRole == ServerRole.Core || selectedRole == ServerRole.Full;
+var enableWorkerGateway = selectedRole == ServerRole.Core || selectedRole == ServerRole.Full;
 
 RegisterCommonServices(builder.Services, builder.Configuration, roleSelection, enableHttpApi);
 RegisterRoleServices(builder.Services, builder.Configuration, selectedRole);
@@ -91,43 +88,20 @@ logger.LogInformation("服务器角色: {Role}({RoleValue}), 来源={Source}, �
 var monitorHost = app.Services.GetRequiredService<IStartupMonitorHost>();
 monitorHost.Start(startupManager);
 
-await RunStartupWorkflowAsync(
-    app,
-    selectedRole,
-    enableHttpApi,
-    enableUserWebSocket || enableBacktestWorkerGateway || enableLiveTradingWorkerGateway,
-    logger);
+await RunStartupWorkflowAsync(app, selectedRole, enableHttpApi, enableUserWebSocket || enableWorkerGateway, logger);
 
 if (enableUserWebSocket)
 {
-    // 清除本节点因进程重启而残留在 Redis 中的连接槽位，避免 403 连接数超限
-    using (var scope = app.Services.CreateScope())
-    {
-        var connectionManager = scope.ServiceProvider.GetRequiredService<IConnectionManager>();
-        connectionManager.ClearStaleEntriesForCurrentNode();
-    }
     MapUserWebSocket(app, wsConfig);
 }
 
-if (enableBacktestWorkerGateway)
+if (enableWorkerGateway)
 {
     app.Map("/ws/worker", wsApp =>
     {
         wsApp.Run(async context =>
         {
             var gateway = context.RequestServices.GetRequiredService<BacktestWorkerGateway>();
-            await gateway.HandleAsync(context).ConfigureAwait(false);
-        });
-    });
-}
-
-if (enableLiveTradingWorkerGateway)
-{
-    app.Map("/ws/live-worker", wsApp =>
-    {
-        wsApp.Run(async context =>
-        {
-            var gateway = context.RequestServices.GetRequiredService<LiveTradingWorkerGateway>();
             await gateway.HandleAsync(context).ConfigureAwait(false);
         });
     });
@@ -210,56 +184,6 @@ static void ApplyRoleSelectionOverrides(
         // 兼容只读取单地址字段的旧逻辑
         builder.Configuration["BacktestWorker:CoreWsUrl"] = firstEndpoint;
     }
-
-    var liveWorkerWsUrls = BuildLiveWorkerCoreWsUrls(roleSelection.WorkerCoreWsUrls);
-    if (!string.IsNullOrWhiteSpace(liveWorkerWsUrls))
-    {
-        builder.Configuration["LiveTradingWorker:CoreWsUrls"] = liveWorkerWsUrls;
-        var firstLiveEndpoint = liveWorkerWsUrls
-            .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(firstLiveEndpoint))
-        {
-            // 兼容只读取单地址字段的旧逻辑
-            builder.Configuration["LiveTradingWorker:CoreWsUrl"] = firstLiveEndpoint;
-        }
-    }
-}
-
-static string BuildLiveWorkerCoreWsUrls(string rawWorkerWsUrls)
-{
-    if (string.IsNullOrWhiteSpace(rawWorkerWsUrls))
-    {
-        return string.Empty;
-    }
-
-    var values = rawWorkerWsUrls
-        .Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-    if (values.Length == 0)
-    {
-        return string.Empty;
-    }
-
-    var endpoints = new List<string>(values.Length);
-    foreach (var value in values)
-    {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
-        {
-            continue;
-        }
-
-        var builder = new UriBuilder(uri)
-        {
-            Path = "/ws/live-worker"
-        };
-        var normalized = builder.Uri.ToString();
-        if (!endpoints.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-        {
-            endpoints.Add(normalized);
-        }
-    }
-
-    return endpoints.Count == 0 ? string.Empty : string.Join("|", endpoints);
 }
 
 static void ConfigureLogging(ILoggingBuilder logging)
@@ -274,7 +198,6 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<HistoricalMarketDataOptions>(configuration.GetSection("HistoricalData"));
     services.Configure<MarketDataQueryOptions>(configuration.GetSection("MarketDataQuery"));
     services.Configure<ConditionCacheOptions>(configuration.GetSection("ConditionCache"));
-    services.Configure<StrategyDiagnosticsOptions>(configuration.GetSection("StrategyDiagnostics"));
     services.Configure<MonitoringOptions>(configuration.GetSection("Monitoring"));
     services.Configure<RateLimitOptions>(configuration.GetSection("RateLimit"));
     services.Configure<AppWebSocketOptions>(configuration.GetSection("WebSocket"));
@@ -286,15 +209,12 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<RedisKeyOptions>(configuration.GetSection("RedisKey"));
     services.Configure<BusinessRulesOptions>(configuration.GetSection("BusinessRules"));
     services.Configure<BacktestWorkerOptions>(configuration.GetSection("BacktestWorker"));
-    services.Configure<LiveTradingWorkerOptions>(configuration.GetSection("LiveTradingWorker"));
-    services.Configure<LiveTradingOptions>(configuration.GetSection("LiveTrading"));
     services.Configure<TalibCoreOptions>(configuration.GetSection("TalibCore"));
     services.Configure<IndicatorFrameworkOptions>(configuration.GetSection("Indicators"));
     services.Configure<CoinGlassOptions>(configuration.GetSection("CoinGlass"));
 
     services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
     services.AddSingleton<IValidateOptions<ConditionCacheOptions>, ConditionCacheOptionsValidator>();
-    services.AddSingleton<IValidateOptions<StrategyDiagnosticsOptions>, StrategyDiagnosticsOptionsValidator>();
     services.AddSingleton<IValidateOptions<MarketDataQueryOptions>, MarketDataQueryOptionsValidator>();
     services.AddSingleton<IValidateOptions<MonitoringOptions>, MonitoringOptionsValidator>();
     services.AddSingleton<IValidateOptions<RedisKeyOptions>, RedisKeyOptionsValidator>();
@@ -302,7 +222,6 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.AddSingleton<IValidateOptions<RuntimeQueueOptions>, RuntimeQueueOptionsValidator>();
     services.AddSingleton<IValidateOptions<StrategyOwnershipOptions>, StrategyOwnershipOptionsValidator>();
     services.AddSingleton<IValidateOptions<BacktestWorkerOptions>, BacktestWorkerOptionsValidator>();
-    services.AddSingleton<IValidateOptions<LiveTradingWorkerOptions>, LiveTradingWorkerOptionsValidator>();
     services.AddSingleton<IValidateOptions<IndicatorFrameworkOptions>, IndicatorFrameworkOptionsValidator>();
     services.AddSingleton<IValidateOptions<CoinGlassOptions>, CoinGlassOptionsValidator>();
 }
@@ -407,7 +326,7 @@ static void RegisterCommonServices(
     services.AddSingleton<IRateLimiter, RedisRateLimiter>();
     services.AddSingleton<WebSocketNodeId>();
 
-    if (role == ServerRole.BacktestWorker || role == ServerRole.LiveTradingWorker)
+    if (role == ServerRole.BacktestWorker)
     {
         services.AddSingleton<IConnectionManager, InMemoryConnectionManager>();
     }
@@ -425,7 +344,7 @@ static void RegisterCommonServices(
     services.AddSingleton<ContractDetailsCacheService>();
     services.AddHostedService<ContractDetailsCacheHostedService>();
 
-    if (role != ServerRole.BacktestWorker && role != ServerRole.LiveTradingWorker)
+    if (role != ServerRole.BacktestWorker)
     {
         services.AddHostedService<HistoricalMarketDataSyncHostedService>();
     }
@@ -442,23 +361,13 @@ static void RegisterCommonServices(
     services.AddScoped<BacktestMainLoop>();
     services.AddScoped<BacktestRunner>();
     services.AddScoped<BacktestService>();
-    if (role != ServerRole.LiveTradingWorker)
-    {
-        services.AddHostedService<BacktestObjectPoolWarmupHostedService>();
-    }
+    services.AddHostedService<BacktestObjectPoolWarmupHostedService>();
     services.AddScoped<BacktestTaskRepository>();
     services.AddScoped<BacktestTaskService>();
 
     services.AddSingleton<BacktestWorkerRegistry>();
     services.AddScoped<BacktestWorkerMessageService>();
     services.AddScoped<BacktestWorkerGateway>();
-
-    if (role != ServerRole.BacktestWorker)
-    {
-        services.AddSingleton<LiveTradingWorkerRegistry>();
-        services.AddSingleton<LiveTradingWorkerDispatchService>();
-        services.AddScoped<LiveTradingWorkerGateway>();
-    }
 }
 
 static void RegisterRoleServices(IServiceCollection services, IConfiguration configuration, ServerRole role)
@@ -491,7 +400,7 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<IIndicatorCollector, CoinGlassFearGreedCollector>();
     services.AddHostedService<IndicatorRefreshHostedService>();
 
-    services.AddSingleton<TalibWasmNodePool>();
+    services.AddSingleton<TalibWasmNodeInvoker>();
     services.AddSingleton<IndicatorEngine>();
 
     services.AddSingleton<ConditionCacheService>();
@@ -502,11 +411,8 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<IStrategyValueResolver, IndicatorValueResolver>();
     services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
     services.AddSingleton<StrategyEngineRunLogQueue>();
-    services.AddSingleton<StrategyTaskTraceLogQueue>();
     services.AddSingleton<StrategyEngineRunLogRepository>();
-    services.AddSingleton<StrategyTaskTraceLogRepository>();
     services.AddSingleton<StrategySystemLogRepository>();
-    services.AddSingleton<ServerTest.Modules.StrategyEngine.Infrastructure.LiveTradingObjectPoolManager>();
     services.AddSingleton<RealTimeStrategyEngine>();
 
     services.AddSingleton<StrategyPositionRepository>();
@@ -557,7 +463,6 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddHostedService<TradeActionConsumer>();
     services.AddHostedService<PositionRiskEngine>();
     services.AddHostedService<StrategyEngineRunLogWriter>();
-    services.AddHostedService<StrategyTaskTraceLogWriter>();
     services.AddHostedService<StrategyRuntimeHostedService>();
     services.AddHostedService<ConditionCacheCleanupHostedService>();
     services.AddHostedService<NotificationDeliveryWorker>();
@@ -566,14 +471,9 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     {
         services.AddHostedService<BacktestTaskWorker>();
     }
-    else if (role == ServerRole.Core)
+    else
     {
         services.AddHostedService<BacktestWorkerDispatchHostedService>();
-    }
-
-    if (role == ServerRole.LiveTradingWorker)
-    {
-        services.AddHostedService<LiveTradingWorkerClientHostedService>();
     }
 
     services.AddScoped<WebSocketHandler>();
@@ -631,7 +531,7 @@ static async Task RunStartupWorkflowAsync(
         throw;
     }
 
-    if (role == ServerRole.Core || role == ServerRole.Full || role == ServerRole.LiveTradingWorker)
+    if (role == ServerRole.Core || role == ServerRole.Full)
     {
         startupManager.MarkStarting(SystemModule.MarketDataEngine, "行情数据引擎");
         try
@@ -795,24 +695,8 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
                     }
                 }
 
-                // 若仍失败且无本地连接可踢，可能是 Redis 中残留陈旧槽位，清除后重试一次
-                if (!reserved && connectionManager.GetConnections(userId)
-                    .All(c => !string.Equals(c.System, system, StringComparison.OrdinalIgnoreCase)))
-                {
-                    var removed = connectionManager.ClearStaleEntriesForCurrentNode(userId, system);
-                    logger.LogWarning(
-                        "WS 连接槽位已满且无本地连接可踢，已按当前节点定向清理陈旧槽位并重试 | user={UserId} system={System} removed={Removed}",
-                        userId,
-                        system,
-                        removed);
-                    reserved = connectionManager.TryReserve(userId, system, connectionId);
-                }
-
                 if (!reserved)
                 {
-                    logger.LogWarning(
-                        "WS 连接被拒绝：同系统连接数已达上限 | user={UserId} system={System}",
-                        userId, system);
                     await WriteWsErrorAsync(
                         context,
                         StatusCodes.Status403Forbidden,

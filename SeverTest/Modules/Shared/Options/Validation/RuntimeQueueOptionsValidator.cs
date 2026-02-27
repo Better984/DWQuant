@@ -27,7 +27,6 @@ namespace ServerTest.Options
             ValidateQueue("Indicator", options.Indicator, failures);
             ValidateQueue("StrategyAction", options.StrategyAction, failures);
             ValidateQueue("StrategyRunLog", options.StrategyRunLog, failures);
-            ValidateQueue("StrategyTaskTraceLog", options.StrategyTaskTraceLog, failures);
 
             return failures.Count > 0
                 ? ValidateOptionsResult.Fail(failures)
