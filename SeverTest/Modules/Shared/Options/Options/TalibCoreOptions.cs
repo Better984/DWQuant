@@ -43,6 +43,12 @@ namespace ServerTest.Options
         public int RequestTimeoutMs { get; set; } = 30000;
 
         /// <summary>
+        /// WASM Node 进程池大小。1 = 单进程（默认），大于 1 = 多进程并行计算指标。
+        /// 建议值：CPU 核数 / 4，或 2~4。
+        /// </summary>
+        public int PoolSize { get; set; } = 1;
+
+        /// <summary>
         /// 严格模式：同核心调用失败时不回退 TALib.NETCore，直接判失败。
         /// </summary>
         public bool StrictWasmCore { get; set; } = false;

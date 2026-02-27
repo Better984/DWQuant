@@ -3,12 +3,23 @@ namespace ServerTest.Models.Strategy
     public sealed class StrategyEngineRunLog
     {
         public DateTime RunAt { get; set; }
+        public string TraceId { get; set; } = string.Empty;
+        public string RunStatus { get; set; } = "success";
         public string Exchange { get; set; } = string.Empty;
         public string Symbol { get; set; } = string.Empty;
         public string Timeframe { get; set; } = string.Empty;
         public long CandleTimestamp { get; set; }
         public bool IsBarClose { get; set; }
         public int DurationMs { get; set; }
+        public int LookupMs { get; set; }
+        public int IndicatorMs { get; set; }
+        public int ExecuteMs { get; set; }
+        public int RunnableStrategyCount { get; set; }
+        public int StateSkippedCount { get; set; }
+        public int RuntimeGateSkippedCount { get; set; }
+        public int IndicatorRequestCount { get; set; }
+        public int IndicatorSuccessCount { get; set; }
+        public int IndicatorTotalCount { get; set; }
         public int MatchedCount { get; set; }
         public int ExecutedCount { get; set; }
         public int SkippedCount { get; set; }
@@ -17,6 +28,8 @@ namespace ServerTest.Models.Strategy
         public int OpenTaskCount { get; set; }
         public string? ExecutedStrategyIds { get; set; }
         public string? OpenTaskStrategyIds { get; set; }
+        public string? OpenTaskTraceIds { get; set; }
+        public string? OpenOrderIds { get; set; }
         public string? ExtraJson { get; set; }
         public string? EngineInstance { get; set; }
     }

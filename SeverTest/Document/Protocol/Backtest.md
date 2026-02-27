@@ -8,6 +8,15 @@
 - 路径：`POST /api/backtest/run`
 - 说明：同步执行回测，等待结果返回。适用于小规模回测或调试场景。
 - data：
+  - `strategies` BacktestStrategyRequestItem[]?（多策略组合；为空时按单策略执行，>=2 时按组合回测执行）
+    - `usId` long?
+    - `configJson` string?
+    - `exchange` string?
+    - `symbols` string[]?
+    - `timeframe` string?
+    - `strategyScopeKey` string?（策略作用域键；未传由服务端自动生成）
+  - `strategyScopeKey` string?（单策略默认 `single:primary`，多策略时作为默认作用域前缀）
+  - `strategyIndex` int?（策略序号，服务端内部透传字段，通常无需前端显式传入）
   - `usId` long?（策略实例 ID，可选）
   - `configJson` string?（策略配置 JSON，优先于 usId）
   - `exchange` string?（交易所，默认取策略）
@@ -40,9 +49,13 @@
   - `startTimestamp` / `endTimestamp`
   - `totalBars`
   - `durationMs`（回测耗时，毫秒）
+  - `totalEquityCurveRaw` string[]（组合总资金曲线原始串列表）
+  - `totalEquitySummary`（组合总资金曲线关键指标，字段同 `BacktestEquitySummary`）
   - `totalStats`（汇总统计，字段见下方"统计指标"）
   - `symbols[]`：`BacktestSymbolResult`
     - `symbol`
+    - `strategyScopeKey` string?（策略作用域键，多策略场景用于区分策略腿）
+    - `strategyIndex` int?（策略序号，从 1 开始）
     - `bars`
     - `initialCapital`
     - `stats`（统计指标，字段见下方"统计指标"）
@@ -60,7 +73,7 @@
       - `totalCount`
       - `firstTimestamp` / `lastTimestamp`
       - `typeCounts`（按类型统计）
-    - `tradesRaw` string[]（可裁剪，单条交易 JSON 字符串，前端按需解析）
+    - `tradesRaw` string[]（可裁剪，单条交易 JSON 字符串，前端按需解析；交易对象新增 `strategyScopeKey`/`strategyIndex` 字段）
     - `equityCurveRaw` string[]（可裁剪，单条曲线点 JSON 字符串，前端按需解析）
       - 字段同 `BacktestEquityPoint`：`timestamp` / `equity` / `realizedPnl` / `unrealizedPnl` / `periodRealizedPnl` / `periodUnrealizedPnl`
     - `eventsRaw` string[]（可裁剪，单条事件 JSON 字符串，前端按需解析）
@@ -69,6 +82,8 @@
 > 为避免前端全量反序列化卡顿，交易明细/资金曲线/事件日志改为字符串数组输出，前端仅在需要展示的行进行解析。
 > 服务端执行模型为“时间轴串行 + 同时间点多 symbol 并行”，确保时序正确的同时提升单任务吞吐。
 > 当执行模式为 `batch_open_close` 时，服务端采用“批量开仓检测 + 并行统一平仓”的高速链路，适用于大样本快速回测。
+> 多策略组合时，服务端按“共享单份初始资金 + 各策略净PnL叠加”构建总资金曲线，并输出一份组合统计。
+> 当前多策略组合为 P1 口径：策略腿按顺序执行后合并结果；后续可升级到统一时间轴组合执行（P2）。
 
 ### 统计指标（`BacktestStats`）
 
@@ -167,7 +182,7 @@
 
 ### backtest.task.cancel
 - 路径：`POST /api/backtest/task/{taskId}/cancel`
-- 说明：取消排队中或运行中的回测任务。
+- 说明：仅取消排队中的回测任务（`queued`）。
 - 鉴权：需要 Bearer Token，仅能取消自己的任务。
 - 响应 data：`"已取消"`
 - 错误响应：
@@ -203,7 +218,7 @@ queued → running → completed
   - 前端应按 `reqId` 过滤，只消费当前回测任务的进度流。
 - data：`BacktestProgressMessage`
   - `eventKind` string：`stage` 或 `positions`
-  - `stage` string：阶段编码（如 `parse_request`、`execution_mode`、`main_loop`、`batch_open_phase`、`batch_close_phase`、`collect_positions`、`completed`、`failed`）
+  - `stage` string：阶段编码（如 `parse_request`、`execution_mode`、`main_loop`、`batch_open_phase`、`batch_close_phase`、`collect_positions`、`portfolio_prepare`、`portfolio_run`、`portfolio_merge`、`completed`、`failed`）
   - `stageName` string：阶段名称（用于前端展示）
   - `message` string?：阶段说明
   - `processedBars` int?：已处理 bar 数
@@ -212,6 +227,7 @@ queued → running → completed
   - `elapsedMs` long?：当前阶段耗时（毫秒）
   - `foundPositions` int?：已汇总仓位/交易数量
   - `totalPositions` int?：预估总仓位/交易数量
+  - `blockedPositions` int?：当前阶段被阻断的仓位数量（如 `MaxPositionQty` 过滤）
   - `chunkCount` int?：本次增量仓位条数
   - `winCount` int?：当前已平仓胜场数（平仓阶段）
   - `lossCount` int?：当前已平仓负场数（平仓阶段）
@@ -227,6 +243,7 @@ queued → running → completed
 > - `batch_open_phase`：实时推送“正在检测开仓”进度，并附带已获取开仓数量；
 > - `batch_open_phase` 完成：消息会明确“开仓数量检测完毕，共 N 个仓位”；
 > - `batch_close_phase`：优先检测最近仓位，推送平仓进度与实时胜率；
+> - `batch_close_phase`：同步推送 `blockedPositions`，用于展示 `MaxPositionQty` 阻断数量；
 > - `batch_close_phase` 可携带最近 100 条仓位预览，`replacePositions=true` 时前端应覆盖显示该窗口。
 > - `processedBars` 在 `batch_open_phase` 表示已检测开仓检查点数量；在 `batch_close_phase` 表示已处理候选仓位数量。
 > - `foundPositions` 在 `batch_close_phase` 表示当前已完成平仓并纳入统计的仓位数量。

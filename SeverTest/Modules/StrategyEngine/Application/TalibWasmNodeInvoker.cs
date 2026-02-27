@@ -40,6 +40,23 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         public bool StrictWasmCore => _options.StrictWasmCore;
 
+        /// <summary>
+        /// 预热 Node+WASM 进程，避免首个真实指标请求承担冷启动耗时。
+        /// </summary>
+        public bool WarmUp(out string? error)
+        {
+            error = null;
+            if (!IsEnabled)
+            {
+                return true;
+            }
+
+            lock (_sync)
+            {
+                return EnsureProcessStarted(out error);
+            }
+        }
+
         public bool TryCompute(
             string indicator,
             double[][] inputs,

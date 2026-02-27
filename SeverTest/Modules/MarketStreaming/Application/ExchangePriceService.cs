@@ -451,16 +451,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)last.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Logger.LogDebug(
-                        "[OKX合约] {Symbol} {Timeframe} 时间:{Timestamp:yyyy-MM-dd HH:mm:ss} 开:{Open} 高:{High} 低:{Low} 收:{Close} 量:{Volume}",
-                        symbol,
-                        timeframe,
-                        ts,
-                        last.open,
-                        last.high,
-                        last.low,
-                        last.close,
-                        last.volume);
+                    //Logger.LogDebug(
+                    //    "[OKX合约] {Symbol} {Timeframe} 时间:{Timestamp:yyyy-MM-dd HH:mm:ss} 开:{Open} 高:{High} 低:{Low} 收:{Close} 量:{Volume}",
+                    //    symbol,
+                    //    timeframe,
+                    //    ts,
+                    //    last.open,
+                    //    last.high,
+                    //    last.low,
+                    //    last.close,
+                    //    last.volume);
 
                     var priceData = new PriceData
                     {
@@ -506,16 +506,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)last.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Logger.LogDebug(
-                        "[Bitget合约] {Symbol} {Timeframe} 时间:{Timestamp:yyyy-MM-dd HH:mm:ss} 开:{Open} 高:{High} 低:{Low} 收:{Close} 量:{Volume}",
-                        symbol,
-                        timeframe,
-                        ts,
-                        last.open,
-                        last.high,
-                        last.low,
-                        last.close,
-                        last.volume);
+                    //Logger.LogDebug(
+                    //    "[Bitget合约] {Symbol} {Timeframe} 时间:{Timestamp:yyyy-MM-dd HH:mm:ss} 开:{Open} 高:{High} 低:{Low} 收:{Close} 量:{Volume}",
+                    //    symbol,
+                    //    timeframe,
+                    //    ts,
+                    //    last.open,
+                    //    last.high,
+                    //    last.low,
+                    //    last.close,
+                    //    last.volume);
 
                     var priceData = new PriceData
                     {

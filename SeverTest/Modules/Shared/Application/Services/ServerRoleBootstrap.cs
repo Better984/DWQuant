@@ -280,10 +280,11 @@ namespace ServerTest.Services
                 Console.WriteLine($"已保存核心地址: {(string.IsNullOrWhiteSpace(defaultWorkerCoreWsUrls) ? "(空)" : defaultWorkerCoreWsUrls)}");
                 Console.WriteLine();
                 Console.WriteLine("步骤 1/3 选择模式（输入序号后回车，空输入使用默认）：");
-                Console.WriteLine("1. 核心服务器（对外 HTTP/WS，分发回测任务）");
+                Console.WriteLine("1. 核心服务器（对外 HTTP/WS，分发回测任务与实盘指令）");
                 Console.WriteLine("2. 回测算力服务器（连接核心服务器，执行回测）");
                 Console.WriteLine("3. 全功能服务器（单机模式，兼容开发环境）");
-                Console.Write($"请输入 [1/2/3]（{promptSeconds} 秒超时默认）：");
+                Console.WriteLine("4. 实盘服务器（连接核心服务器，仅运行实盘相关内容）");
+                Console.Write($"请输入 [1/2/3/4]（{promptSeconds} 秒超时默认）：");
 
                 var inputTask = Task.Run(Console.ReadLine);
                 var completed = Task.WhenAny(inputTask, Task.Delay(TimeSpan.FromSeconds(promptSeconds))).GetAwaiter().GetResult();

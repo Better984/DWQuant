@@ -68,6 +68,31 @@ namespace ServerTest.Modules.Backtest.Application
             var symbols = request.Symbols != null && request.Symbols.Count > 0
                 ? string.Join(",", request.Symbols)
                 : string.Empty;
+            if (string.IsNullOrWhiteSpace(symbols) && request.Strategies != null && request.Strategies.Count > 0)
+            {
+                symbols = string.Join(
+                    ",",
+                    request.Strategies
+                        .Where(item => item?.Symbols != null && item.Symbols.Count > 0)
+                        .SelectMany(item => item!.Symbols!)
+                        .Where(item => !string.IsNullOrWhiteSpace(item))
+                        .Select(item => item.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase));
+            }
+
+            var exchange = !string.IsNullOrWhiteSpace(request.Exchange)
+                ? request.Exchange
+                : request.Strategies?
+                    .Select(item => item?.Exchange)
+                    .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+                    ?? string.Empty;
+
+            var timeframe = !string.IsNullOrWhiteSpace(request.Timeframe)
+                ? request.Timeframe
+                : request.Strategies?
+                    .Select(item => item?.Timeframe)
+                    .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+                    ?? string.Empty;
 
             var task = new BacktestTask
             {
@@ -75,8 +100,8 @@ namespace ServerTest.Modules.Backtest.Application
                 ReqId = reqId,
                 Status = BacktestTaskStatus.Queued,
                 RequestJson = JsonConvert.SerializeObject(request),
-                Exchange = request.Exchange ?? string.Empty,
-                Timeframe = request.Timeframe ?? string.Empty,
+                Exchange = exchange,
+                Timeframe = timeframe,
                 Symbols = symbols,
                 BarCount = request.BarCount ?? 0
             };
@@ -164,7 +189,7 @@ namespace ServerTest.Modules.Backtest.Application
         }
 
         /// <summary>
-        /// 取消回测任务
+        /// 取消回测任务（仅 queued 可取消）
         /// </summary>
         public async Task<bool> CancelTaskAsync(long taskId, long userId, CancellationToken ct = default)
         {
