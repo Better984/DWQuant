@@ -624,6 +624,12 @@ namespace ServerTest.Modules.Backtest.Application
                 EndTimestamp = drivingEnd,
                 TotalBars = drivingTimestamps.Count,
                 DurationMs = stopwatch.ElapsedMilliseconds,
+                TotalEquityCurveRaw = output.IncludeEquityCurve
+                    ? BacktestStatisticsBuilder.SerializeToRawList(totalEquity)
+                    : new List<string>(),
+                TotalEquitySummary = output.IncludeEquityCurve
+                    ? BacktestStatisticsBuilder.BuildEquitySummary(totalEquity)
+                    : new BacktestEquitySummary(),
                 TotalStats = BacktestStatisticsBuilder.BuildStats(allTrades, totalEquity, totalInitial),
                 Symbols = symbolRuntimes.Values.Select(r => r.Result).ToList()
             };
@@ -693,11 +699,25 @@ namespace ServerTest.Modules.Backtest.Application
                 var leverage = request.LeverageOverride ?? trade.Sizing.Leverage;
                 var stopLoss = request.StopLossPctOverride ?? trade.Risk.StopLossPct;
                 var takeProfit = request.TakeProfitPctOverride ?? trade.Risk.TakeProfitPct;
+                var configuredMaxPositionQty = trade.Sizing.MaxPositionQty;
+                var effectiveMaxPositionQty = configuredMaxPositionQty > 0m
+                    ? configuredMaxPositionQty
+                    : (orderQty > 0m ? orderQty : 0m);
+                if (configuredMaxPositionQty <= 0m)
+                {
+                    LogSystemWarning(
+                        "最大持仓未配置或<=0，按单次开仓量回退：标的={Symbol} 回退上限={FallbackQty}",
+                        symbol,
+                        effectiveMaxPositionQty);
+                }
 
                 var state = new BacktestActionExecutor.SymbolState
                 {
                     Symbol = symbol,
+                    StrategyScopeKey = string.IsNullOrWhiteSpace(request.StrategyScopeKey) ? "single:primary" : request.StrategyScopeKey.Trim(),
+                    StrategyIndex = request.StrategyIndex.GetValueOrDefault(1),
                     OrderQty = orderQty,
+                    MaxPositionQty = effectiveMaxPositionQty,
                     Leverage = Math.Max(1, leverage),
                     StopLossPct = stopLoss > 0 ? stopLoss : null,
                     TakeProfitPct = takeProfit > 0 ? takeProfit : null,
@@ -711,7 +731,9 @@ namespace ServerTest.Modules.Backtest.Application
 
                 var result = new BacktestSymbolResult
                 {
-                    Symbol = symbol
+                    Symbol = symbol,
+                    StrategyScopeKey = state.StrategyScopeKey,
+                    StrategyIndex = state.StrategyIndex > 0 ? state.StrategyIndex : null
                 };
 
                 runtimes[symbol] = new BacktestSymbolRuntime(

@@ -1,4 +1,5 @@
-﻿using ccxt;
+using ccxt;
+using Microsoft.Extensions.Logging;
 using ServerTest.Models.Indicator;
 using TALib;
 
@@ -7,12 +8,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
     internal sealed class TalibIndicatorCalculator
     {
         private readonly TalibIndicatorCatalog? _catalog;
-        private readonly TalibWasmNodeInvoker? _wasmInvoker;
+        private readonly TalibWasmNodePool? _wasmPool;
 
-        public TalibIndicatorCalculator(TalibIndicatorCatalog? catalog, TalibWasmNodeInvoker? wasmInvoker = null)
+        public TalibIndicatorCalculator(TalibIndicatorCatalog? catalog, TalibWasmNodePool? wasmPool = null)
         {
             _catalog = catalog;
-            _wasmInvoker = wasmInvoker;
+            _wasmPool = wasmPool;
         }
 
         public Abstract.IndicatorFunction? ResolveFunction(string indicator)
@@ -54,7 +55,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
             double[] parameters,
             List<OHLCV> candles,
             int maxPoints,
-            out List<IndicatorPoint> points)
+            out List<IndicatorPoint> points,
+            ILogger? logger = null)
         {
             points = new List<IndicatorPoint>();
             if (candles == null || candles.Count == 0)
@@ -73,10 +75,9 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 outputIndex = 0;
             }
 
-            // 优先走同核心（Node + talib-web + talib.wasm），确保与前端计算核心一致。
-            if (_wasmInvoker is { IsEnabled: true })
+            if (_wasmPool is { IsEnabled: true })
             {
-                if (_wasmInvoker.TryCompute(
+                if (_wasmPool.TryCompute(
                     key.Indicator,
                     inputs,
                     parameters,
@@ -92,8 +93,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
                         out points);
                 }
 
-                Console.WriteLine($"同核心计算失败，指标={key.Indicator}，错误={wasmError}");
-                if (_wasmInvoker.StrictWasmCore)
+                logger?.LogWarning(
+                    "同核心计算失败，指标={Indicator}，错误={Error}",
+                    key.Indicator,
+                    wasmError);
+                if (_wasmPool.StrictWasmCore)
                 {
                     return false;
                 }
@@ -114,7 +118,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (retCode != Core.RetCode.Success)
             {
-                Console.WriteLine("更新指标出错：" + retCode);
+                logger?.LogWarning("更新指标出错: {RetCode}", retCode);
                 return false;
             }
 

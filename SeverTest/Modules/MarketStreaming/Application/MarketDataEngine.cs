@@ -3,10 +3,14 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ServerTest.Models;
 using ServerTest.Models.Market;
+using ServerTest.Models.Strategy;
+using ServerTest.Modules.Shared.Application.Diagnostics;
 using ServerTest.Options;
 using ServerTest.Services;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace ServerTest.Modules.MarketStreaming.Application
 {
@@ -44,6 +48,9 @@ namespace ServerTest.Modules.MarketStreaming.Application
         private readonly Channel<MarketDataTask> _marketTaskChannel;
         private readonly QueuePressureMonitor _queueMonitor;
         private readonly RuntimeQueueOptions _queueOptions;
+        private readonly StrategyDiagnosticsOptions _diagnostics;
+        private readonly StrategyTaskTraceLogQueue? _taskTraceLogQueue;
+        private readonly string _instanceId;
         private readonly ConcurrentDictionary<string, MarketDataTaskSubscription> _subscriptions = new();
         private readonly ConcurrentDictionary<string, int> _pendingCriticalSubscriptionWrites = new(StringComparer.Ordinal);
         private readonly Channel<MarketDataTask> _criticalMainWriteChannel;
@@ -71,11 +78,16 @@ namespace ServerTest.Modules.MarketStreaming.Application
         public MarketDataEngine(
             ILogger<MarketDataEngine> logger,
             IOptions<RuntimeQueueOptions> queueOptions,
-            IOptions<MarketDataQueryOptions> queryOptions) : base(logger)
+            IOptions<MarketDataQueryOptions> queryOptions,
+            StrategyTaskTraceLogQueue? taskTraceLogQueue = null,
+            IOptions<StrategyDiagnosticsOptions>? diagnosticsOptions = null) : base(logger)
         {
             // 初始化队列，启用有界通道与背压策略
             var options = queueOptions?.Value ?? new RuntimeQueueOptions();
             _queueOptions = options;
+            _taskTraceLogQueue = taskTraceLogQueue;
+            _instanceId = ProcessInstanceIdProvider.InstanceId;
+            _diagnostics = diagnosticsOptions?.Value ?? new StrategyDiagnosticsOptions();
             var mainQueueOptions = NormalizeMainQueueOptions(options.MarketData, logger);
             _marketTaskChannel = ChannelFactory.Create<MarketDataTask>(
                 mainQueueOptions,
@@ -653,6 +665,7 @@ namespace ServerTest.Modules.MarketStreaming.Application
                     if (!symbolCacheDict.TryGetValue(symbol, out var symbolCache))
                         continue;
 
+                    List<PendingMarketTask>? pendingTasks = null;
                     lock (symbolCache.Lock)
                     {
                         var cache1m = symbolCache.Timeframes["1m"];
@@ -688,14 +701,30 @@ namespace ServerTest.Modules.MarketStreaming.Application
                                 var closedTimestamp = closedCandle.timestamp != null ? (long)closedCandle.timestamp : 0;
                                 if (closedTimestamp > 0)
                                 {
+                                    pendingTasks ??= new List<PendingMarketTask>(8);
                                     // 1m 收线时，使用已收线的上一根K线进行聚合与任务投递
-                                    UpdateOtherTimeframesIncremental(exchangeId, symbol, closedCandle, symbolCache);
+                                    UpdateOtherTimeframesIncremental(
+                                        exchangeId,
+                                        symbol,
+                                        closedCandle,
+                                        symbolCache,
+                                        pendingTasks);
 
                                     // 1m 收线生成实时行情任务
-                                    EnqueueMarketTask(exchangeId, symbol, "1m", closedTimestamp, isBarClose: true);
+                                    pendingTasks.Add(new PendingMarketTask(
+                                        exchangeId,
+                                        symbol,
+                                        "1m",
+                                        closedTimestamp,
+                                        isBarClose: true));
 
                                     // 1m 收线驱动其他周期 OnBarUpdate 任务
-                                    EnqueueOnBarUpdateTasks(exchangeId, symbol, symbolCache, closedTimestamp);
+                                    CollectOnBarUpdateTasks(
+                                        exchangeId,
+                                        symbol,
+                                        symbolCache,
+                                        closedTimestamp,
+                                        pendingTasks);
                                 }
                             }
                         }
@@ -711,6 +740,22 @@ namespace ServerTest.Modules.MarketStreaming.Application
                             }
                         }
                     }
+
+                    if (pendingTasks == null || pendingTasks.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    // 锁外分发任务，避免队列写入与日志开销阻塞行情缓存更新。
+                    foreach (var pendingTask in pendingTasks)
+                    {
+                        EnqueueMarketTask(
+                            pendingTask.ExchangeId,
+                            pendingTask.Symbol,
+                            pendingTask.Timeframe,
+                            pendingTask.CandleTimestamp,
+                            pendingTask.IsBarClose);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -723,7 +768,12 @@ namespace ServerTest.Modules.MarketStreaming.Application
         /// <summary>
         /// 增量更新其他周期（新K线收线时）
         /// </summary>
-        private void UpdateOtherTimeframesIncremental(string exchangeId, string symbol, OHLCV new1mCandle, SymbolCache symbolCache)
+        private void UpdateOtherTimeframesIncremental(
+            string exchangeId,
+            string symbol,
+            OHLCV new1mCandle,
+            SymbolCache symbolCache,
+            List<PendingMarketTask> pendingTasks)
         {
             var timestamp1m = new1mCandle.timestamp != null ? (long)new1mCandle.timestamp : 0;
             if (timestamp1m == 0) return;
@@ -787,7 +837,12 @@ namespace ServerTest.Modules.MarketStreaming.Application
                             var finalizedTimestamp = finalizedBucket.timestamp != null ? (long)finalizedBucket.timestamp : 0;
                             if (finalizedTimestamp > 0)
                             {
-                                EnqueueMarketTask(exchangeId, symbol, timeframe, finalizedTimestamp);
+                                pendingTasks.Add(new PendingMarketTask(
+                                    exchangeId,
+                                    symbol,
+                                    timeframe,
+                                    finalizedTimestamp,
+                                    isBarClose: true));
                             }
 
                             // 创建新的 bucket
@@ -1200,39 +1255,13 @@ namespace ServerTest.Modules.MarketStreaming.Application
 
             lock (symbolCache.Lock)
             {
-                var result = new List<OHLCV>(candles);
-
-                // 如果是非1m周期，添加当前 bucket（如果存在）
-                if (timeframeStr != "1m")
-                {
-                    var currentBucket = symbolCache.CurrentBuckets[timeframeStr];
-                    if (currentBucket != null)
-                    {
-                        result.Add(currentBucket.Value);
-                    }
-                }
-
-                if (result.Count == 0)
-                    return new List<OHLCV>();
-
-                // 如果指定了结束时间，过滤数据
-                if (endTime.HasValue)
-                {
-                    var endTimestamp = ((DateTimeOffset)endTime.Value).ToUnixTimeMilliseconds();
-                    var filtered = result.Where(c =>
-                        c.timestamp != null &&
-                        (long)c.timestamp <= endTimestamp).ToList();
-
-                    // 返回最新的 count 根
-                    var startIndex = Math.Max(0, filtered.Count - count);
-                    return filtered.Skip(startIndex).Take(count).ToList();
-                }
-                else
-                {
-                    // 返回最新的 count 根
-                    var startIndex = Math.Max(0, result.Count - count);
-                    return result.Skip(startIndex).Take(count).ToList();
-                }
+                var currentBucket = timeframeStr != "1m"
+                    ? symbolCache.CurrentBuckets[timeframeStr]
+                    : null;
+                var endTimestamp = endTime.HasValue
+                    ? ((DateTimeOffset)endTime.Value).ToUnixTimeMilliseconds()
+                    : (long?)null;
+                return BuildHistoryWindow(candles, currentBucket, endTimestamp, count);
             }
         }
 
@@ -1258,33 +1287,70 @@ namespace ServerTest.Modules.MarketStreaming.Application
 
             lock (symbolCache.Lock)
             {
-                var result = new List<OHLCV>(candles);
-
-                if (timeframeKey != "1m")
-                {
-                    var currentBucket = symbolCache.CurrentBuckets[timeframeKey];
-                    if (currentBucket != null)
-                    {
-                        result.Add(currentBucket.Value);
-                    }
-                }
-
-                if (result.Count == 0)
-                    return new List<OHLCV>();
-
-                if (endTimestamp.HasValue)
-                {
-                    var filtered = result.Where(c =>
-                        c.timestamp != null &&
-                        (long)c.timestamp <= endTimestamp.Value).ToList();
-
-                    var startIndex = Math.Max(0, filtered.Count - count);
-                    return filtered.Skip(startIndex).Take(count).ToList();
-                }
-
-                var start = Math.Max(0, result.Count - count);
-                return result.Skip(start).Take(count).ToList();
+                var currentBucket = timeframeKey != "1m"
+                    ? symbolCache.CurrentBuckets[timeframeKey]
+                    : null;
+                return BuildHistoryWindow(candles, currentBucket, endTimestamp, count);
             }
+        }
+
+        /// <summary>
+        /// 构建历史窗口：仅拷贝尾部所需数据，避免整表复制与额外 LINQ 分配。
+        /// </summary>
+        private static List<OHLCV> BuildHistoryWindow(
+            IReadOnlyList<OHLCV> candles,
+            OHLCV? currentBucket,
+            long? endTimestamp,
+            int count)
+        {
+            if (count <= 0)
+            {
+                return new List<OHLCV>();
+            }
+
+            var hasBucket = currentBucket != null;
+            var total = candles.Count + (hasBucket ? 1 : 0);
+            if (total <= 0)
+            {
+                return new List<OHLCV>();
+            }
+
+            if (!endTimestamp.HasValue)
+            {
+                var start = Math.Max(0, total - count);
+                var result = new List<OHLCV>(total - start);
+                for (var i = start; i < total; i++)
+                {
+                    result.Add(GetHistoryItem(candles, currentBucket, i));
+                }
+
+                return result;
+            }
+
+            var filtered = new List<OHLCV>(Math.Min(count, total));
+            for (var i = total - 1; i >= 0 && filtered.Count < count; i--)
+            {
+                var candle = GetHistoryItem(candles, currentBucket, i);
+                if (candle.timestamp == null || (long)candle.timestamp > endTimestamp.Value)
+                {
+                    continue;
+                }
+
+                filtered.Add(candle);
+            }
+
+            filtered.Reverse();
+            return filtered;
+        }
+
+        private static OHLCV GetHistoryItem(IReadOnlyList<OHLCV> candles, OHLCV? currentBucket, int index)
+        {
+            if (index < candles.Count)
+            {
+                return candles[index];
+            }
+
+            return currentBucket!.Value;
         }
 
         /// <summary>
@@ -1359,8 +1425,11 @@ namespace ServerTest.Modules.MarketStreaming.Application
                 return;
             }
 
+            var dispatchStopwatch = Stopwatch.StartNew();
             var task = new MarketDataTask(exchangeId, symbol, timeframe, candleTimestamp, isBarClose);
-            TryWriteMainChannel(task);
+            var mainWriteAccepted = TryWriteMainChannel(task);
+            var subscribedCount = 0;
+            var failedSubscriptionCount = 0;
 
             foreach (var subscription in _subscriptions.Values)
             {
@@ -1369,8 +1438,10 @@ namespace ServerTest.Modules.MarketStreaming.Application
                     continue;
                 }
 
+                subscribedCount++;
                 if (!subscription.TryWrite(task))
                 {
+                    failedSubscriptionCount++;
                     Logger.LogWarning(
                         "行情任务写入订阅队列失败: {Subscriber} {Exchange} {Symbol} {Timeframe}",
                         subscription.Name,
@@ -1385,17 +1456,136 @@ namespace ServerTest.Modules.MarketStreaming.Application
                 }
             }
 
+            dispatchStopwatch.Stop();
+            var dispatchMs = (int)Math.Min(dispatchStopwatch.ElapsedMilliseconds, int.MaxValue);
+            LogMarketDispatchProfile(
+                task,
+                dispatchMs,
+                subscribedCount,
+                failedSubscriptionCount);
+            TraceMarketDispatch(
+                task,
+                dispatchMs,
+                subscribedCount,
+                failedSubscriptionCount,
+                mainWriteAccepted);
+
             // var modeText = isBarClose ? "收线" : "更新";
             // Logger.LogInformation(
             //     $"[{exchangeId}] {symbol} {timeframe} 实时行情任务入队({modeText}): time={FormatTimestamp(candleTimestamp)}");
         }
 
-        private void TryWriteMainChannel(MarketDataTask task)
+        private void LogMarketDispatchProfile(
+            MarketDataTask task,
+            int dispatchMs,
+            int subscribedCount,
+            int failedSubscriptionCount)
+        {
+            if (!_diagnostics.EnableMarketDispatchLog)
+            {
+                return;
+            }
+
+            var shouldLog = _diagnostics.LogEveryMarketDispatch
+                || dispatchMs >= _diagnostics.SlowMarketDispatchThresholdMs
+                || failedSubscriptionCount > 0;
+            if (!shouldLog)
+            {
+                return;
+            }
+
+            if (dispatchMs >= _diagnostics.SlowMarketDispatchThresholdMs || failedSubscriptionCount > 0)
+            {
+                Logger.LogWarning(
+                    "[行情任务分发画像] 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 收线={IsBarClose} 分发耗时={DispatchMs}毫秒 订阅写入={Subscribed} 订阅失败={Failed}",
+                    task.Exchange,
+                    task.Symbol,
+                    task.Timeframe,
+                    task.IsBarClose,
+                    dispatchMs,
+                    subscribedCount,
+                    failedSubscriptionCount);
+                return;
+            }
+
+            Logger.LogInformation(
+                "[行情任务分发画像] 交易所={Exchange} 交易对={Symbol} 周期={Timeframe} 收线={IsBarClose} 分发耗时={DispatchMs}毫秒 订阅写入={Subscribed} 订阅失败={Failed}",
+                task.Exchange,
+                task.Symbol,
+                task.Timeframe,
+                task.IsBarClose,
+                dispatchMs,
+                subscribedCount,
+                failedSubscriptionCount);
+        }
+
+        private void TraceMarketDispatch(
+            MarketDataTask task,
+            int dispatchMs,
+            int subscribedCount,
+            int failedSubscriptionCount,
+            bool mainWriteAccepted)
+        {
+            if (_taskTraceLogQueue == null || !_diagnostics.EnableTaskTracePersist)
+            {
+                return;
+            }
+
+            var status = (!mainWriteAccepted || failedSubscriptionCount > 0) ? "degraded" : "success";
+            var shouldPersist = _diagnostics.TaskTraceLogEveryEvent
+                || !string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
+                || dispatchMs >= _diagnostics.SlowTaskTraceThresholdMs;
+            if (!shouldPersist)
+            {
+                return;
+            }
+
+            var payload = new
+            {
+                dispatchMs,
+                subscribedCount,
+                failedSubscriptionCount,
+                mainWriteAccepted,
+                slowThresholdMs = _diagnostics.SlowTaskTraceThresholdMs
+            };
+
+            _taskTraceLogQueue.TryEnqueue(new StrategyTaskTraceLog
+            {
+                TraceId = MarketDataTask.NormalizeTraceId(task.TraceId),
+                ParentTraceId = null,
+                EventStage = "market.dispatch",
+                EventStatus = status,
+                ActorModule = nameof(MarketDataEngine),
+                ActorInstance = _instanceId,
+                Exchange = task.Exchange,
+                Symbol = task.Symbol,
+                Timeframe = task.Timeframe,
+                CandleTimestamp = task.CandleTimestamp,
+                IsBarClose = task.IsBarClose,
+                Method = task.IsBarClose ? "close" : "update",
+                DurationMs = dispatchMs,
+                MetricsJson = SerializeTracePayload(payload)
+            });
+        }
+
+        private static string? SerializeTracePayload(object payload)
+        {
+            try
+            {
+                return JsonSerializer.Serialize(payload);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool TryWriteMainChannel(MarketDataTask task)
         {
             if (_marketTaskChannel.Writer.TryWrite(task))
             {
                 _queueMonitor.OnEnqueueSuccess();
-                return;
+                return true;
             }
 
             _queueMonitor.OnEnqueueFailed();
@@ -1407,17 +1597,19 @@ namespace ServerTest.Modules.MarketStreaming.Application
 
             if (!task.IsBarClose)
             {
-                return;
+                return false;
             }
 
             TryScheduleCriticalMainChannelWrite(task);
+            return false;
         }
 
-        private void EnqueueOnBarUpdateTasks(
+        private void CollectOnBarUpdateTasks(
             string exchangeId,
             string symbol,
             SymbolCache symbolCache,
-            long currentTimestamp)
+            long currentTimestamp,
+            List<PendingMarketTask> pendingTasks)
         {
             var timeframes = GetOtherTimeframes();
             foreach (var timeframe in timeframes)
@@ -1432,7 +1624,12 @@ namespace ServerTest.Modules.MarketStreaming.Application
                     continue;
                 }
 
-                EnqueueMarketTask(exchangeId, symbol, timeframe, currentTimestamp, isBarClose: false);
+                pendingTasks.Add(new PendingMarketTask(
+                    exchangeId,
+                    symbol,
+                    timeframe,
+                    currentTimestamp,
+                    isBarClose: false));
             }
         }
 
@@ -1609,6 +1806,29 @@ namespace ServerTest.Modules.MarketStreaming.Application
             public MarketDataTaskSubscription Subscription { get; }
 
             public MarketDataTask Task { get; }
+        }
+
+        private readonly struct PendingMarketTask
+        {
+            public PendingMarketTask(
+                string exchangeId,
+                string symbol,
+                string timeframe,
+                long candleTimestamp,
+                bool isBarClose)
+            {
+                ExchangeId = exchangeId;
+                Symbol = symbol;
+                Timeframe = timeframe;
+                CandleTimestamp = candleTimestamp;
+                IsBarClose = isBarClose;
+            }
+
+            public string ExchangeId { get; }
+            public string Symbol { get; }
+            public string Timeframe { get; }
+            public long CandleTimestamp { get; }
+            public bool IsBarClose { get; }
         }
     }
 }

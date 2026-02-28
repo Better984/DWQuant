@@ -80,7 +80,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                 if (!TryResolveParamValue(context, method, paramIndex, out result[i]))
                 {
-                    _logger.LogInformation(
+                    _logger.LogDebug(
                         "策略参数不足，无法解析条件: {Uid} Method={Method} ArgsCount={ArgsCount} ParamCount={ParamCount} Need={Need}",
                         context.Strategy.UidCode,
                         method.Method,
@@ -192,7 +192,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return true;
             }
 
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "常量解析失败: {Uid} input={Input}",
                 context.Strategy.UidCode,
                 reference?.Input);
@@ -209,7 +209,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var trade = context.StrategyConfig.Trade;
             if (trade == null)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "字段解析失败: 策略缺少Trade配置 {Uid}",
                     context.Strategy.UidCode);
                 return false;
@@ -218,7 +218,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (string.Equals(reference.CalcMode, "OnBarClose", StringComparison.OrdinalIgnoreCase) &&
                 !context.Task.IsBarClose)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "字段解析跳过: OnBarClose但当前为更新任务 {Uid} timeframe={Timeframe}",
                     context.Strategy.UidCode,
                     reference.Timeframe);
@@ -237,7 +237,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 string.IsNullOrWhiteSpace(symbol) ||
                 string.IsNullOrWhiteSpace(timeframe))
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "字段解析失败: 交易所/币对/周期无效 {Uid} exchange={Exchange} symbol={Symbol} timeframe={Timeframe}",
                     context.Strategy.UidCode,
                     exchange,
@@ -259,7 +259,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (candles.Count <= offset)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "字段解析失败: K线数量不足 {Uid} needOffset={Offset} count={Count}",
                     context.Strategy.UidCode,
                     offset,
@@ -270,7 +270,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var index = candles.Count - 1 - offset;
             if (index < 0)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "字段解析失败: 索引无效 {Uid} index={Index}",
                     context.Strategy.UidCode,
                     index);
@@ -281,7 +281,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             value = TalibIndicatorCalculator.ResolveValue(candle, reference.Input ?? string.Empty);
             if (double.IsNaN(value))
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "字段解析失败: 值为NaN {Uid} input={Input}",
                     context.Strategy.UidCode,
                     reference.Input);
@@ -303,7 +303,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var trade = context.StrategyConfig.Trade;
             if (trade == null)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "指标解析失败: 策略缺少Trade配置 {Uid}",
                     context.Strategy.UidCode);
                 return false;
@@ -312,7 +312,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (string.Equals(reference.CalcMode, "OnBarClose", StringComparison.OrdinalIgnoreCase) &&
                 !context.Task.IsBarClose)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "指标解析跳过: OnBarClose但当前为更新任务 {Uid} indicator={Indicator} timeframe={Timeframe}",
                     context.Strategy.UidCode,
                     reference.Indicator,
@@ -329,7 +329,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (!_indicatorEngine.TryGetValue(request, context.Task, offset, out value))
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "指标解析失败: 无法取得指标值 {Uid} indicator={Indicator} offset={Offset}",
                     context.Strategy.UidCode,
                     reference.Indicator,
@@ -347,7 +347,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             StrategyValueRef reference,
             double value)
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "条件检测取值 固定值: {Uid} input={Input} value={Value:F6}",
                 context.Strategy.UidCode,
                 reference?.Input,
@@ -388,14 +388,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
             double value,
             int offset)
         {
-            _logger.LogInformation(
-                "条件检测取值 指标: {Uid} indicator={Indicator} output={Output} timeframe={Timeframe} value={Value:F6} offset={Offset}",
-                context.Strategy.UidCode,
-                reference?.Indicator,
-                reference?.Output,
-                request?.Key.Timeframe,
-                value,
-                offset);
+            //_logger.LogInformation(
+            //    "条件检测取值 指标: {Uid} indicator={Indicator} output={Output} timeframe={Timeframe} value={Value:F6} offset={Offset}",
+            //    context.Strategy.UidCode,
+            //    reference?.Indicator,
+            //    reference?.Output,
+            //    request?.Key.Timeframe,
+            //    value,
+            //    offset);
         }
 
         private static string FormatKlineTime(long timestamp)

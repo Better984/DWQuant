@@ -10,6 +10,7 @@ namespace ServerTest.Services
         Core = 1,
         BacktestWorker = 2,
         Full = 3,
+        LiveTradingWorker = 4,
     }
 
     /// <summary>
@@ -36,6 +37,8 @@ namespace ServerTest.Services
         public bool IsCoreLike => Role == ServerRole.Core || Role == ServerRole.Full;
 
         public bool IsBacktestWorker => Role == ServerRole.BacktestWorker;
+
+        public bool IsLiveTradingWorker => Role == ServerRole.LiveTradingWorker;
     }
 
     public static class ServerRoleHelper
@@ -86,6 +89,16 @@ namespace ServerTest.Services
                     role = ServerRole.Full;
                     return true;
 
+                case "4":
+                case "live":
+                case "live-worker":
+                case "live_worker":
+                case "live-trading-worker":
+                case "live_trading_worker":
+                case "trading-worker":
+                    role = ServerRole.LiveTradingWorker;
+                    return true;
+
                 default:
                     return false;
             }
@@ -98,6 +111,7 @@ namespace ServerTest.Services
                 ServerRole.Core => "core",
                 ServerRole.BacktestWorker => "backtest-worker",
                 ServerRole.Full => "full",
+                ServerRole.LiveTradingWorker => "live-trading-worker",
                 _ => "full",
             };
         }
@@ -109,6 +123,7 @@ namespace ServerTest.Services
                 ServerRole.Core => "核心服务器",
                 ServerRole.BacktestWorker => "回测算力服务器",
                 ServerRole.Full => "全功能服务器",
+                ServerRole.LiveTradingWorker => "实盘服务器",
                 _ => "未知服务器",
             };
         }

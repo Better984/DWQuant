@@ -6,6 +6,7 @@ using ServerTest.Options;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using ServerTest.Services;
+using ServerTest.Modules.MarketStreaming.Application;
 
 namespace ServerTest.Modules.StrategyEngine.Application
 {
@@ -24,18 +25,21 @@ namespace ServerTest.Modules.StrategyEngine.Application
         private const int MaxPendingCriticalWrites = 128;
 
         private readonly ConcurrentDictionary<IndicatorKey, IndicatorHandle> _handles = new();
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<IndicatorKey, byte>> _handlesByMarketKey =
+            new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, long> _taskPrecomputeWatermark =
+            new(StringComparer.Ordinal);
 
         public IndicatorEngine(
             IMarketDataProvider marketDataProvider,
             ILogger<IndicatorEngine> logger,
             IOptions<RuntimeQueueOptions> queueOptions,
-            TalibWasmNodeInvoker? wasmInvoker = null)
+            TalibWasmNodePool? wasmPool = null)
         {
             _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var options = queueOptions?.Value ?? new RuntimeQueueOptions();
             var indicatorQueueOptions = NormalizeQueueOptions(options.Indicator, _logger);
-            // 初始化队列，启用有界通道与背压策略
             _taskChannel = ChannelFactory.Create<IndicatorTask>(
                 indicatorQueueOptions,
                 "IndicatorEngine",
@@ -50,7 +54,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             });
             _queueMonitor = new QueuePressureMonitor("IndicatorEngine", indicatorQueueOptions, logger);
             _catalog = TryLoadCatalog();
-            _calculator = new TalibIndicatorCalculator(_catalog, wasmInvoker);
+            _calculator = new TalibIndicatorCalculator(_catalog, wasmPool);
         }
 
         public void EnqueueTask(IndicatorTask task)
@@ -86,6 +90,52 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 task.MarketTask.Timeframe,
                 FormatTimestamp(task.MarketTask.CandleTimestamp),
                 task.Requests.Count);
+        }
+
+        /// <summary>
+        /// 策略加载时预注册指标请求，确保自动预计算可以命中对应句柄。
+        /// </summary>
+        public void RegisterRequestsForStrategy(IReadOnlyList<IndicatorRequest> requests)
+        {
+            if (requests == null || requests.Count == 0)
+            {
+                return;
+            }
+
+            RegisterRequests(requests);
+        }
+
+        /// <summary>
+        /// 判断当前行情任务是否已被自动预计算链路覆盖。
+        /// </summary>
+        public bool IsTaskPrecomputed(MarketDataTask task)
+        {
+            if (task.CandleTimestamp <= 0)
+            {
+                return false;
+            }
+
+            var normalizedTask = NormalizeTask(task);
+            var marketKey = BuildMarketTaskKey(
+                normalizedTask.Exchange,
+                normalizedTask.Symbol,
+                normalizedTask.Timeframe);
+
+            if (!_taskPrecomputeWatermark.TryGetValue(marketKey, out var watermark))
+            {
+                return false;
+            }
+
+            return watermark >= normalizedTask.CandleTimestamp;
+        }
+
+        /// <summary>
+        /// 标记任务已完成指标刷新（供同步刷新链路补写水位，避免同任务被预计算再次重算）。
+        /// </summary>
+        public void MarkTaskPrecomputed(MarketDataTask task)
+        {
+            var normalizedTask = NormalizeTask(task);
+            AdvanceTaskWatermark(normalizedTask);
         }
 
         /// <summary>
@@ -136,6 +186,135 @@ namespace ServerTest.Modules.StrategyEngine.Application
             await Task.WhenAll(workers).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// 订阅行情引擎，行情到达时自动更新所有已注册指标（预计算）。
+        /// 策略执行时指标已是最新的，HandleTask 中的同步刷新变为缓存命中。
+        /// </summary>
+        public async Task SubscribeAndAutoUpdateAsync(
+            MarketDataEngine marketDataEngine,
+            CancellationToken cancellationToken)
+        {
+            var subscription = marketDataEngine.SubscribeMarketTasks(
+                "IndicatorAutoUpdate", onlyBarClose: false);
+
+            _logger.LogInformation("指标自动更新服务已启动，订阅行情引擎");
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                MarketDataTask task;
+                try
+                {
+                    task = await subscription.ReadAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                try
+                {
+                    PrecomputeHandlesForTask(task);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "指标自动更新异常: {Exchange} {Symbol} {Timeframe}",
+                        task.Exchange, task.Symbol, task.Timeframe);
+                }
+            }
+
+            _logger.LogInformation("指标自动更新服务已停止");
+        }
+
+        private void PrecomputeHandlesForTask(MarketDataTask task)
+        {
+            var normalizedTask = NormalizeTask(task);
+            var updated = 0;
+            var requiredHandleCount = 0;
+            var succeededHandleCount = 0;
+            var marketKey = BuildMarketTaskKey(
+                normalizedTask.Exchange,
+                normalizedTask.Symbol,
+                normalizedTask.Timeframe);
+
+            // 同一时间戳已被同步刷新链路完成时，预计算直接跳过，避免重复重算。
+            if (normalizedTask.CandleTimestamp > 0
+                && _taskPrecomputeWatermark.TryGetValue(marketKey, out var watermark)
+                && watermark >= normalizedTask.CandleTimestamp)
+            {
+                return;
+            }
+
+            if (_handlesByMarketKey.TryGetValue(marketKey, out var indexedKeys))
+            {
+                foreach (var indicatorKey in indexedKeys.Keys)
+                {
+                    if (!_handles.TryGetValue(indicatorKey, out var handle))
+                    {
+                        continue;
+                    }
+
+                    if (!handle.IsUpdateRequired(normalizedTask))
+                    {
+                        continue;
+                    }
+
+                    requiredHandleCount++;
+                    if (handle.Update(normalizedTask, _marketDataProvider, _calculator, _logger))
+                    {
+                        updated++;
+                        succeededHandleCount++;
+                    }
+                }
+            }
+
+            // 仅当本任务所需的句柄全部更新成功时，才推进预计算水位，避免误判“已预计算”。
+            if (normalizedTask.CandleTimestamp > 0 && succeededHandleCount >= requiredHandleCount)
+            {
+                AdvanceTaskWatermark(normalizedTask);
+            }
+            else if (requiredHandleCount > 0 && succeededHandleCount < requiredHandleCount)
+            {
+                _logger.LogWarning(
+                    "指标预计算未完全成功，保持旧水位: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Required}",
+                    normalizedTask.Exchange,
+                    normalizedTask.Symbol,
+                    normalizedTask.Timeframe,
+                    FormatTimestamp(normalizedTask.CandleTimestamp),
+                    succeededHandleCount,
+                    requiredHandleCount);
+            }
+
+            if (updated > 0 && _logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug(
+                    "指标预计算完成: {Exchange} {Symbol} {Timeframe} 时间={Time} 更新={Count}",
+                    normalizedTask.Exchange,
+                    normalizedTask.Symbol,
+                    normalizedTask.Timeframe,
+                    FormatTimestamp(normalizedTask.CandleTimestamp),
+                    updated);
+            }
+        }
+
+        private void AdvanceTaskWatermark(MarketDataTask normalizedTask)
+        {
+            if (normalizedTask.CandleTimestamp <= 0)
+            {
+                return;
+            }
+
+            var marketKey = BuildMarketTaskKey(
+                normalizedTask.Exchange,
+                normalizedTask.Symbol,
+                normalizedTask.Timeframe);
+
+            _taskPrecomputeWatermark.AddOrUpdate(
+                marketKey,
+                normalizedTask.CandleTimestamp,
+                (_, current) => Math.Max(current, normalizedTask.CandleTimestamp));
+        }
+
         public bool TryGetValue(
             IndicatorRequest request,
             MarketDataTask task,
@@ -153,7 +332,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var handle = GetOrCreateHandle(effectiveRequest);
             handle.UpdateMaxOffset(effectiveRequest.MaxOffset);
 
-            if (handle.TryGetValue(offset, out value))
+            if (handle.TryGetValueFresh(offset, normalizedTask.CandleTimestamp, out value))
             {
                 return true;
             }
@@ -163,7 +342,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return false;
             }
 
-            return handle.TryGetValue(offset, out value);
+            return handle.TryGetValueFresh(offset, normalizedTask.CandleTimestamp, out value);
         }
 
         public bool TryGetCachedValue(IndicatorKey key, int offset, out double value)
@@ -227,14 +406,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (log)
             {
-                _logger.LogInformation(
-                    "指标任务完成: {Exchange} {Symbol} {Timeframe} time={Time} 成功={Success}/{Total}",
-                    normalizedTask.Exchange,
-                    normalizedTask.Symbol,
-                    normalizedTask.Timeframe,
-                    FormatTimestamp(normalizedTask.CandleTimestamp),
-                    successCount,
-                    task.Requests.Count);
+                //_logger.LogInformation(
+                //    "指标任务完成: {Exchange} {Symbol} {Timeframe} time={Time} 成功={Success}/{Total}",
+                //    normalizedTask.Exchange,
+                //    normalizedTask.Symbol,
+                //    normalizedTask.Timeframe,
+                //    FormatTimestamp(normalizedTask.CandleTimestamp),
+                //    successCount,
+                //    task.Requests.Count);
             }
 
             return (successCount, task.Requests.Count);
@@ -251,9 +430,25 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         private IndicatorHandle GetOrCreateHandle(IndicatorRequest request)
         {
-            return _handles.GetOrAdd(
+            var handle = _handles.GetOrAdd(
                 request.Key,
                 _ => new IndicatorHandle(request.Key, request.Parameters, request.MaxOffset));
+            IndexHandleByMarketKey(handle.Key);
+            return handle;
+        }
+
+        private void IndexHandleByMarketKey(IndicatorKey key)
+        {
+            var marketKey = BuildMarketTaskKey(key.Exchange, key.Symbol, key.Timeframe);
+            var bucket = _handlesByMarketKey.GetOrAdd(
+                marketKey,
+                _ => new ConcurrentDictionary<IndicatorKey, byte>());
+            bucket.TryAdd(key, 0);
+        }
+
+        private static string BuildMarketTaskKey(string exchange, string symbol, string timeframe)
+        {
+            return $"{exchange}|{symbol}|{timeframe}";
         }
 
         private static MarketDataTask NormalizeTask(MarketDataTask task)
@@ -268,7 +463,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             try
             {
-                return new MarketDataTask(exchange, symbol, timeframe, task.CandleTimestamp, task.IsBarClose);
+                return new MarketDataTask(
+                    exchange,
+                    symbol,
+                    timeframe,
+                    task.CandleTimestamp,
+                    task.TimeframeSec,
+                    task.IsBarClose,
+                    MarketDataTask.NormalizeTraceId(task.TraceId));
             }
             catch
             {

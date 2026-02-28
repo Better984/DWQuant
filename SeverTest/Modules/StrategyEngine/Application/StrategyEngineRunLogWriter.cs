@@ -22,6 +22,8 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            await _repository.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
+
             await foreach (var log in _queue.ReadAllAsync(stoppingToken))
             {
                 try

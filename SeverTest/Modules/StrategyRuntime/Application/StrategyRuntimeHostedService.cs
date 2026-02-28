@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ServerTest.Models.Strategy;
 using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.MarketStreaming.Application;
+using ServerTest.Options;
 
 namespace ServerTest.Modules.StrategyRuntime.Application
 {
@@ -13,19 +15,22 @@ namespace ServerTest.Modules.StrategyRuntime.Application
         private readonly RealTimeStrategyEngine _strategyEngine;
         private readonly StrategyJsonLoader _strategyLoader;
         private readonly ILogger<StrategyRuntimeHostedService> _logger;
+        private readonly LiveTradingOptions _liveTradingOptions;
 
         public StrategyRuntimeHostedService(
             MarketDataEngine marketDataEngine,
             IndicatorEngine indicatorEngine,
             RealTimeStrategyEngine strategyEngine,
             StrategyJsonLoader strategyLoader,
-            ILogger<StrategyRuntimeHostedService> logger)
+            ILogger<StrategyRuntimeHostedService> logger,
+            IOptions<LiveTradingOptions>? liveTradingOptions = null)
         {
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
             _indicatorEngine = indicatorEngine ?? throw new ArgumentNullException(nameof(indicatorEngine));
             _strategyEngine = strategyEngine ?? throw new ArgumentNullException(nameof(strategyEngine));
             _strategyLoader = strategyLoader ?? throw new ArgumentNullException(nameof(strategyLoader));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _liveTradingOptions = liveTradingOptions?.Value ?? new LiveTradingOptions();
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,16 +39,30 @@ namespace ServerTest.Modules.StrategyRuntime.Application
             await _marketDataEngine.WaitForInitializationAsync();
             _logger.LogInformation("行情引擎初始化完成，开始加载策略配置");
 
-            //LoadTestStrategy(); //早期测试不必理会!!!
-
-            // 外层多 worker + 引擎内层 Parallel.ForEach 会造成并行叠加。
-            // 这里固定为单 worker 消费行情任务，保留引擎内部并行即可，降低高压下线程竞争。
-            const int strategyWorkerCount = 1;
             var indicatorWorkerCount = Math.Max(1, Environment.ProcessorCount / 2);
             var indicatorTask = _indicatorEngine.RunAsync(indicatorWorkerCount, stoppingToken);
-            var strategyTask = _strategyEngine.RunWorkersAsync(strategyWorkerCount, stoppingToken);
+            var indicatorAutoTask = _indicatorEngine.SubscribeAndAutoUpdateAsync(
+                _marketDataEngine, stoppingToken);
 
-            await Task.WhenAll(indicatorTask, strategyTask);
+            Task strategyTask;
+            var shardCount = _liveTradingOptions.ShardCount;
+            if (shardCount > 1)
+            {
+                var consumer = new KeyShardedStrategyConsumer(
+                    _strategyEngine, shardCount, _logger);
+                strategyTask = consumer.RunAsync(stoppingToken);
+            }
+            else
+            {
+                strategyTask = _strategyEngine.RunWorkersAsync(1, stoppingToken);
+            }
+
+            _logger.LogInformation(
+                "策略消费模式: {Mode}, shardCount={ShardCount}",
+                shardCount > 1 ? "键分片并行" : "单 worker",
+                shardCount);
+
+            await Task.WhenAll(indicatorTask, indicatorAutoTask, strategyTask);
         }
 
         private void LoadTestStrategy()
