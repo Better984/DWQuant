@@ -23,7 +23,7 @@ namespace ServerTest.Modules.Backtest.Application
 {
     /// <summary>
     /// 回测主循环执行器：
-    /// 负责指标计算、条件评估、动作执行、风控处理与收尾强平。
+    /// 负责指标计算、条件评估、动作执行、风控处理与收尾持仓处理。
     /// </summary>
     public sealed class BacktestMainLoop
     {
@@ -436,17 +436,7 @@ namespace ServerTest.Modules.Backtest.Application
                     continue;
                 }
 
-                var orderSide = runtime.State.Position.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
-                    ? "sell"
-                    : "buy";
-                var execPrice = BacktestSlippageHelper.ApplySlippage(closePrice, orderSide, runtime.State.SlippageBps);
-                actionExecutor.ClosePosition(runtime.Symbol, execPrice, lastTimestamp, "End");
-
-                if (output.IncludeEquityCurve && equityCurveCollectors != null)
-                {
-                    var equity = BuildEquityPoint(runtime, lastPriceBar, initialCapital, lastTimestamp);
-                    equityCurveCollectors[runtime.Symbol].Add(equity);
-                }
+                actionExecutor.MarkPositionAsOpenAtEnd(runtime.Symbol, closePrice, lastTimestamp);
             }
 
             Dictionary<string, List<BacktestEquityPoint>>? equityCurvesBySymbol = null;
@@ -765,8 +755,8 @@ namespace ServerTest.Modules.Backtest.Application
                             if (chunkProgress.AcceptedPositions.Count > 0)
                             {
                                 var chunkClosed = chunkProgress.AcceptedPositions.Count;
-                                var chunkWins = chunkProgress.AcceptedPositions.Count(item => item.Trade.PnL > 0m);
-                                var chunkLosses = chunkProgress.AcceptedPositions.Count(item => item.Trade.PnL < 0m);
+                                var chunkWins = chunkProgress.AcceptedPositions.Count(item => !item.Trade.IsOpen && item.Trade.PnL > 0m);
+                                var chunkLosses = chunkProgress.AcceptedPositions.Count(item => !item.Trade.IsOpen && item.Trade.PnL < 0m);
 
                                 Interlocked.Add(ref closedPositions, chunkClosed);
                                 Interlocked.Add(ref winCount, chunkWins);
@@ -1219,10 +1209,11 @@ namespace ServerTest.Modules.Backtest.Application
                 ? (decimal)timeframeMs / (8m * 60m * 60m * 1000m)
                 : 0m;
 
-            var exitReason = "End";
+            var exitReason = "Open";
             var exitTime = candidate.EntryTime;
             var exitPrice = candidate.EntryPrice;
             var matched = false;
+            var isOpen = false;
 
             for (var index = entryIndex + 1; index < priceBars.Count; index++)
             {
@@ -1286,12 +1277,12 @@ namespace ServerTest.Modules.Backtest.Application
                 {
                     exitTime = candidate.EntryTime;
                 }
-
-                var closeSide = candidate.Side.Equals("Long", StringComparison.OrdinalIgnoreCase) ? "sell" : "buy";
-                exitPrice = BacktestSlippageHelper.ApplySlippage(close, closeSide, candidate.SlippageBps);
+                // 未触发止盈止损则保持未平仓，仅按最新价格做快照，不执行滑点成交。
+                exitPrice = close;
+                isOpen = true;
             }
 
-            var exitFee = CalculateBatchFee(exitPrice, candidate.Qty, candidate.ContractSize, candidate.FeeRate);
+            var exitFee = isOpen ? 0m : CalculateBatchFee(exitPrice, candidate.Qty, candidate.ContractSize, candidate.FeeRate);
             var grossPnl = candidate.Side.Equals("Long", StringComparison.OrdinalIgnoreCase)
                 ? (exitPrice - candidate.EntryPrice) * candidate.Qty * candidate.ContractSize
                 : (candidate.EntryPrice - exitPrice) * candidate.Qty * candidate.ContractSize;
@@ -1312,6 +1303,7 @@ namespace ServerTest.Modules.Backtest.Application
                 Fee = candidate.EntryFee + exitFee,
                 PnL = tradePnl,
                 ExitReason = exitReason,
+                IsOpen = isOpen,
                 SlippageBps = candidate.SlippageBps
             };
 
@@ -1328,14 +1320,28 @@ namespace ServerTest.Modules.Backtest.Application
             foreach (var item in closed)
             {
                 runtime.State.Trades.Add(item.Trade);
-                runtime.State.RealizedPnl += item.Trade.PnL + item.FundingRealizedDelta;
-                runtime.State.AccumulatedFunding += item.FundingAccumulatedDelta;
                 runtime.State.Events.Add(new BacktestEvent
                 {
                     Timestamp = item.Candidate.EntryTime,
                     Type = "Open",
                     Message = $"开仓 {item.Candidate.Side} 价格={item.Candidate.EntryPrice} 数量={item.Candidate.Qty}"
                 });
+                if (item.Trade.IsOpen)
+                {
+                    // 未平仓快照：仅记录资金费率已实现影响，不写入平仓事件。
+                    runtime.State.RealizedPnl += item.FundingRealizedDelta;
+                    runtime.State.AccumulatedFunding += item.FundingAccumulatedDelta;
+                    runtime.State.Events.Add(new BacktestEvent
+                    {
+                        Timestamp = item.Trade.ExitTime,
+                        Type = "OpenPosition",
+                        Message = $"回测结束仍持仓 {item.Candidate.Side} 标记价={item.Trade.ExitPrice} 浮动盈亏={item.Trade.PnL:F4}"
+                    });
+                    continue;
+                }
+
+                runtime.State.RealizedPnl += item.Trade.PnL + item.FundingRealizedDelta;
+                runtime.State.AccumulatedFunding += item.FundingAccumulatedDelta;
                 runtime.State.Events.Add(new BacktestEvent
                 {
                     Timestamp = item.Trade.ExitTime,
@@ -1378,8 +1384,16 @@ namespace ServerTest.Modules.Backtest.Application
                 while (closeCursor < byExit.Count && byExit[closeCursor].Trade.ExitTime <= timestamp)
                 {
                     var item = byExit[closeCursor];
-                    realized += item.Trade.PnL + item.FundingRealizedDelta;
-                    active.Remove(item);
+                    if (item.Trade.IsOpen)
+                    {
+                        // 未平仓仓位仅结算资金费率，价格盈亏继续按浮动计入 unrealized。
+                        realized += item.FundingRealizedDelta;
+                    }
+                    else
+                    {
+                        realized += item.Trade.PnL + item.FundingRealizedDelta;
+                        active.Remove(item);
+                    }
                     closeCursor++;
                 }
 
@@ -1399,7 +1413,7 @@ namespace ServerTest.Modules.Backtest.Application
                 {
                     foreach (var item in active)
                     {
-                        if (item.Trade.ExitTime <= timestamp)
+                        if (!item.Trade.IsOpen && item.Trade.ExitTime <= timestamp)
                         {
                             continue;
                         }
@@ -2051,6 +2065,7 @@ namespace ServerTest.Modules.Backtest.Application
                 builder.Append(message);
                 return (success, builder);
             }
+
         }
 
         private sealed class BatchIndicatorProvider : IMarketDataProvider

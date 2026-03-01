@@ -8,6 +8,16 @@ namespace ServerTest.Modules.StrategyEngine.Application
     /// </summary>
     internal static class TalibCalcRules
     {
+        /// <summary>
+        /// 指标最小历史根数下限，避免空窗口导致计算失败。
+        /// </summary>
+        private const int MinRequiredBars = 5;
+
+        /// <summary>
+        /// EMA 族指标的最小预热根数（用于降低短窗口初值偏移）。
+        /// </summary>
+        private const int EmaFamilyMinWarmupBars = 200;
+
         public static int RoundToIntOption(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
@@ -62,6 +72,42 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 "OC2" => (open + close) / 2.0,
                 "HLCC4" => (high + low + close + close) / 4.0,
                 _ => close
+            };
+        }
+
+        /// <summary>
+        /// 统一计算指标所需历史根数。
+        /// 规则：
+        /// 1) 基础规则：lookback + maxOffset + 2；
+        /// 2) EMA 族规则：额外要求至少 200 根预热，降低初值偏移。
+        /// </summary>
+        public static int ResolveRequiredBars(string? indicator, int lookback, int maxOffset)
+        {
+            var safeLookback = Math.Max(0, lookback);
+            var safeMaxOffset = Math.Max(0, maxOffset);
+            var baseRequired = Math.Max(MinRequiredBars, safeLookback + safeMaxOffset + 2);
+            if (!IsEmaFamily(indicator))
+            {
+                return baseRequired;
+            }
+
+            var emaRequired = safeMaxOffset + EmaFamilyMinWarmupBars;
+            return Math.Max(baseRequired, emaRequired);
+        }
+
+        private static bool IsEmaFamily(string? indicator)
+        {
+            var code = (indicator ?? string.Empty).Trim().ToUpperInvariant();
+            return code switch
+            {
+                "EMA" => true,
+                "DEMA" => true,
+                "TEMA" => true,
+                "TRIX" => true,
+                "T3" => true,
+                "KAMA" => true,
+                "MAMA" => true,
+                _ => false
             };
         }
     }

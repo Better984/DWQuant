@@ -64,6 +64,7 @@ import {
   registerTalibIndicators,
   type TalibIndicatorInputSlot,
   type TalibIndicatorParamDefinition,
+  type TalibRegisteredIndicatorMeta,
 } from "../../lib/registerTalibIndicators";
 import { HttpClient, getToken, subscribeMarket } from "../../network/index.ts";
 import { registerCustomOverlays } from "./customOverlays";
@@ -87,6 +88,14 @@ type MarketChartProps = {
   height?: string | number;
   theme?: "light" | "dark";
   focusRange?: MarketChartFocusRange | null;
+  preferredIndicators?: string[];
+  preferredIndicatorConfigs?: MarketChartPreferredIndicatorConfig[];
+};
+
+type MarketChartPreferredIndicatorConfig = {
+  code: string;
+  params?: number[];
+  input?: string;
 };
 
 export type MarketChartFocusRange = {
@@ -168,10 +177,48 @@ type CrosshairPayload = {
   kLineData?: KLineData | null;
 };
 
+type InternalTimeScaleStore = {
+  getVisibleBarCountLimits?: () => { min: number; max: number };
+  getTotalBarSpace?: () => number;
+  setBarSpace?: (barSpace: number, adjustBeforeFunc?: () => void) => void;
+  getBarSpace?: () => { bar: number };
+  getLastBarRightSideDiffBarCount?: () => number;
+};
+
+type IndexedTimestamp = {
+  dataIndex: number;
+  timestamp: number;
+};
+
+type FocusWindowLayout = {
+  intervalMs: number;
+  holdingBars: number;
+  sidePaddingBars: number;
+  rightPreloadBars: number;
+  totalBars: number;
+  paddedStartTime: number;
+  paddedEndTime: number;
+  preloadEndTime: number;
+};
+
+type LoadedTimestampRange = {
+  minTimestamp: number | null;
+  maxTimestamp: number | null;
+};
+
 const DEFAULT_SYMBOL = "Binance:BTC/USDT";
 const DEFAULT_INTERVAL = "1";
 const HISTORY_PAGE_SIZE = 500;
 const CANDLE_PANE_ID = "candle_pane";
+const FOCUS_INTERVAL_SEQUENCE = ["1", "3", "5", "15", "30", "60", "120", "240", "D", "W"] as const;
+const FOCUS_SIDE_PADDING_RATIO = 0.25;
+const FOCUS_MIN_PADDING_BARS = 20;
+const FOCUS_RIGHT_PRELOAD_RATIO = 3;
+const FOCUS_INITIAL_BACKWARD_SUPPRESS_MS = 1200;
+const FOCUS_DEFAULT_MAX_VISIBLE_BARS = 1000;
+const FOCUS_HISTORY_MAX_BARS = 2000;
+const EMPTY_PREFERRED_INDICATORS: string[] = [];
+const EMPTY_PREFERRED_INDICATOR_CONFIGS: MarketChartPreferredIndicatorConfig[] = [];
 
 const SYMBOL_OPTIONS: SymbolOption[] = [
   { label: "BTC/USDT", value: "Binance:BTC/USDT" },
@@ -445,6 +492,8 @@ const RESOLUTION_ALIASES: Record<string, string> = {
   w: "W",
   "1w": "W",
 };
+const DEFAULT_RISK_TAKE_PROFIT_PCT = 0.04;
+const DEFAULT_RISK_STOP_LOSS_PCT = 0.02;
 
 function parseSymbolName(symbolName: string): { exchange: string; symbol: string } | null {
   if (!symbolName) {
@@ -499,6 +548,176 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function getInternalTimeScaleStore(chart: Chart): InternalTimeScaleStore | null {
+  const chartWithStore = chart as unknown as {
+    _chartStore?: {
+      getTimeScaleStore?: () => InternalTimeScaleStore | null;
+    };
+  };
+  return chartWithStore._chartStore?.getTimeScaleStore?.() ?? null;
+}
+
+function buildTimestampIndexList(dataList: KLineData[]): IndexedTimestamp[] {
+  const indexed: IndexedTimestamp[] = [];
+  for (let i = 0; i < dataList.length; i += 1) {
+    const item = dataList[i];
+    const timestamp = item?.timestamp;
+    if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+      indexed.push({ dataIndex: i, timestamp });
+    }
+  }
+  return indexed;
+}
+
+function findNearestDataIndexByTimestamp(indexed: IndexedTimestamp[], targetTimestamp: number): number | null {
+  if (indexed.length === 0 || !Number.isFinite(targetTimestamp)) {
+    return null;
+  }
+  let left = 0;
+  let right = indexed.length - 1;
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const midTimestamp = indexed[mid].timestamp;
+    if (midTimestamp === targetTimestamp) {
+      return indexed[mid].dataIndex;
+    }
+    if (midTimestamp < targetTimestamp) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+  if (left <= 0) {
+    return indexed[0].dataIndex;
+  }
+  if (left >= indexed.length) {
+    return indexed[indexed.length - 1].dataIndex;
+  }
+  const before = indexed[left - 1];
+  const after = indexed[left];
+  return Math.abs(before.timestamp - targetTimestamp) <= Math.abs(after.timestamp - targetTimestamp)
+    ? before.dataIndex
+    : after.dataIndex;
+}
+
+function buildLoadedTimestampRange(dataList: KLineData[]): LoadedTimestampRange {
+  let minTimestamp: number | null = null;
+  let maxTimestamp: number | null = null;
+  for (const item of dataList) {
+    const timestamp = item?.timestamp;
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+      continue;
+    }
+    if (minTimestamp === null || timestamp < minTimestamp) {
+      minTimestamp = timestamp;
+    }
+    if (maxTimestamp === null || timestamp > maxTimestamp) {
+      maxTimestamp = timestamp;
+    }
+  }
+  return { minTimestamp, maxTimestamp };
+}
+
+function mergeLoadedTimestampRange(current: LoadedTimestampRange, bars: KLineData[]): LoadedTimestampRange {
+  if (bars.length === 0) {
+    return current;
+  }
+  const nextRange = buildLoadedTimestampRange(bars);
+  const minTimestamp =
+    nextRange.minTimestamp === null
+      ? current.minTimestamp
+      : current.minTimestamp === null
+        ? nextRange.minTimestamp
+        : Math.min(current.minTimestamp, nextRange.minTimestamp);
+  const maxTimestamp =
+    nextRange.maxTimestamp === null
+      ? current.maxTimestamp
+      : current.maxTimestamp === null
+        ? nextRange.maxTimestamp
+        : Math.max(current.maxTimestamp, nextRange.maxTimestamp);
+  return { minTimestamp, maxTimestamp };
+}
+
+function buildFocusWindowLayout(startTime: number, endTime: number, resolution: string): FocusWindowLayout | null {
+  const intervalMs = toIntervalMs(resolution);
+  if (intervalMs === null || !Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return null;
+  }
+  const rangeStart = Math.min(startTime, endTime);
+  const rangeEnd = Math.max(startTime, endTime);
+  const durationMs = Math.max(0, rangeEnd - rangeStart);
+  const holdingBars = Math.max(1, Math.ceil(durationMs / intervalMs) + 1);
+  // 左右冗余必须一致：每侧按持仓根数 25% 计算。
+  const sidePaddingBars = Math.max(FOCUS_MIN_PADDING_BARS, Math.ceil(holdingBars * FOCUS_SIDE_PADDING_RATIO));
+  // 焦点初次加载预取右侧更多数据，降低点击后立刻触发右侧补拉的概率。
+  const rightPreloadBars = Math.max(FOCUS_MIN_PADDING_BARS, Math.ceil(sidePaddingBars * FOCUS_RIGHT_PRELOAD_RATIO));
+  return {
+    intervalMs,
+    holdingBars,
+    sidePaddingBars,
+    rightPreloadBars,
+    totalBars: holdingBars + sidePaddingBars * 2,
+    paddedStartTime: Math.max(0, rangeStart - sidePaddingBars * intervalMs),
+    paddedEndTime: rangeEnd + sidePaddingBars * intervalMs,
+    preloadEndTime: rangeEnd + (sidePaddingBars + rightPreloadBars) * intervalMs,
+  };
+}
+
+function centerDataIndexInViewport(
+  chart: Chart,
+  timeScaleStore: InternalTimeScaleStore | null,
+  dataIndex: number,
+  animationDuration = 0
+): void {
+  if (!timeScaleStore || !Number.isFinite(dataIndex)) {
+    return;
+  }
+  const chartData = chart.getDataList();
+  const dataCount = chartData.length;
+  if (dataCount <= 0) {
+    return;
+  }
+  const barSpace = timeScaleStore.getBarSpace?.().bar ?? 0;
+  const totalBarSpace = timeScaleStore.getTotalBarSpace?.() ?? 0;
+  const currentLastDiffBarCount = timeScaleStore.getLastBarRightSideDiffBarCount?.() ?? 0;
+  if (barSpace <= 0 || totalBarSpace <= 0 || !Number.isFinite(currentLastDiffBarCount)) {
+    return;
+  }
+  const clampedIndex = clamp(Math.round(dataIndex), 0, dataCount - 1);
+  const targetDeltaFromRight = totalBarSpace / (2 * barSpace) + 0.5;
+  const targetLastDiffBarCount = targetDeltaFromRight + clampedIndex - dataCount;
+  const distance = (currentLastDiffBarCount - targetLastDiffBarCount) * barSpace;
+  if (!Number.isFinite(distance) || Math.abs(distance) < 0.5) {
+    return;
+  }
+  chart.scrollByDistance(distance, animationDuration);
+}
+
+function pickFocusResolution(
+  baseResolution: string,
+  startTime: number,
+  endTime: number,
+  maxVisibleBars: number
+): { resolution: string; layout: FocusWindowLayout | null } {
+  const normalizedBase = normalizeResolution(baseResolution) ?? DEFAULT_INTERVAL;
+  const baseIndex = Math.max(0, FOCUS_INTERVAL_SEQUENCE.indexOf(normalizedBase as (typeof FOCUS_INTERVAL_SEQUENCE)[number]));
+  let fallbackResolution = normalizedBase;
+  let fallbackLayout: FocusWindowLayout | null = null;
+  for (let i = baseIndex; i < FOCUS_INTERVAL_SEQUENCE.length; i += 1) {
+    const resolution = FOCUS_INTERVAL_SEQUENCE[i];
+    const layout = buildFocusWindowLayout(startTime, endTime, resolution);
+    if (!layout) {
+      continue;
+    }
+    fallbackResolution = resolution;
+    fallbackLayout = layout;
+    if (layout.totalBars <= maxVisibleBars) {
+      return { resolution, layout };
+    }
+  }
+  return { resolution: fallbackResolution, layout: fallbackLayout };
+}
+
 function toFinitePrice(value?: number): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
@@ -506,44 +725,16 @@ function toFinitePrice(value?: number): number | null {
   return value;
 }
 
-function getFocusPriceBand(dataList: KLineData[], focusRange: MarketChartFocusRange): [number, number] {
-  const start = Math.min(focusRange.startTime, focusRange.endTime);
-  const end = Math.max(focusRange.startTime, focusRange.endTime);
+function getDefaultRiskTakeProfitPrice(entryPrice: number, side: "long" | "short"): number {
+  return side === "long"
+    ? entryPrice * (1 + DEFAULT_RISK_TAKE_PROFIT_PCT)
+    : entryPrice * (1 - DEFAULT_RISK_TAKE_PROFIT_PCT);
+}
 
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-
-  for (const item of dataList) {
-    if (item.timestamp < start || item.timestamp > end) {
-      continue;
-    }
-    min = Math.min(min, item.low);
-    max = Math.max(max, item.high);
-  }
-
-  const priceCandidates = [
-    toFinitePrice(focusRange.entryPrice),
-    toFinitePrice(focusRange.exitPrice),
-    toFinitePrice(focusRange.stopLossPrice),
-    toFinitePrice(focusRange.takeProfitPrice),
-  ];
-
-  for (const price of priceCandidates) {
-    if (price === null) {
-      continue;
-    }
-    min = Math.min(min, price);
-    max = Math.max(max, price);
-  }
-
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
-    const fallback = priceCandidates.find((value): value is number => value !== null) ?? 1;
-    const pad = Math.max(fallback * 0.01, 0.5);
-    return [fallback - pad, fallback + pad];
-  }
-
-  const pad = Math.max((max - min) * 0.15, max * 0.003, 0.5);
-  return [min - pad, max + pad];
+function getDefaultRiskStopLossPrice(entryPrice: number, side: "long" | "short"): number {
+  return side === "long"
+    ? entryPrice * (1 - DEFAULT_RISK_STOP_LOSS_PCT)
+    : entryPrice * (1 + DEFAULT_RISK_STOP_LOSS_PCT);
 }
 
 function safeCreateOverlay(chart: Chart, value: Record<string, unknown>): void {
@@ -786,12 +977,194 @@ function createIndicatorTooltipIcons(textColor: string) {
   ];
 }
 
+function normalizePreferredIndicatorCode(value: string): string {
+  return value.trim().replace(/^ta_/i, "").toUpperCase();
+}
+
+type NormalizedPreferredIndicatorConfig = {
+  code: string;
+  params: number[];
+  input?: string;
+};
+
+type ResolvedPreferredIndicators = {
+  main: string[];
+  sub: string[];
+  paramsByKey: Record<string, number[]>;
+  inputMapsByKey: Record<string, IndicatorInputMap>;
+};
+
+function normalizePreferredIndicatorConfig(
+  value: MarketChartPreferredIndicatorConfig | null | undefined
+): NormalizedPreferredIndicatorConfig | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  if (typeof value.code !== "string") {
+    return null;
+  }
+  const code = normalizePreferredIndicatorCode(value.code);
+  if (!code) {
+    return null;
+  }
+  const params = Array.isArray(value.params)
+    ? value.params.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+    : [];
+  const input = typeof value.input === "string" ? value.input.trim() : "";
+  return {
+    code,
+    params,
+    input: input || undefined,
+  };
+}
+
+function shouldReplacePreferredConfig(
+  current: NormalizedPreferredIndicatorConfig,
+  next: NormalizedPreferredIndicatorConfig
+): boolean {
+  const nextHasMoreParams = next.params.length > current.params.length;
+  const nextHasInput = !current.input && Boolean(next.input);
+  return nextHasMoreParams || nextHasInput;
+}
+
+function normalizePreferredIndicatorParams(
+  params: number[] | undefined,
+  paramDefinitions: TalibIndicatorParamDefinition[],
+  defaultParams: number[]
+): number[] | undefined {
+  const normalized = Array.isArray(params)
+    ? params.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+    : [];
+  if (paramDefinitions.length === 0) {
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  const resolved: number[] = [];
+  for (let i = 0; i < paramDefinitions.length; i += 1) {
+    const definition = paramDefinitions[i];
+    const fallback = Number.isFinite(defaultParams[i]) ? Number(defaultParams[i]) : Number(definition.defaultValue);
+    const candidate = Number.isFinite(normalized[i]) ? Number(normalized[i]) : fallback;
+    if (definition.valueType === "integer" || definition.valueType === "matype") {
+      resolved.push(Math.round(candidate));
+    } else {
+      resolved.push(candidate);
+    }
+  }
+  return resolved;
+}
+
+function resolvePreferredIndicators(
+  preferredIndicators: string[],
+  preferredIndicatorConfigs: MarketChartPreferredIndicatorConfig[],
+  catalog: TalibRegisteredIndicatorMeta[]
+): ResolvedPreferredIndicators {
+  const byCode = new Map<string, TalibRegisteredIndicatorMeta>();
+  const byName = new Map<string, TalibRegisteredIndicatorMeta>();
+  for (const item of catalog) {
+    byCode.set(normalizePreferredIndicatorCode(item.code), item);
+    byName.set(item.name.toLowerCase(), item);
+  }
+
+  const configByCode = new Map<string, NormalizedPreferredIndicatorConfig>();
+  for (const rawConfig of preferredIndicatorConfigs) {
+    const normalized = normalizePreferredIndicatorConfig(rawConfig);
+    if (!normalized) {
+      continue;
+    }
+    const existing = configByCode.get(normalized.code);
+    if (!existing || shouldReplacePreferredConfig(existing, normalized)) {
+      configByCode.set(normalized.code, normalized);
+    }
+  }
+
+  const pendingTokens: string[] = [];
+  for (const code of configByCode.keys()) {
+    pendingTokens.push(code);
+  }
+  for (const raw of preferredIndicators) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      continue;
+    }
+    pendingTokens.push(trimmed);
+  }
+
+  const main: string[] = [];
+  const sub: string[] = [];
+  const paramsByKey: Record<string, number[]> = {};
+  const inputMapsByKey: Record<string, IndicatorInputMap> = {};
+  const selected = new Set<string>();
+
+  for (const token of pendingTokens) {
+    const trimmed = token.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const normalizedCode = normalizePreferredIndicatorCode(trimmed);
+    let matched =
+      byName.get(trimmed.toLowerCase()) ??
+      byName.get(`ta_${normalizedCode.toLowerCase()}`) ??
+      byCode.get(normalizedCode);
+    if (!matched && trimmed.toUpperCase().startsWith("TA_")) {
+      matched = byCode.get(normalizedCode);
+    }
+    if (!matched || selected.has(matched.name)) {
+      continue;
+    }
+
+    selected.add(matched.name);
+    const pane: IndicatorPane = matched.pane === "main" ? "main" : "sub";
+    if (pane === "main") {
+      main.push(matched.name);
+    } else {
+      sub.push(matched.name);
+    }
+
+    const indicatorKey = buildIndicatorKey(pane, matched.name);
+    const config = configByCode.get(normalizePreferredIndicatorCode(matched.code));
+    if (!config) {
+      continue;
+    }
+
+    const editorSchema = getTalibIndicatorEditorSchema(matched.name);
+    const nextParams = normalizePreferredIndicatorParams(
+      config.params,
+      editorSchema?.paramDefinitions ?? [],
+      editorSchema?.defaultParams ?? []
+    );
+    if (nextParams && nextParams.length > 0) {
+      paramsByKey[indicatorKey] = nextParams;
+    }
+
+    if (editorSchema && editorSchema.inputSlots.length > 0) {
+      const nextInputMap = normalizeInputMapBySlots(editorSchema.inputSlots, undefined);
+      if (config.input) {
+        const preferredInput = normalizeTalibInputSource(config.input);
+        const firstSlot = editorSchema.inputSlots[0];
+        const isSupported = firstSlot.options.some((option) => option.value === preferredInput);
+        nextInputMap[firstSlot.key] = isSupported ? preferredInput : firstSlot.defaultValue;
+      }
+      if (Object.keys(nextInputMap).length > 0) {
+        inputMapsByKey[indicatorKey] = nextInputMap;
+      }
+    }
+  }
+
+  return { main, sub, paramsByKey, inputMapsByKey };
+}
+
 const MarketChart: React.FC<MarketChartProps> = ({
   symbol,
   interval,
   height = "100%",
   theme = "light",
   focusRange = null,
+  preferredIndicators = EMPTY_PREFERRED_INDICATORS,
+  preferredIndicatorConfigs = EMPTY_PREFERRED_INDICATOR_CONFIGS,
 }) => {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -803,6 +1176,10 @@ const MarketChart: React.FC<MarketChartProps> = ({
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const dataVersionRef = useRef(0);
   const lastBarRef = useRef<KLineData | null>(null);
+  const loadedTimestampRangeRef = useRef<LoadedTimestampRange>({ minTimestamp: null, maxTimestamp: null });
+  const suppressBackwardUntilRef = useRef(0);
+  const focusAutoIntervalHandledIdRef = useRef<string | null>(null);
+  const appliedPreferredIndicatorsKeyRef = useRef<string | null>(null);
   const drawingOverlayIdsRef = useRef<Set<string>>(new Set());
   const subPaneIdMapRef = useRef<Map<string, string>>(new Map());
   const focusOverlayGroupIdRef = useRef<string | null>(null);
@@ -868,6 +1245,23 @@ const MarketChart: React.FC<MarketChartProps> = ({
     }
     return getTalibIndicatorMetaList();
   }, [talibReady]);
+  const preferredIndicatorKey = useMemo(() => {
+    const normalizedCodes = (preferredIndicators ?? [])
+      .map((item) => normalizePreferredIndicatorCode(String(item ?? "")))
+      .filter((item) => item.length > 0);
+    const normalizedConfigs = (preferredIndicatorConfigs ?? [])
+      .map((item) => normalizePreferredIndicatorConfig(item))
+      .filter((item): item is NormalizedPreferredIndicatorConfig => item !== null)
+      .map((item) => {
+        const paramsKey = item.params.map((value) => String(value)).join(",");
+        const inputKey = item.input ? normalizeTalibInputSource(item.input) : "";
+        return `${item.code}:${paramsKey}:${inputKey}`;
+      });
+    if (normalizedCodes.length === 0 && normalizedConfigs.length === 0) {
+      return "";
+    }
+    return [...normalizedCodes, ...normalizedConfigs].join("|");
+  }, [preferredIndicators, preferredIndicatorConfigs]);
 
   const indicatorGroupOptions = useMemo(() => {
     const groups = new Set<string>();
@@ -987,6 +1381,10 @@ const MarketChart: React.FC<MarketChartProps> = ({
 
   useEffect(() => {
     const normalized = normalizeResolution(interval);
+    // 仓位焦点模式允许用户手动切换周期观察，不持续跟随外部 interval 强制回切。
+    if (focusRange) {
+      return;
+    }
     if (normalized && normalized !== activeInterval) {
       setActiveInterval(normalized);
       setSelectedIntervals((prev) => {
@@ -997,13 +1395,40 @@ const MarketChart: React.FC<MarketChartProps> = ({
         return [...prev, normalized];
       });
     }
-  }, [interval, activeInterval]);
+  }, [interval, activeInterval, focusRange]);
 
   useEffect(() => {
     if (theme !== activeTheme) {
       setActiveTheme(theme);
     }
   }, [theme, activeTheme]);
+
+  useEffect(() => {
+    if (!chartReady || !talibReady) {
+      return;
+    }
+    if (!preferredIndicatorKey) {
+      appliedPreferredIndicatorsKeyRef.current = null;
+      return;
+    }
+    if (appliedPreferredIndicatorsKeyRef.current === preferredIndicatorKey) {
+      return;
+    }
+
+    const resolved = resolvePreferredIndicators(preferredIndicators, preferredIndicatorConfigs, indicatorCatalog);
+    if (resolved.main.length === 0 && resolved.sub.length === 0) {
+      appliedPreferredIndicatorsKeyRef.current = preferredIndicatorKey;
+      return;
+    }
+
+    // 进入页面时按策略预设加载指标，并同步参数与输入源，避免回退到默认值。
+    setMainIndicators(resolved.main);
+    setSubIndicators(resolved.sub);
+    setIndicatorParams(resolved.paramsByKey);
+    setIndicatorInputMaps(resolved.inputMapsByKey);
+    setHiddenIndicatorKeys([]);
+    appliedPreferredIndicatorsKeyRef.current = preferredIndicatorKey;
+  }, [chartReady, talibReady, preferredIndicatorKey, preferredIndicators, preferredIndicatorConfigs, indicatorCatalog]);
 
   const symbolOptions = useMemo(() => {
     const map = new Map<string, SymbolOption>();
@@ -1329,6 +1754,20 @@ const MarketChart: React.FC<MarketChartProps> = ({
       return;
     }
 
+    const focusSymbol = focusRange?.chartSymbol?.trim();
+    const isFocusForActiveSymbol = Boolean(focusRange) && (!focusSymbol || focusSymbol === activeSymbol);
+    const isFocusMode = Boolean(focusRange);
+    const focusWindow = isFocusForActiveSymbol && focusRange
+      ? buildFocusWindowLayout(
+          Math.min(focusRange.startTime, focusRange.endTime),
+          Math.max(focusRange.startTime, focusRange.endTime),
+          activeInterval
+        )
+      : null;
+    const focusHistoryCount = focusWindow
+      ? clamp(Math.ceil((focusWindow.totalBars + focusWindow.rightPreloadBars) * 1.1), HISTORY_PAGE_SIZE, FOCUS_HISTORY_MAX_BARS)
+      : HISTORY_PAGE_SIZE;
+
     const version = dataVersionRef.current + 1;
     dataVersionRef.current = version;
 
@@ -1342,6 +1781,8 @@ const MarketChart: React.FC<MarketChartProps> = ({
     lastBarRef.current = null;
     clearFocusOverlays();
     chart.clearData();
+    loadedTimestampRangeRef.current = { minTimestamp: null, maxTimestamp: null };
+    suppressBackwardUntilRef.current = 0;
 
     const loadInitial = async () => {
       try {
@@ -1351,7 +1792,9 @@ const MarketChart: React.FC<MarketChartProps> = ({
           symbol: parsed.symbol,
           timeframe,
           intervalMs,
-          count: HISTORY_PAGE_SIZE,
+          count: focusHistoryCount,
+          startTime: focusWindow?.paddedStartTime,
+          endTime: focusWindow?.preloadEndTime,
           signal: controller.signal,
         });
 
@@ -1360,6 +1803,11 @@ const MarketChart: React.FC<MarketChartProps> = ({
         }
 
         chart.applyNewData(bars, true);
+        loadedTimestampRangeRef.current = buildLoadedTimestampRange(bars);
+        if (isFocusMode) {
+          // 焦点首屏阶段短暂抑制右侧自动补拉，避免首帧空白触发 Backward 后出现回跳。
+          suppressBackwardUntilRef.current = Date.now() + FOCUS_INITIAL_BACKWARD_SUPPRESS_MS;
+        }
         if (bars.length > 0) {
           const lastBar = bars[bars.length - 1];
           lastBarRef.current = lastBar;
@@ -1386,62 +1834,122 @@ const MarketChart: React.FC<MarketChartProps> = ({
         params.callback([], false);
         return;
       }
-      if (params.type !== LoadDataType.Forward) {
-        params.callback([], false);
-        return;
-      }
-      if (!params.data?.timestamp) {
-        params.callback([], false);
-        return;
-      }
-
-      const endTime = params.data.timestamp - intervalMs;
-      if (!Number.isFinite(endTime) || endTime <= 0) {
-        params.callback([], false);
-        return;
-      }
 
       try {
-        const bars = await fetchHistory({
-          http: httpRef.current,
-          exchange: parsed.exchange,
-          symbol: parsed.symbol,
-          timeframe,
-          intervalMs,
-          count: HISTORY_PAGE_SIZE,
-          endTime,
-          signal: controller.signal,
-        });
+        let bars: KLineData[] = [];
+        let responseBars: KLineData[] = [];
+        const ensureLoadedRange = (): LoadedTimestampRange => {
+          const current = loadedTimestampRangeRef.current;
+          if (current.minTimestamp !== null && current.maxTimestamp !== null) {
+            return current;
+          }
+          const fromChart = buildLoadedTimestampRange(chart.getDataList());
+          loadedTimestampRangeRef.current = fromChart;
+          return fromChart;
+        };
+        if (params.type === LoadDataType.Forward) {
+          const loadedRange = ensureLoadedRange();
+          const anchorCandidate = loadedRange.minTimestamp ?? params.data?.timestamp;
+          if (typeof anchorCandidate !== "number" || !Number.isFinite(anchorCandidate)) {
+            params.callback([], false);
+            return;
+          }
+          const anchorTimestamp = anchorCandidate;
+          const endTime = anchorTimestamp - intervalMs;
+          if (!Number.isFinite(endTime) || endTime <= 0) {
+            params.callback([], false);
+            return;
+          }
+          responseBars = await fetchHistory({
+            http: httpRef.current,
+            exchange: parsed.exchange,
+            symbol: parsed.symbol,
+            timeframe,
+            intervalMs,
+            count: HISTORY_PAGE_SIZE,
+            endTime,
+            signal: controller.signal,
+          });
+          bars = responseBars.filter((item) => item.timestamp < anchorTimestamp);
+        } else if (params.type === LoadDataType.Backward) {
+          if (isFocusMode && Date.now() < suppressBackwardUntilRef.current) {
+            params.callback([], true);
+            return;
+          }
+          const loadedRange = ensureLoadedRange();
+          const anchorCandidate = loadedRange.maxTimestamp ?? params.data?.timestamp;
+          if (typeof anchorCandidate !== "number" || !Number.isFinite(anchorCandidate)) {
+            params.callback([], false);
+            return;
+          }
+          const anchorTimestamp = anchorCandidate;
+          const startTime = anchorTimestamp + intervalMs;
+          if (!Number.isFinite(startTime) || startTime <= 0) {
+            params.callback([], false);
+            return;
+          }
+          responseBars = await fetchHistory({
+            http: httpRef.current,
+            exchange: parsed.exchange,
+            symbol: parsed.symbol,
+            timeframe,
+            intervalMs,
+            count: HISTORY_PAGE_SIZE,
+            startTime,
+            signal: controller.signal,
+          });
+          bars = responseBars.filter((item) => item.timestamp > anchorTimestamp);
+        } else {
+          params.callback([], false);
+          return;
+        }
 
         if (disposed || version !== dataVersionRef.current) {
           params.callback([], false);
           return;
         }
 
-        params.callback(bars, bars.length === HISTORY_PAGE_SIZE);
+        if (bars.length > 0) {
+          loadedTimestampRangeRef.current = mergeLoadedTimestampRange(loadedTimestampRangeRef.current, bars);
+          if (params.type === LoadDataType.Backward) {
+            const newestLoadedBar = bars[bars.length - 1];
+            const currentLatestTimestamp = lastBarRef.current?.timestamp ?? Number.NEGATIVE_INFINITY;
+            if (newestLoadedBar.timestamp >= currentLatestTimestamp) {
+              lastBarRef.current = newestLoadedBar;
+              setLatestBar(newestLoadedBar);
+            }
+          }
+        }
+
+        params.callback(bars, responseBars.length >= HISTORY_PAGE_SIZE);
       } catch {
-        params.callback([], false);
+        // 网络抖动不应导致左右分页被永久关闭，保留 more=true 以允许后续继续尝试。
+        params.callback([], true);
       }
     });
 
     unsubscribeRef.current?.();
-    unsubscribeRef.current = subscribeMarket([parsed.symbol], (ticks) => {
-      if (disposed || version !== dataVersionRef.current) {
-        return;
-      }
-      for (const tick of ticks) {
-        if (tick.symbol !== parsed.symbol) {
-          continue;
+    unsubscribeRef.current = null;
+    if (!isFocusMode) {
+      unsubscribeRef.current = subscribeMarket([parsed.symbol], (ticks) => {
+        if (disposed || version !== dataVersionRef.current) {
+          return;
         }
-        const nextBar = updateBar(lastBarRef.current, intervalMs, tick.price, tick.ts);
-        if (!nextBar) {
-          continue;
+        for (const tick of ticks) {
+          if (tick.symbol !== parsed.symbol) {
+            continue;
+          }
+          const nextBar = updateBar(lastBarRef.current, intervalMs, tick.price, tick.ts);
+          if (!nextBar) {
+            continue;
+          }
+          lastBarRef.current = nextBar;
+          loadedTimestampRangeRef.current = mergeLoadedTimestampRange(loadedTimestampRangeRef.current, [nextBar]);
+          chart.updateData(nextBar);
+          setLatestBar(nextBar);
         }
-        lastBarRef.current = nextBar;
-        chart.updateData(nextBar);
-        setLatestBar(nextBar);
-      }
-    });
+      });
+    }
 
     return () => {
       disposed = true;
@@ -1449,7 +1957,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
     };
-  }, [chartReady, activeSymbol, activeInterval, clearFocusOverlays]);
+  }, [chartReady, activeSymbol, activeInterval, clearFocusOverlays, focusRange?.id, focusRange?.chartSymbol, focusRange?.startTime, focusRange?.endTime]);
 
   useEffect(() => {
     if (!chartReady) {
@@ -1462,6 +1970,7 @@ const MarketChart: React.FC<MarketChartProps> = ({
     }
 
     if (!focusRange) {
+      focusAutoIntervalHandledIdRef.current = null;
       clearFocusOverlays();
       return;
     }
@@ -1472,15 +1981,36 @@ const MarketChart: React.FC<MarketChartProps> = ({
       return;
     }
 
-    const targetInterval = normalizeResolution(focusRange.chartInterval);
-    if (targetInterval && targetInterval !== activeInterval) {
-      setActiveInterval(targetInterval);
-      return;
-    }
-
     const startTime = Math.min(focusRange.startTime, focusRange.endTime);
     const endTime = Math.max(focusRange.startTime, focusRange.endTime);
     if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime <= 0 || endTime <= 0) {
+      return;
+    }
+
+    const timeScaleStore = getInternalTimeScaleStore(chart);
+    const visibleBarLimits = timeScaleStore?.getVisibleBarCountLimits?.();
+    const maxVisibleBars =
+      visibleBarLimits && Number.isFinite(visibleBarLimits.max) && visibleBarLimits.max > 0
+        ? visibleBarLimits.max
+        : FOCUS_DEFAULT_MAX_VISIBLE_BARS;
+
+    const focusId = focusRange.id;
+    const isFirstAutoIntervalPass = focusAutoIntervalHandledIdRef.current !== focusId;
+    let focusWindow: FocusWindowLayout | null = buildFocusWindowLayout(startTime, endTime, activeInterval);
+
+    if (isFirstAutoIntervalPass) {
+      // 只在点击“新仓位”时执行一次自动周期选择；之后允许用户手动切换周期观察同一仓位。
+      const preferredInterval = normalizeResolution(focusRange.chartInterval) ?? activeInterval;
+      const focusResolutionSelection = pickFocusResolution(preferredInterval, startTime, endTime, maxVisibleBars);
+      if (focusResolutionSelection.resolution !== activeInterval) {
+        setActiveInterval(focusResolutionSelection.resolution);
+        return;
+      }
+      focusWindow = focusResolutionSelection.layout ?? focusWindow;
+      focusAutoIntervalHandledIdRef.current = focusId;
+    }
+
+    if (!focusWindow) {
       return;
     }
 
@@ -1489,91 +2019,68 @@ const MarketChart: React.FC<MarketChartProps> = ({
     const groupId = `focus-${focusRange.id}-${Date.now()}`;
     focusOverlayGroupIdRef.current = groupId;
 
-    const [minPrice, maxPrice] = getFocusPriceBand(chart.getDataList(), focusRange);
-    const side = focusRange.side?.trim().toLowerCase();
-    const color = side === "long" ? "#16a34a" : side === "short" ? "#dc2626" : "#2563eb";
+    const side = focusRange.side?.trim().toLowerCase() === "short" ? "short" : "long";
+    const overlayName = side === "short" ? "riskRewardShort" : "riskRewardLong";
+    const entryPrice = toFinitePrice(focusRange.entryPrice) ?? toFinitePrice(focusRange.exitPrice);
+    const exitPrice = toFinitePrice(focusRange.exitPrice);
+    const rawStopLossPrice = toFinitePrice(focusRange.stopLossPrice);
+    const rawTakeProfitPrice = toFinitePrice(focusRange.takeProfitPrice);
 
+    if (entryPrice === null) {
+      return;
+    }
+    // API 调用必须提供有效价格，避免 overlay 因 undefined 点位创建失败。
+    const takeProfitPrice = rawTakeProfitPrice ?? getDefaultRiskTakeProfitPrice(entryPrice, side);
+    const stopLossPrice = rawStopLossPrice ?? getDefaultRiskStopLossPrice(entryPrice, side);
+
+    // 仓位聚焦只保留一次 API 绘制：多/空风险收益区间组件。
     safeCreateOverlay(chart, {
-      name: "rect",
+      name: overlayName,
       groupId,
       points: [
-        { timestamp: startTime, value: minPrice },
-        { timestamp: endTime, value: maxPrice },
+        { timestamp: startTime, value: entryPrice },
+        { timestamp: endTime, value: entryPrice },
+        { timestamp: endTime, value: takeProfitPrice },
+        { timestamp: endTime, value: stopLossPrice },
       ],
-      styles: {
-        polygon: {
-          color: `${color}22`,
-          borderColor: color,
-          borderSize: 1,
-          style: "stroke_fill",
-        },
+      extendData: {
+        direction: side,
+        getBars: () => chart.getDataList(),
+        bars: chart.getDataList(),
+        positionEntryTime: startTime,
+        positionExitTime: endTime,
+        positionExitPrice: exitPrice,
+        positionTakeProfitPrice: takeProfitPrice,
+        positionStopLossPrice: stopLossPrice,
       },
     });
 
-    safeCreateOverlay(chart, {
-      name: "verticalStraightLine",
-      groupId,
-      points: [{ timestamp: startTime }],
-      styles: { line: { color, size: 1 } },
-    });
-
-    safeCreateOverlay(chart, {
-      name: "verticalStraightLine",
-      groupId,
-      points: [{ timestamp: endTime }],
-      styles: { line: { color, size: 1 } },
-    });
-
-    const entryPrice = toFinitePrice(focusRange.entryPrice);
-    const exitPrice = toFinitePrice(focusRange.exitPrice);
-    const stopLossPrice = toFinitePrice(focusRange.stopLossPrice);
-    const takeProfitPrice = toFinitePrice(focusRange.takeProfitPrice);
-
-    if (entryPrice !== null) {
-      safeCreateOverlay(chart, {
-        name: "priceLine",
-        groupId,
-        points: [{ value: entryPrice }],
-        extendData: "Entry",
-      });
+    // 自动定位到仓位区间，并保留左右冗余，减少用户手动拖拽操作。
+    const indexedBars = buildTimestampIndexList(chart.getDataList());
+    if (indexedBars.length === 0) {
+      return;
     }
-
-    if (exitPrice !== null) {
-      safeCreateOverlay(chart, {
-        name: "priceLine",
-        groupId,
-        points: [{ value: exitPrice }],
-        extendData: "Exit",
-      });
+    const leftIndex = findNearestDataIndexByTimestamp(indexedBars, focusWindow.paddedStartTime);
+    const rightIndex = findNearestDataIndexByTimestamp(indexedBars, focusWindow.paddedEndTime);
+    if (leftIndex === null || rightIndex === null) {
+      return;
     }
-
-    if (stopLossPrice !== null) {
-      safeCreateOverlay(chart, {
-        name: "priceLine",
-        groupId,
-        points: [{ value: stopLossPrice }],
-        extendData: "SL",
-      });
+    const focusFromIndex = Math.min(leftIndex, rightIndex);
+    const focusToIndex = Math.max(leftIndex, rightIndex);
+    const desiredVisibleBars = Math.max(2, focusToIndex - focusFromIndex + 1);
+    const minVisibleBars =
+      visibleBarLimits && Number.isFinite(visibleBarLimits.min) && visibleBarLimits.min > 0
+        ? visibleBarLimits.min
+        : 2;
+    const targetVisibleBars = clamp(desiredVisibleBars, minVisibleBars, maxVisibleBars);
+    const totalBarSpace = timeScaleStore?.getTotalBarSpace?.() ?? 0;
+    if (totalBarSpace > 0 && typeof timeScaleStore?.setBarSpace === "function") {
+      const targetBarSpace = clamp(totalBarSpace / targetVisibleBars, 1, 50);
+      timeScaleStore.setBarSpace(targetBarSpace);
     }
-
-    if (takeProfitPrice !== null) {
-      safeCreateOverlay(chart, {
-        name: "priceLine",
-        groupId,
-        points: [{ value: takeProfitPrice }],
-        extendData: "TP",
-      });
-    }
-
-    const centerTimestamp = Math.floor((startTime + endTime) / 2);
-    chart.scrollToTimestamp(centerTimestamp, 240);
-
-    const intervalMs = toIntervalMs(activeInterval) ?? 60_000;
-    const targetVisibleBars = clamp(Math.ceil((endTime - startTime) / intervalMs) + 20, 20, 600);
-    const visibleRange = chart.getVisibleRange();
-    const currentVisibleBars = Math.max(1, visibleRange.to - visibleRange.from);
-    const scale = clamp(currentVisibleBars / targetVisibleBars, 0.2, 5);
-    chart.zoomAtTimestamp(scale, centerTimestamp, 240);
+    const centerIndex = Math.floor((focusFromIndex + focusToIndex) / 2);
+    // 焦点定位使用无动画滚动，避免首屏动画过程中触发边界补拉造成视觉回跳。
+    centerDataIndexInViewport(chart, timeScaleStore, centerIndex, 0);
   }, [chartReady, activeInterval, activeSymbol, clearFocusOverlays, focusRange, historyNonce]);
 
   const activeIndicatorChips = useMemo<IndicatorChip[]>(() => {

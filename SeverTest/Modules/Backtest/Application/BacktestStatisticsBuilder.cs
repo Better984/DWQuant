@@ -21,13 +21,14 @@ namespace ServerTest.Modules.Backtest.Application
             IReadOnlyList<BacktestEquityPoint>? equityCurve,
             decimal initialCapital)
         {
-            var tradeCount = trades.Count;
+            var closedTrades = FilterClosedTrades(trades);
+            var tradeCount = closedTrades.Count;
             var totalProfit = 0m;
             var winCount = 0;
             var lossCount = 0;
             var winSum = 0m;
             var lossSum = 0m;
-            foreach (var trade in trades)
+            foreach (var trade in closedTrades)
             {
                 totalProfit += trade.PnL;
                 if (trade.PnL > 0)
@@ -54,19 +55,19 @@ namespace ServerTest.Modules.Backtest.Application
                 : ComputeMaxDrawdown(equityCurve);
 
             // 高级指标
-            var maxConsecutiveLosses = ComputeMaxConsecutiveLosses(trades);
-            var maxConsecutiveWins = ComputeMaxConsecutiveWins(trades);
-            var avgHoldingMs = ComputeAvgHoldingMs(trades);
+            var maxConsecutiveLosses = ComputeMaxConsecutiveLosses(closedTrades);
+            var maxConsecutiveWins = ComputeMaxConsecutiveWins(closedTrades);
+            var avgHoldingMs = ComputeAvgHoldingMs(closedTrades);
             var maxDrawdownDurationMs = equityCurve == null || equityCurve.Count == 0
                 ? 0L
                 : ComputeMaxDrawdownDurationMs(equityCurve);
 
             // 时间跨度（用于年化计算）
-            var durationMs = ComputeTradingDurationMs(trades);
+            var durationMs = ComputeTradingDurationMs(closedTrades);
             var annualizedReturn = ComputeAnnualizedReturn(totalReturn, durationMs);
-            var returnStatistics = ComputeReturnStatistics(trades, equityCurve, initialCapital);
-            var sharpeRatio = ComputeSharpeRatio(trades, returnStatistics);
-            var sortinoRatio = ComputeSortinoRatio(trades, returnStatistics);
+            var returnStatistics = ComputeReturnStatistics(closedTrades, equityCurve, initialCapital);
+            var sharpeRatio = ComputeSharpeRatio(closedTrades, returnStatistics);
+            var sortinoRatio = ComputeSortinoRatio(closedTrades, returnStatistics);
             var calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0m;
 
             return new BacktestStats
@@ -75,7 +76,7 @@ namespace ServerTest.Modules.Backtest.Application
                 TotalReturn = totalReturn,
                 MaxDrawdown = maxDrawdown,
                 WinRate = winRate,
-                TradeCount = tradeCount,
+                TradeCount = closedTrades.Count,
                 AvgProfit = avgProfit,
                 ProfitFactor = profitFactor,
                 AvgWin = avgWin,
@@ -457,6 +458,7 @@ namespace ServerTest.Modules.Backtest.Application
             if (trades.Count == 0)
                 return summary;
 
+            var closedTrades = FilterClosedTrades(trades);
             var winCount = 0;
             var lossCount = 0;
             var maxProfit = 0m;
@@ -467,12 +469,16 @@ namespace ServerTest.Modules.Backtest.Application
 
             foreach (var trade in trades)
             {
+                if (trade.EntryTime > 0 && trade.EntryTime < firstEntry) firstEntry = trade.EntryTime;
+            }
+
+            foreach (var trade in closedTrades)
+            {
                 if (trade.PnL > 0m) winCount++;
                 else if (trade.PnL < 0m) lossCount++;
                 if (trade.PnL > maxProfit) maxProfit = trade.PnL;
                 if (trade.PnL < maxLoss) maxLoss = trade.PnL;
                 totalFee += trade.Fee;
-                if (trade.EntryTime > 0 && trade.EntryTime < firstEntry) firstEntry = trade.EntryTime;
                 if (trade.ExitTime > lastExit) lastExit = trade.ExitTime;
             }
 
@@ -484,6 +490,46 @@ namespace ServerTest.Modules.Backtest.Application
             summary.FirstEntryTime = firstEntry == long.MaxValue ? 0L : firstEntry;
             summary.LastExitTime = lastExit;
             return summary;
+        }
+
+        private static IReadOnlyList<BacktestTrade> FilterClosedTrades(IReadOnlyList<BacktestTrade> trades)
+        {
+            if (trades.Count == 0)
+            {
+                return trades;
+            }
+
+            var closed = new List<BacktestTrade>(trades.Count);
+            foreach (var trade in trades)
+            {
+                if (!IsClosedTrade(trade))
+                {
+                    continue;
+                }
+                closed.Add(trade);
+            }
+            return closed;
+        }
+
+        private static bool IsClosedTrade(BacktestTrade trade)
+        {
+            if (trade == null)
+            {
+                return false;
+            }
+            if (trade.IsOpen)
+            {
+                return false;
+            }
+            if (trade.ExitTime <= 0 || trade.ExitTime < trade.EntryTime)
+            {
+                return false;
+            }
+            if (string.Equals(trade.ExitReason, "Open", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            return true;
         }
 
         /// <summary>

@@ -50,7 +50,6 @@ namespace ServerTest.Modules.Backtest.Application
 
         private readonly Dictionary<string, SymbolState> _states;
         private readonly Dictionary<string, OHLCV> _currentBars;
-
         public BacktestActionExecutor(Dictionary<string, SymbolState> states)
         {
             _states = states ?? throw new ArgumentNullException(nameof(states));
@@ -104,6 +103,25 @@ namespace ServerTest.Modules.Backtest.Application
             }
 
             return TryClosePosition(state, price, timestamp, reason);
+        }
+
+        /// <summary>
+        /// 回测结束时将仍在持仓的仓位标记为“未平仓快照”。
+        /// 不执行强平，不计入已实现平仓盈亏，仅用于结果展示与联动定位。
+        /// </summary>
+        public bool MarkPositionAsOpenAtEnd(string symbol, decimal markPrice, long timestamp)
+        {
+            if (string.IsNullOrWhiteSpace(symbol))
+            {
+                return false;
+            }
+
+            if (!_states.TryGetValue(symbol, out var state))
+            {
+                return false;
+            }
+
+            return TryMarkPositionAsOpenAtEnd(state, markPrice, timestamp);
         }
 
         public (bool Success, StringBuilder Message) Execute(
@@ -298,6 +316,50 @@ namespace ServerTest.Modules.Backtest.Application
                 Timestamp = timestamp,
                 Type = "Close",
                 Message = $"平仓 {position.Side} 价格={price} 原因={reason} 盈亏={pnl:F4}"
+            });
+
+            state.Position = null;
+            return true;
+        }
+
+        private bool TryMarkPositionAsOpenAtEnd(SymbolState state, decimal markPrice, long timestamp)
+        {
+            if (state.Position == null)
+            {
+                return false;
+            }
+
+            if (markPrice <= 0m)
+            {
+                return false;
+            }
+
+            var position = state.Position;
+            var snapshotPnl = CalculatePnl(position, markPrice) - position.EntryFee;
+            state.Trades.Add(new BacktestTrade
+            {
+                Symbol = state.Symbol,
+                Side = position.Side,
+                EntryTime = position.EntryTime,
+                ExitTime = timestamp,
+                EntryPrice = position.EntryPrice,
+                ExitPrice = markPrice,
+                StopLossPrice = position.StopLossPrice,
+                TakeProfitPrice = position.TakeProfitPrice,
+                Qty = position.Qty,
+                ContractSize = position.ContractSize,
+                Fee = position.EntryFee,
+                PnL = snapshotPnl,
+                ExitReason = "Open",
+                IsOpen = true,
+                SlippageBps = state.SlippageBps
+            });
+
+            state.Events.Add(new BacktestEvent
+            {
+                Timestamp = timestamp,
+                Type = "OpenPosition",
+                Message = $"回测结束仍持仓 {position.Side} 标记价={markPrice} 浮动盈亏={snapshotPnl:F4}"
             });
 
             state.Position = null;

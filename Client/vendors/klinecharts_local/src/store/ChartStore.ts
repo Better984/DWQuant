@@ -252,6 +252,10 @@ export default class ChartStore {
         case LoadDataType.Backward: {
           this._dataList = this._dataList.concat(data)
           this._backwardMore = more ?? false
+          if (dataLengthChange > 0) {
+            const lastBarRightSideDiffBarCount = this._timeScaleStore.getLastBarRightSideDiffBarCount()
+            this._timeScaleStore.setLastBarRightSideDiffBarCount(lastBarRightSideDiffBarCount - dataLengthChange)
+          }
           adjustFlag = dataLengthChange > 0
           break
         }

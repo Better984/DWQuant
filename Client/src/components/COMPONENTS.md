@@ -33,7 +33,7 @@
 - **SignIn4**：登录表单页面。
 - **StrategyConfigDialog**：策略配置预览弹窗，支持概览/JSON 切换。
 - **StrategyCurveSparkline**：策略卡片轻量曲线组件（SVG 实现），统一展示 30 日资金曲线与“实盘/回测”来源标签。
-- **StrategyDetailDialog**：策略详情弹窗。
+- **StrategyDetailDialog**：策略详情弹窗；回测“交易明细”点击仓位后，图表仅调用一次 `riskRewardLong/riskRewardShort` API 绘制单个仓位风险收益区间（开/平仓时间、止盈、止损、最终平仓价）。未平仓时间范围展示为“开仓时间（未平仓）”。
 - **StrategyList**：策略列表页，策略状态/发布/同步/移除/删除等操作改为单条记录局部更新，编辑器提交通过 `strategy:changed` 事件的 `skipReload` 标记避免触发全量重拉。
 - **StrategyEditorShell**：策略编辑器壳结构（头部/主体/底部）。
 - **StrategyIndicatorPanel**：已选指标列表与新增指标入口。

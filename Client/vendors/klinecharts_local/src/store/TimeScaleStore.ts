@@ -252,6 +252,31 @@ export default class TimeScaleStore {
     }
   }
 
+  /**
+   * 主图绘制区宽度（像素）。由 Chart 在 resize 时通过 setTotalBarSpace 设置。
+   * 用于在任意适配下计算可见 K 线数量范围。
+   */
+  getTotalBarSpace (): number {
+    return this._totalBarSpace
+  }
+
+  /**
+   * 根据当前绘制区宽度与 barSpace 上下限，返回当前适配下的可见 K 线数量范围。
+   * - min：用户放大到最大时可见的最少根数（barSpace = MAX）。
+   * - max：用户缩小到最小时可见的最多根数（barSpace = MIN）。
+   * 容器尺寸变化后，resize 会更新 _totalBarSpace，再调用本方法即可得到新的范围。
+   */
+  getVisibleBarCountLimits (): { min: number; max: number } {
+    const width = this._totalBarSpace
+    if (width <= 0) {
+      return { min: 0, max: 0 }
+    }
+    return {
+      min: Math.floor(width / BarSpaceLimitConstants.MAX),
+      max: Math.floor(width / BarSpaceLimitConstants.MIN)
+    }
+  }
+
   setBarSpace (barSpace: number, adjustBeforeFunc?: () => void): void {
     if (barSpace < BarSpaceLimitConstants.MIN || barSpace > BarSpaceLimitConstants.MAX || this._barSpace === barSpace) {
       return

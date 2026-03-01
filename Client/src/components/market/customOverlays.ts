@@ -359,10 +359,16 @@ function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fal
         if (!points[1]) {
           points[1] = {};
         }
-        points[1].timestamp = performPoint.timestamp;
-        points[1].dataIndex = performPoint.dataIndex;
-        points[1].value = points[0]?.value;
-        ensureRiskPointsStructure(points, direction, { resetRiskLevels: true });
+        const hasPresetRangeTimestamp = toFiniteNumber(points[1].timestamp) !== null;
+        if (!hasPresetRangeTimestamp) {
+          points[1].timestamp = performPoint.timestamp;
+          points[1].dataIndex = performPoint.dataIndex;
+        }
+        if (toFiniteNumber(points[1].value) === null) {
+          points[1].value = points[0]?.value;
+        }
+        // 兼容 API 直接传入 points 的场景：如果已有区间终点，不要覆盖为起点，避免区间宽度被压成 0。
+        ensureRiskPointsStructure(points, direction, { resetRiskLevels: !hasPresetRangeTimestamp });
         return;
       }
       ensureRiskPointsStructure(points, direction);

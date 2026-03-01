@@ -208,6 +208,11 @@ namespace ServerTest.Modules.Backtest.Domain
         public decimal Fee { get; set; }
         public decimal PnL { get; set; }
         public string ExitReason { get; set; } = string.Empty;
+        /// <summary>
+        /// 是否为未平仓仓位快照（回测结束时仍持仓）。
+        /// true 表示该记录用于展示未平仓状态，不属于已完成平仓交易。
+        /// </summary>
+        public bool IsOpen { get; set; }
         public int SlippageBps { get; set; }
     }
 

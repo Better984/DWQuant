@@ -979,5 +979,6 @@ namespace ServerTest.Modules.StrategyEngine.Domain
             builder.Append(message);
             return (success, builder);
         }
+
     }
 }

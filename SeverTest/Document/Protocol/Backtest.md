@@ -60,12 +60,12 @@
       - `totalCount`
       - `firstTimestamp` / `lastTimestamp`
       - `typeCounts`（按类型统计）
-    - `tradesRaw` string[]（可裁剪，单条交易 JSON 字符串，前端按需解析）
+    - `tradesRaw` string[]（可裁剪，单条交易 JSON 字符串，前端按需解析；交易对象含 `isOpen` 等字段，未平仓快照为 `isOpen=true`）
     - `equityCurveRaw` string[]（可裁剪，单条曲线点 JSON 字符串，前端按需解析）
       - 字段同 `BacktestEquityPoint`：`timestamp` / `equity` / `realizedPnl` / `unrealizedPnl` / `periodRealizedPnl` / `periodUnrealizedPnl`
     - `eventsRaw` string[]（可裁剪，单条事件 JSON 字符串，前端按需解析）
 
-> 说明：回测结束会按最后一根 K 线收盘价强制平仓，便于统计输出。
+> 说明：回测结束不再强制平仓。若仓位到样本结束仍未触发止盈止损，则输出未平仓快照（`isOpen=true`，`exitReason=Open`），用于前端未平仓样式展示。
 > 为避免前端全量反序列化卡顿，交易明细/资金曲线/事件日志改为字符串数组输出，前端仅在需要展示的行进行解析。
 > 服务端执行模型为“时间轴串行 + 同时间点多 symbol 并行”，确保时序正确的同时提升单任务吞吐。
 > 当执行模式为 `batch_open_close` 时，服务端采用“批量开仓检测 + 并行统一平仓”的高速链路，适用于大样本快速回测。
@@ -78,7 +78,7 @@
 | `totalProfit` | decimal | 总收益（交易 PnL 求和，已扣手续费） |
 | `totalReturn` | decimal | 总收益率（TotalProfit / 初始资金） |
 | `maxDrawdown` | decimal | 最大回撤（权益曲线峰值回撤比例） |
-| `winRate` | decimal | 胜率（盈利交易数 / 交易总数） |
+| `winRate` | decimal | 胜率（盈利平仓交易数 / 已完成平仓交易数，未平仓快照不参与） |
 | `tradeCount` | int | 交易次数 |
 | `avgProfit` | decimal | 平均盈亏（TotalProfit / TradeCount） |
 | `profitFactor` | decimal | 盈亏比（盈利总和 / |亏损总和|） |

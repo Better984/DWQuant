@@ -93,7 +93,7 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     _lookback = calculator.GetLookback(_function, _parameters);
                 }
 
-                var requiredBars = Math.Max(_lookback + _maxOffset + 2, 5);
+                var requiredBars = TalibCalcRules.ResolveRequiredBars(Key.Indicator, _lookback, _maxOffset);
                 _series.EnsureCapacity(requiredBars);
 
                 var endTimestamp = calculator.ResolveEndTimestamp(Key.CalcMode, task.CandleTimestamp);

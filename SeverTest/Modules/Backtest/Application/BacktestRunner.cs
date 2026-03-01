@@ -1032,7 +1032,7 @@ namespace ServerTest.Modules.Backtest.Application
                 }
 
                 var lookback = calculator.GetLookback(func, request.Parameters ?? Array.Empty<double>());
-                var requiredBars = Math.Max(5, lookback + request.MaxOffset + 2);
+                var requiredBars = TalibCalcRules.ResolveRequiredBars(request.Key.Indicator, lookback, request.MaxOffset);
 
                 if (!warmup.TryGetValue(request.Key.Timeframe, out var existing) || requiredBars > existing)
                 {
