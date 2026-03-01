@@ -13,6 +13,8 @@ using ServerTest.Middleware;
 using ServerTest.Models;
 using ServerTest.Modules.Accounts.Application;
 using ServerTest.Modules.Accounts.Infrastructure;
+using ServerTest.Modules.AiAssistant.Application;
+using ServerTest.Modules.AiAssistant.Infrastructure;
 using ServerTest.Modules.AdminBroadcast.Application;
 using ServerTest.Modules.AdminBroadcast.Infrastructure;
 using ServerTest.Modules.Backtest.Application;
@@ -195,6 +197,7 @@ static void ConfigureLogging(ILoggingBuilder logging)
 
 static void ConfigureOptions(IServiceCollection services, IConfiguration configuration)
 {
+    services.Configure<AiAssistantOptions>(configuration.GetSection("AiAssistant"));
     services.Configure<HistoricalMarketDataOptions>(configuration.GetSection("HistoricalData"));
     services.Configure<MarketDataQueryOptions>(configuration.GetSection("MarketDataQuery"));
     services.Configure<ConditionCacheOptions>(configuration.GetSection("ConditionCache"));
@@ -213,6 +216,7 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<IndicatorFrameworkOptions>(configuration.GetSection("Indicators"));
     services.Configure<CoinGlassOptions>(configuration.GetSection("CoinGlass"));
 
+    services.AddSingleton<IValidateOptions<AiAssistantOptions>, AiAssistantOptionsValidator>();
     services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
     services.AddSingleton<IValidateOptions<ConditionCacheOptions>, ConditionCacheOptionsValidator>();
     services.AddSingleton<IValidateOptions<MarketDataQueryOptions>, MarketDataQueryOptionsValidator>();
@@ -382,6 +386,19 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<MarketDataEngine>();
     services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
     services.AddSingleton<ExchangePriceService>();
+    services.AddHttpClient<DeepSeekChatClient>((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptions<AiAssistantOptions>>().Value;
+        var baseUrl = string.IsNullOrWhiteSpace(options.BaseUrl)
+            ? "https://api.deepseek.com"
+            : options.BaseUrl.TrimEnd('/');
+
+        client.BaseAddress = new Uri($"{baseUrl}/");
+        client.Timeout = TimeSpan.FromSeconds(Math.Max(5, options.TimeoutSeconds));
+    });
+    services.AddSingleton<AiAssistantChatRepository>();
+    services.AddScoped<AiAssistantService>();
+    services.AddScoped<AiAssistantConversationService>();
     services.AddHttpClient<CoinGlassClient>((sp, client) =>
     {
         var options = sp.GetRequiredService<IOptions<CoinGlassOptions>>().Value;

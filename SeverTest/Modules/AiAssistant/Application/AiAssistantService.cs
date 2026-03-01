@@ -1,0 +1,832 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Linq;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ServerTest.Models.Strategy;
+using ServerTest.Modules.AiAssistant.Domain;
+using ServerTest.Modules.AiAssistant.Infrastructure;
+using ServerTest.Options;
+
+namespace ServerTest.Modules.AiAssistant.Application
+{
+    /// <summary>
+    /// AI 助手应用服务：拼装提示词、调用模型并做结果归一化。
+    /// </summary>
+    public sealed class AiAssistantService
+    {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true
+        };
+
+        private readonly DeepSeekChatClient _deepSeekClient;
+        private readonly AiAssistantOptions _options;
+        private readonly IWebHostEnvironment _environment;
+        private readonly ILogger<AiAssistantService> _logger;
+
+        private readonly SemaphoreSlim _knowledgeLock = new(1, 1);
+        private string? _knowledgeText;
+
+        public AiAssistantService(
+            DeepSeekChatClient deepSeekClient,
+            IOptions<AiAssistantOptions> options,
+            IWebHostEnvironment environment,
+            ILogger<AiAssistantService> logger)
+        {
+            _deepSeekClient = deepSeekClient ?? throw new ArgumentNullException(nameof(deepSeekClient));
+            _options = options?.Value ?? new AiAssistantOptions();
+            _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        public async Task<AiAssistantChatResult> ChatAsync(
+            long uid,
+            string message,
+            IReadOnlyList<AiAssistantHistoryItem>? history,
+            CancellationToken ct)
+        {
+            var userMessage = message?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(userMessage))
+            {
+                throw new InvalidOperationException("消息不能为空");
+            }
+
+            var knowledgeText = await GetKnowledgeTextAsync(ct).ConfigureAwait(false);
+            var prompt = BuildSystemPrompt(knowledgeText);
+
+            var messages = new List<DeepSeekChatMessage>
+            {
+                new()
+                {
+                    Role = "system",
+                    Content = prompt
+                }
+            };
+
+            var historyWindow = (history ?? new List<AiAssistantHistoryItem>())
+                .Where(item => item != null)
+                .ToList();
+            if (_options.MaxHistoryMessages > 0 && historyWindow.Count > _options.MaxHistoryMessages)
+            {
+                historyWindow = historyWindow
+                    .Skip(historyWindow.Count - _options.MaxHistoryMessages)
+                    .ToList();
+            }
+            AppendHistoryMessages(messages, historyWindow);
+
+            messages.Add(new DeepSeekChatMessage
+            {
+                Role = "user",
+                Content = userMessage
+            });
+
+            _logger.LogInformation("AI 助手请求开始: uid={Uid}, 历史条数={HistoryCount}", uid, history?.Count ?? 0);
+            var modelContent = await _deepSeekClient.CreateChatCompletionAsync(messages, ct).ConfigureAwait(false);
+            var parsed = ParseModelOutput(modelContent);
+
+            var result = new AiAssistantChatResult
+            {
+                Reply = string.IsNullOrWhiteSpace(parsed.AssistantReply)
+                    ? "已收到你的需求。"
+                    : parsed.AssistantReply.Trim(),
+                StrategyConfig = NormalizeStrategyConfig(parsed.StrategyConfigRaw, userMessage)
+            };
+
+            _logger.LogInformation(
+                "AI 助手请求完成: uid={Uid}, 是否生成策略={HasConfig}",
+                uid,
+                result.StrategyConfig != null);
+
+            return result;
+        }
+
+        private static void AppendHistoryMessages(
+            List<DeepSeekChatMessage> messages,
+            IReadOnlyList<AiAssistantHistoryItem>? history)
+        {
+            if (history == null || history.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var item in history)
+            {
+                var role = NormalizeRole(item?.Role);
+                if (role == null)
+                {
+                    continue;
+                }
+
+                var text = item?.Text?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                // 历史文本截断，避免单条消息过长导致 token 爆炸。
+                if (text.Length > 1000)
+                {
+                    text = text[..1000];
+                }
+
+                messages.Add(new DeepSeekChatMessage
+                {
+                    Role = role,
+                    Content = text
+                });
+            }
+        }
+
+        private static string? NormalizeRole(string? role)
+        {
+            var raw = role?.Trim().ToLowerInvariant();
+            return raw switch
+            {
+                "user" => "user",
+                "assistant" => "assistant",
+                _ => null
+            };
+        }
+
+        private async Task<string> GetKnowledgeTextAsync(CancellationToken ct)
+        {
+            if (!string.IsNullOrWhiteSpace(_knowledgeText))
+            {
+                return _knowledgeText;
+            }
+
+            await _knowledgeLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_knowledgeText))
+                {
+                    return _knowledgeText;
+                }
+
+                var configuredPath = _options.KnowledgeFilePath?.Trim();
+                string knowledgePath;
+                if (string.IsNullOrWhiteSpace(configuredPath))
+                {
+                    knowledgePath = Path.Combine(_environment.ContentRootPath, "Document", "AI助手知识库.md");
+                }
+                else if (Path.IsPathRooted(configuredPath))
+                {
+                    knowledgePath = configuredPath;
+                }
+                else
+                {
+                    knowledgePath = Path.Combine(_environment.ContentRootPath, configuredPath);
+                }
+
+                if (File.Exists(knowledgePath))
+                {
+                    _knowledgeText = await File.ReadAllTextAsync(knowledgePath, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    _knowledgeText = """
+                    - 你是多维量化平台 AI 助手。
+                    - 需要输出平台可用的策略 JSON 配置，字段遵循 trade / logic / runtime 结构。
+                    - 当用户未要求生成策略时，strategyConfig 返回 null。
+                    """;
+                    _logger.LogWarning("AI 知识库文件不存在，使用内置兜底知识: {Path}", knowledgePath);
+                }
+
+                return _knowledgeText;
+            }
+            finally
+            {
+                _knowledgeLock.Release();
+            }
+        }
+
+        private static string BuildSystemPrompt(string knowledgeText)
+        {
+            return "你是“多维量化”平台的 AI 助手，请始终使用中文。\n\n" +
+                   "以下是平台知识库，请优先遵循：\n" +
+                   knowledgeText +
+                   "\n\n" +
+                   "你必须输出严格 JSON（禁止 markdown 代码块、禁止额外说明），结构如下：\n" +
+                   "{\n" +
+                   "  \"assistantReply\": \"给用户看的中文说明\",\n" +
+                   "  \"strategyConfig\": 对象或 null\n" +
+                   "}\n\n" +
+                   "规则：\n" +
+                   "1. 若用户明确要求“生成策略/配置/JSON”，strategyConfig 必须为对象。\n" +
+                   "2. strategyConfig 需要遵循 trade / logic / runtime 三层结构，并尽量使用平台习惯值：\n" +
+                   "   - exchange: binance | okx | bitget\n" +
+                   "   - symbol: 例如 BTC/USDT\n" +
+                   "   - timeframeSec: 秒，例如 60/300/3600/86400\n" +
+                   "   - positionMode: Cross 或 Isolated\n" +
+                   "   - openConflictPolicy: GiveUp\n" +
+                   "   - logic.entry.long 与 logic.entry.short 必须包含至少一个可执行条件：containers[].checks.groups[].conditions 不能为空\n" +
+                   "   - entry 分支禁止输出 groups: [] 或 conditions: [] 的空条件结构\n" +
+                   "   - 条件 method、indicator、params、output 必须严格匹配知识库白名单与参数顺序\n" +
+                   "   - MakeTrade 动作可使用 args 或 param 传递方向（Long/Short/CloseLong/CloseShort）\n" +
+                   "3. 若用户只是咨询，不要求生成策略，strategyConfig 必须为 null。\n" +
+                   "4. assistantReply 简洁明确，不要超过 220 个中文字符。";
+        }
+
+        private static AiModelOutput ParseModelOutput(string modelContent)
+        {
+            var cleaned = StripCodeFence(modelContent);
+            if (string.IsNullOrWhiteSpace(cleaned))
+            {
+                return new AiModelOutput();
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(cleaned);
+                var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    return new AiModelOutput { AssistantReply = cleaned };
+                }
+
+                var output = new AiModelOutput();
+                if (root.TryGetProperty("assistantReply", out var replyNode) &&
+                    replyNode.ValueKind == JsonValueKind.String)
+                {
+                    output.AssistantReply = replyNode.GetString();
+                }
+
+                if (root.TryGetProperty("strategyConfig", out var configNode) &&
+                    configNode.ValueKind == JsonValueKind.Object)
+                {
+                    output.StrategyConfigRaw = configNode.GetRawText();
+                }
+
+                if (string.IsNullOrWhiteSpace(output.AssistantReply))
+                {
+                    output.AssistantReply = "已生成结果。";
+                }
+
+                return output;
+            }
+            catch (JsonException)
+            {
+                // 模型偶发未按 JSON 返回时，降级为纯文本回复。
+                return new AiModelOutput { AssistantReply = cleaned };
+            }
+        }
+
+        private static string StripCodeFence(string text)
+        {
+            var raw = text?.Trim() ?? string.Empty;
+            if (!raw.StartsWith("```", StringComparison.Ordinal))
+            {
+                return raw;
+            }
+
+            var lines = raw.Split('\n')
+                .Select(line => line.TrimEnd('\r'))
+                .ToList();
+            if (lines.Count == 0)
+            {
+                return raw;
+            }
+
+            if (lines[0].StartsWith("```", StringComparison.Ordinal))
+            {
+                lines.RemoveAt(0);
+            }
+
+            if (lines.Count > 0 && lines[^1].StartsWith("```", StringComparison.Ordinal))
+            {
+                lines.RemoveAt(lines.Count - 1);
+            }
+
+            return string.Join('\n', lines).Trim();
+        }
+
+        private static StrategyConfig? NormalizeStrategyConfig(string? rawConfigJson, string userMessage)
+        {
+            if (string.IsNullOrWhiteSpace(rawConfigJson))
+            {
+                return null;
+            }
+
+            StrategyConfig? parsed;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<StrategyConfig>(rawConfigJson, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            if (parsed == null)
+            {
+                return null;
+            }
+
+            var defaults = BuildDefaultStrategyConfig();
+            parsed.Trade ??= defaults.Trade;
+            parsed.Logic ??= defaults.Logic;
+            parsed.Runtime ??= defaults.Runtime;
+
+            NormalizeTrade(parsed.Trade, defaults.Trade);
+            NormalizeLogic(parsed.Logic, defaults.Logic);
+            NormalizeRuntime(parsed.Runtime, defaults.Runtime);
+            EnsureExecutableLogic(parsed, userMessage);
+            return parsed;
+        }
+
+        private static void NormalizeTrade(TradeConfig trade, TradeConfig defaults)
+        {
+            if (string.IsNullOrWhiteSpace(trade.Exchange))
+            {
+                trade.Exchange = defaults.Exchange;
+            }
+            else
+            {
+                trade.Exchange = trade.Exchange.Trim().ToLowerInvariant();
+            }
+
+            if (string.IsNullOrWhiteSpace(trade.Symbol))
+            {
+                trade.Symbol = defaults.Symbol;
+            }
+            else
+            {
+                trade.Symbol = trade.Symbol.Trim().ToUpperInvariant();
+            }
+
+            if (trade.TimeframeSec <= 0)
+            {
+                trade.TimeframeSec = defaults.TimeframeSec;
+            }
+
+            if (!string.Equals(trade.PositionMode, "Cross", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(trade.PositionMode, "Isolated", StringComparison.OrdinalIgnoreCase))
+            {
+                trade.PositionMode = defaults.PositionMode;
+            }
+            else
+            {
+                trade.PositionMode = char.ToUpperInvariant(trade.PositionMode[0]) +
+                                     trade.PositionMode[1..].ToLowerInvariant();
+            }
+
+            if (string.IsNullOrWhiteSpace(trade.OpenConflictPolicy))
+            {
+                trade.OpenConflictPolicy = defaults.OpenConflictPolicy;
+            }
+
+            trade.Sizing ??= defaults.Sizing;
+            if (trade.Sizing.OrderQty <= 0)
+            {
+                trade.Sizing.OrderQty = defaults.Sizing.OrderQty;
+            }
+            if (trade.Sizing.MaxPositionQty <= 0)
+            {
+                trade.Sizing.MaxPositionQty = defaults.Sizing.MaxPositionQty;
+            }
+            if (trade.Sizing.Leverage <= 0)
+            {
+                trade.Sizing.Leverage = defaults.Sizing.Leverage;
+            }
+
+            trade.Risk ??= defaults.Risk;
+            if (trade.Risk.TakeProfitPct <= 0)
+            {
+                trade.Risk.TakeProfitPct = defaults.Risk.TakeProfitPct;
+            }
+            if (trade.Risk.StopLossPct <= 0)
+            {
+                trade.Risk.StopLossPct = defaults.Risk.StopLossPct;
+            }
+
+            trade.Risk.Trailing ??= defaults.Risk.Trailing;
+            if (trade.Risk.Trailing.ActivationProfitPct <= 0)
+            {
+                trade.Risk.Trailing.ActivationProfitPct = defaults.Risk.Trailing.ActivationProfitPct;
+            }
+            if (trade.Risk.Trailing.CloseOnDrawdownPct <= 0)
+            {
+                trade.Risk.Trailing.CloseOnDrawdownPct = defaults.Risk.Trailing.CloseOnDrawdownPct;
+            }
+        }
+
+        private static void NormalizeLogic(StrategyLogic logic, StrategyLogic defaults)
+        {
+            logic.Entry ??= defaults.Entry;
+            logic.Exit ??= defaults.Exit;
+
+            logic.Entry.Long ??= defaults.Entry.Long;
+            logic.Entry.Short ??= defaults.Entry.Short;
+            logic.Exit.Long ??= defaults.Exit.Long;
+            logic.Exit.Short ??= defaults.Exit.Short;
+
+            NormalizeBranch(logic.Entry.Long, defaults.Entry.Long, "Long");
+            NormalizeBranch(logic.Entry.Short, defaults.Entry.Short, "Short");
+            NormalizeBranch(logic.Exit.Long, defaults.Exit.Long, "CloseLong");
+            NormalizeBranch(logic.Exit.Short, defaults.Exit.Short, "CloseShort");
+        }
+
+        private static void NormalizeBranch(StrategyLogicBranch branch, StrategyLogicBranch defaults, string action)
+        {
+            branch.Containers ??= defaults.Containers;
+            branch.OnPass ??= defaults.OnPass;
+
+            if (branch.Containers.Count == 0)
+            {
+                branch.Containers.Add(new ConditionContainer
+                {
+                    Checks = new ConditionGroupSet
+                    {
+                        Enabled = true,
+                        MinPassGroups = 1,
+                        Groups = new List<ConditionGroup>()
+                    }
+                });
+            }
+
+            foreach (var container in branch.Containers)
+            {
+                container.Checks ??= new ConditionGroupSet
+                {
+                    Enabled = true,
+                    MinPassGroups = 1,
+                    Groups = new List<ConditionGroup>()
+                };
+                container.Checks.Groups ??= new List<ConditionGroup>();
+                if (container.Checks.MinPassGroups <= 0)
+                {
+                    container.Checks.MinPassGroups = 1;
+                }
+            }
+
+            branch.OnPass.Conditions ??= new List<StrategyMethod>();
+            if (branch.OnPass.Conditions.Count == 0)
+            {
+                branch.OnPass.Conditions.Add(BuildActionMethod(action));
+            }
+        }
+
+        /// <summary>
+        /// 对模型输出做最终可执行兜底：避免 checks.groups 为空导致策略永不触发。
+        /// </summary>
+        private static void EnsureExecutableLogic(StrategyConfig config, string userMessage)
+        {
+            if (config.Logic?.Entry == null || config.Logic.Exit == null)
+            {
+                return;
+            }
+
+            if (TryBuildEmaMaCrossRefs(userMessage, out var fastRef, out var slowRef))
+            {
+                EnsureBranchCondition(config.Logic.Entry.Long, "CrossUp", fastRef, slowRef);
+                EnsureBranchCondition(config.Logic.Entry.Short, "CrossDown", fastRef, slowRef);
+                EnsureBranchCondition(config.Logic.Exit.Long, "CrossDown", fastRef, slowRef);
+                EnsureBranchCondition(config.Logic.Exit.Short, "CrossUp", fastRef, slowRef);
+                return;
+            }
+
+            // 无法从用户语义提取指标时，退化为价格与 SMA20 的交叉，确保策略至少可触发。
+            var closeRef = BuildFieldRef("Close");
+            var ma20Ref = BuildIndicatorRef("SMA", 20);
+            EnsureBranchCondition(config.Logic.Entry.Long, "CrossUp", closeRef, ma20Ref);
+            EnsureBranchCondition(config.Logic.Entry.Short, "CrossDown", closeRef, ma20Ref);
+            EnsureBranchCondition(config.Logic.Exit.Long, "CrossDown", closeRef, ma20Ref);
+            EnsureBranchCondition(config.Logic.Exit.Short, "CrossUp", closeRef, ma20Ref);
+        }
+
+        private static bool TryBuildEmaMaCrossRefs(
+            string userMessage,
+            out StrategyValueRef fastRef,
+            out StrategyValueRef slowRef)
+        {
+            fastRef = null!;
+            slowRef = null!;
+
+            var text = (userMessage ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var emaMatch = Regex.Match(text, @"EMA\s*(\d+)", RegexOptions.IgnoreCase);
+            var smaMatch = Regex.Match(text, @"SMA\s*(\d+)", RegexOptions.IgnoreCase);
+            var maMatch = Regex.Match(text, @"(?<!E)MA\s*(\d+)", RegexOptions.IgnoreCase);
+
+            var hasSlow = smaMatch.Success || maMatch.Success;
+            if (!emaMatch.Success || !hasSlow)
+            {
+                return false;
+            }
+
+            if (!int.TryParse(emaMatch.Groups[1].Value, out var emaPeriod) ||
+                !int.TryParse((smaMatch.Success ? smaMatch.Groups[1].Value : maMatch.Groups[1].Value), out var maPeriod))
+            {
+                return false;
+            }
+
+            if (emaPeriod <= 0 || maPeriod <= 0)
+            {
+                return false;
+            }
+
+            fastRef = BuildIndicatorRef("EMA", emaPeriod);
+            slowRef = BuildIndicatorRef("SMA", maPeriod);
+            return true;
+        }
+
+        private static void EnsureBranchCondition(
+            StrategyLogicBranch branch,
+            string method,
+            StrategyValueRef leftRef,
+            StrategyValueRef rightRef)
+        {
+            if (BranchHasExecutableCondition(branch))
+            {
+                return;
+            }
+
+            branch.Containers ??= new List<ConditionContainer>();
+            if (branch.Containers.Count == 0)
+            {
+                branch.Containers.Add(new ConditionContainer
+                {
+                    Checks = new ConditionGroupSet
+                    {
+                        Enabled = true,
+                        MinPassGroups = 1,
+                        Groups = new List<ConditionGroup>()
+                    }
+                });
+            }
+
+            var firstContainer = branch.Containers[0] ?? new ConditionContainer();
+            branch.Containers[0] = firstContainer;
+            firstContainer.Checks ??= new ConditionGroupSet
+            {
+                Enabled = true,
+                MinPassGroups = 1,
+                Groups = new List<ConditionGroup>()
+            };
+            firstContainer.Checks.Groups ??= new List<ConditionGroup>();
+            if (firstContainer.Checks.MinPassGroups <= 0)
+            {
+                firstContainer.Checks.MinPassGroups = 1;
+            }
+
+            var group = new ConditionGroup
+            {
+                Enabled = true,
+                MinPassConditions = 1,
+                Conditions = new List<StrategyMethod>
+                {
+                    BuildCrossMethod(method, leftRef, rightRef)
+                }
+            };
+            firstContainer.Checks.Groups.Add(group);
+        }
+
+        private static bool BranchHasExecutableCondition(StrategyLogicBranch branch)
+        {
+            if (branch?.Containers == null || branch.Containers.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (var container in branch.Containers)
+            {
+                var groups = container?.Checks?.Groups;
+                if (groups == null || groups.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var group in groups)
+                {
+                    var conditions = group?.Conditions;
+                    if (conditions == null || conditions.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    if (conditions.Any(item => item != null && !string.IsNullOrWhiteSpace(item.Method)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static StrategyMethod BuildCrossMethod(string method, StrategyValueRef leftRef, StrategyValueRef rightRef)
+        {
+            return new StrategyMethod
+            {
+                Enabled = true,
+                Required = false,
+                Method = method,
+                Param = Array.Empty<string>(),
+                Args = new List<StrategyValueRef>
+                {
+                    CloneRef(leftRef),
+                    CloneRef(rightRef)
+                }
+            };
+        }
+
+        private static StrategyValueRef BuildFieldRef(string input)
+        {
+            return new StrategyValueRef
+            {
+                RefType = "Field",
+                Input = input,
+                Output = "Value",
+                Params = new List<double>(),
+                OffsetRange = new[] { 0, 0 },
+                CalcMode = "OnBarClose"
+            };
+        }
+
+        private static StrategyValueRef BuildIndicatorRef(string indicator, int period)
+        {
+            return new StrategyValueRef
+            {
+                RefType = "Indicator",
+                Indicator = indicator,
+                Input = "Close",
+                Output = "Real",
+                Params = new List<double> { period },
+                OffsetRange = new[] { 0, 0 },
+                CalcMode = "OnBarClose"
+            };
+        }
+
+        private static StrategyValueRef CloneRef(StrategyValueRef source)
+        {
+            return new StrategyValueRef
+            {
+                RefType = source.RefType,
+                Indicator = source.Indicator,
+                Timeframe = source.Timeframe,
+                Input = source.Input,
+                Params = source.Params?.ToList() ?? new List<double>(),
+                Output = source.Output,
+                OffsetRange = source.OffsetRange?.ToArray() ?? new[] { 0, 0 },
+                CalcMode = source.CalcMode
+            };
+        }
+
+        private static void NormalizeRuntime(StrategyRuntimeConfig runtime, StrategyRuntimeConfig defaults)
+        {
+            var scheduleType = runtime.ScheduleType?.Trim();
+            if (!string.Equals(scheduleType, "Always", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(scheduleType, "Template", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(scheduleType, "Custom", StringComparison.OrdinalIgnoreCase))
+            {
+                runtime.ScheduleType = defaults.ScheduleType;
+            }
+            else
+            {
+                runtime.ScheduleType = scheduleType ?? defaults.ScheduleType;
+            }
+
+            var policy = runtime.OutOfSessionPolicy?.Trim();
+            if (!string.Equals(policy, "BlockEntryAllowExit", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(policy, "BlockAll", StringComparison.OrdinalIgnoreCase))
+            {
+                runtime.OutOfSessionPolicy = defaults.OutOfSessionPolicy;
+            }
+            else
+            {
+                runtime.OutOfSessionPolicy = policy ?? defaults.OutOfSessionPolicy;
+            }
+
+            runtime.TemplateIds ??= new List<string>();
+            runtime.Templates ??= new List<StrategyRuntimeTemplateConfig>();
+            runtime.Custom ??= defaults.Custom;
+
+            if (string.IsNullOrWhiteSpace(runtime.Custom.Mode))
+            {
+                runtime.Custom.Mode = defaults.Custom.Mode;
+            }
+
+            if (string.IsNullOrWhiteSpace(runtime.Custom.Timezone))
+            {
+                runtime.Custom.Timezone = defaults.Custom.Timezone;
+            }
+
+            runtime.Custom.Days ??= new List<string>();
+            runtime.Custom.TimeRanges ??= new List<StrategyRuntimeTimeRange>();
+        }
+
+        private static StrategyConfig BuildDefaultStrategyConfig()
+        {
+            return new StrategyConfig
+            {
+                Trade = new TradeConfig
+                {
+                    Exchange = "bitget",
+                    Symbol = "BTC/USDT",
+                    TimeframeSec = 60,
+                    PositionMode = "Cross",
+                    OpenConflictPolicy = "GiveUp",
+                    Sizing = new TradeSizing
+                    {
+                        OrderQty = 0.001m,
+                        MaxPositionQty = 10m,
+                        Leverage = 20
+                    },
+                    Risk = new TradeRisk
+                    {
+                        TakeProfitPct = 2m,
+                        StopLossPct = 1m,
+                        Trailing = new TradeTrailingStop
+                        {
+                            Enabled = false,
+                            ActivationProfitPct = 1m,
+                            CloseOnDrawdownPct = 0.2m
+                        }
+                    }
+                },
+                Logic = new StrategyLogic
+                {
+                    Entry = new StrategyLogicSide
+                    {
+                        Long = BuildDefaultBranch("Long"),
+                        Short = BuildDefaultBranch("Short")
+                    },
+                    Exit = new StrategyLogicSide
+                    {
+                        Long = BuildDefaultBranch("CloseLong"),
+                        Short = BuildDefaultBranch("CloseShort")
+                    }
+                },
+                Runtime = new StrategyRuntimeConfig
+                {
+                    ScheduleType = "Always",
+                    OutOfSessionPolicy = "BlockEntryAllowExit",
+                    TemplateIds = new List<string>(),
+                    Templates = new List<StrategyRuntimeTemplateConfig>(),
+                    Custom = new StrategyRuntimeCustomConfig
+                    {
+                        Mode = "Deny",
+                        Timezone = "Asia/Shanghai",
+                        Days = new List<string>(),
+                        TimeRanges = new List<StrategyRuntimeTimeRange>()
+                    }
+                }
+            };
+        }
+
+        private static StrategyLogicBranch BuildDefaultBranch(string action)
+        {
+            return new StrategyLogicBranch
+            {
+                Enabled = true,
+                MinPassConditionContainer = 1,
+                Containers = new List<ConditionContainer>
+                {
+                    new()
+                    {
+                        Checks = new ConditionGroupSet
+                        {
+                            Enabled = true,
+                            MinPassGroups = 1,
+                            Groups = new List<ConditionGroup>()
+                        }
+                    }
+                },
+                OnPass = new ActionSet
+                {
+                    Enabled = true,
+                    MinPassConditions = 1,
+                    Conditions = new List<StrategyMethod>
+                    {
+                        BuildActionMethod(action)
+                    }
+                }
+            };
+        }
+
+        private static StrategyMethod BuildActionMethod(string action)
+        {
+            return new StrategyMethod
+            {
+                Enabled = true,
+                Required = false,
+                Method = "MakeTrade",
+                Param = new[] { action },
+                Args = new List<StrategyValueRef>()
+            };
+        }
+
+        private sealed class AiModelOutput
+        {
+            public string? AssistantReply { get; set; }
+            public string? StrategyConfigRaw { get; set; }
+        }
+    }
+}

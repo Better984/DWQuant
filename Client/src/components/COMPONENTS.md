@@ -18,7 +18,7 @@
 - **AlertDialog**：通用提示弹窗，带确认/取消等基础操作。
 - **AuthPage**：登录/认证入口页面容器。
 - **ChangePassword**：修改密码表单页面。
-- **ChatModule**：聊天模块入口与布局。
+- **ChatModule**：AI 助手聊天模块，支持会话新建/切换、历史持久化加载、后端 AI 调用与策略 JSON 回显。
 - **ConditionContainerList**：策略条件容器/条件组/条件项的列表渲染与操作区。
 - **ConditionEditorDialog**：条件编辑弹窗，用于新增/编辑触发条件。
 - **CryptoMarketPanel**：行情面板布局与数据展示容器；行情推送更新采用帧内合并，降低高频 tick 导致的重渲染抖动。
