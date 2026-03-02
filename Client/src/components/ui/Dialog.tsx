@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import './Dialog.css';
 
@@ -52,10 +52,18 @@ const Dialog: React.FC<DialogProps> = ({
   if (!open) return null;
   if (typeof document === 'undefined') return null;
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) {
+  // 记录本次按下是否发生在遮罩层上，避免「在内容区按下、拖到外面松开」误触关闭。
+  const backdropMouseDownRef = useRef(false);
+
+  const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    backdropMouseDownRef.current = e.target === e.currentTarget;
+  };
+
+  const handleBackdropMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (backdropMouseDownRef.current && e.target === e.currentTarget) {
       onClose();
     }
+    backdropMouseDownRef.current = false;
   };
 
   const handleCancel = () => {
@@ -95,7 +103,11 @@ const Dialog: React.FC<DialogProps> = ({
   const Divider = <div className="ui-dialog__divider-line" />;
 
   return createPortal(
-    <div className="ui-dialog-overlay" onClick={handleBackdropClick}>
+    <div
+      className="ui-dialog-overlay"
+      onMouseDown={handleBackdropMouseDown}
+      onMouseUp={handleBackdropMouseUp}
+    >
       <div className={`ui-dialog ui-scrollable ${className}`} onClick={(e) => e.stopPropagation()}>
         {/* 标题区域 */}
         {(title || showCloseButton) && (
