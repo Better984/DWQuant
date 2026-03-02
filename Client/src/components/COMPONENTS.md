@@ -51,6 +51,7 @@
 
 ## UI 子目录（`ui/`）
 通用基础组件：Button、Dialog、Select、SelectItem、SelectCard、TextInput、SearchInput、Slider、Avatar、AvatarGroup、PeopleList、StatusBadge、Notification、NotificationToast 等，统一从 `components/ui` 导出。
+- `Dialog` 遮罩关闭规则：仅当鼠标按下和抬起都发生在遮罩层时触发关闭，避免“在弹窗外释放鼠标”导致误关闭。
 
 ## 全局滚动条样式
 - 可滚动容器统一添加 `ui-scrollable` 类，使用 `index.css` 中定义的全局滚动条样式（4px 宽度、透明轨道、统一拇指颜色与 hover 效果）。

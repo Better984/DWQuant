@@ -29,6 +29,9 @@ const Dialog: React.FC<DialogProps> = ({
   className = '',
   footer,
 }) => {
+  // 用于判断按下是否发生在遮罩层，必须放在条件返回前以保持 Hook 顺序稳定。
+  const backdropMouseDownRef = useRef(false);
+
   // 处理 ESC 键关闭
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -51,9 +54,6 @@ const Dialog: React.FC<DialogProps> = ({
 
   if (!open) return null;
   if (typeof document === 'undefined') return null;
-
-  // 记录本次按下是否发生在遮罩层上，避免「在内容区按下、拖到外面松开」误触关闭。
-  const backdropMouseDownRef = useRef(false);
 
   const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     backdropMouseDownRef.current = e.target === e.currentTarget;
