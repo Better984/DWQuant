@@ -140,6 +140,14 @@
   object-fit: contain;
 }
 
+.whats-on-road-item-country-code {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--text-secondary);
+}
+
 .whats-on-road-item-text {
   display: flex;
   flex-direction: column;
@@ -165,6 +173,24 @@
   font-weight: 400;
   font-size: 12px;
   line-height: 16px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.whats-on-road-item-meta {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.whats-on-road-item-importance {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 15px;
   color: var(--text-secondary);
   margin: 0;
 }

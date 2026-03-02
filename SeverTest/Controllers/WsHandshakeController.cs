@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -46,10 +47,20 @@ namespace ServerTest.Controllers
         public async Task<IActionResult> CheckAsync([FromBody] ProtocolRequest<object?> request)
         {
             var traceId = HttpContext.TraceIdentifier;
+            var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            var system = request?.Data is JsonElement data && data.ValueKind == JsonValueKind.Object && data.TryGetProperty("system", out var systemProp)
+                ? systemProp.GetString()
+                : null;
 
             var token = GetToken(HttpContext);
             if (string.IsNullOrWhiteSpace(token))
             {
+                Logger.LogWarning(
+                    "[websocket 问题排查] 预校验失败：缺少 token | system={System} ip={RemoteIp} reqId={ReqId} traceId={TraceId}",
+                    system,
+                    remoteIp,
+                    request?.ReqId,
+                    traceId);
                 var err = ProtocolEnvelopeFactory.Error(
                     request?.ReqId,
                     ProtocolErrorCodes.Unauthorized,
@@ -62,6 +73,12 @@ namespace ServerTest.Controllers
             var validation = await _tokenService.ValidateTokenAsync(token).ConfigureAwait(false);
             if (!validation.IsValid)
             {
+                Logger.LogWarning(
+                    "[websocket 问题排查] 预校验失败：token 无效 | system={System} ip={RemoteIp} reqId={ReqId} traceId={TraceId}",
+                    system,
+                    remoteIp,
+                    request?.ReqId,
+                    traceId);
                 var err = ProtocolEnvelopeFactory.Error(
                     request?.ReqId,
                     ProtocolErrorCodes.TokenInvalid,
@@ -73,6 +90,12 @@ namespace ServerTest.Controllers
 
             if (string.IsNullOrWhiteSpace(validation.UserId))
             {
+                Logger.LogWarning(
+                    "[websocket 问题排查] 预校验失败：token 缺少 userId | system={System} ip={RemoteIp} reqId={ReqId} traceId={TraceId}",
+                    system,
+                    remoteIp,
+                    request?.ReqId,
+                    traceId);
                 var err = ProtocolEnvelopeFactory.Error(
                     request?.ReqId,
                     ProtocolErrorCodes.Forbidden,
@@ -90,6 +113,14 @@ namespace ServerTest.Controllers
                     userId = validation.UserId
                 },
                 "可以建立 WebSocket 连接",
+                traceId);
+
+            Logger.LogInformation(
+                "[websocket 问题排查] 预校验通过 | userId={UserId} system={System} ip={RemoteIp} reqId={ReqId} traceId={TraceId}",
+                validation.UserId,
+                system,
+                remoteIp,
+                request?.ReqId,
                 traceId);
 
             return Ok(ok);

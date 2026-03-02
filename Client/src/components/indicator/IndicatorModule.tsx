@@ -27,6 +27,7 @@ interface IndicatorCardData {
   description: string;
   note: string;
   chartOption: EChartsOption;
+  chartWrapClassName?: string;
 }
 
 interface FearGreedRuntime {
@@ -34,6 +35,42 @@ interface FearGreedRuntime {
   classification: string;
   stale: boolean;
   sourceTs?: number;
+}
+
+interface EtfFlowRuntime {
+  latestNetFlowUsd: number;
+  stale: boolean;
+  sourceTs?: number;
+  series: Array<{
+    ts: number;
+    netFlowUsd: number;
+  }>;
+}
+
+interface LiquidationCandlestick {
+  ts: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+interface LiquidationHeatmapRuntime {
+  exchange: string;
+  symbol: string;
+  range: string;
+  stale: boolean;
+  sourceTs?: number;
+  yAxis: number[];
+  xAxisTimestamps: number[];
+  points: Array<{
+    xIndex: number;
+    yIndex: number;
+    liquidationUsd: number;
+  }>;
+  candlesticks: LiquidationCandlestick[];
+  currentPrice?: number;
+  maxLiquidationUsd: number;
 }
 
 const createPalette = (isDarkMode: boolean): ChartPalette => ({
@@ -61,9 +98,47 @@ const buildTooltip = (palette: ChartPalette): EChartsOption['tooltip'] => ({
   },
 });
 
+const formatCompactUsd = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return '--';
+  }
+
+  if (Math.abs(value) >= 100_000_000) {
+    return `${(value / 100_000_000).toFixed(2)}亿 USD`;
+  }
+  if (Math.abs(value) >= 10_000) {
+    return `${(value / 10_000).toFixed(2)}万 USD`;
+  }
+
+  return `${value.toFixed(2)} USD`;
+};
+
+const formatHeatmapAxisTime = (ts: number): string => {
+  const date = new Date(ts);
+  const day = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${day} ${time}`;
+};
+
+const LIQUIDATION_BUCKET_COUNT = 100;
+
+const clampNumber = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+
+const formatPriceAxisValue = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return '--';
+  }
+  if (Math.abs(value) >= 1000) {
+    return value.toFixed(0);
+  }
+  return value.toFixed(2);
+};
+
 const buildIndicators = (
   palette: ChartPalette,
   fearGreedRuntime?: FearGreedRuntime | null,
+  etfFlowRuntime?: EtfFlowRuntime | null,
+  liquidationHeatmapRuntime?: LiquidationHeatmapRuntime | null,
 ): IndicatorCardData[] => {
   const categoryAxisStyle = {
     axisLabel: { color: palette.textSecondary, fontSize: 11 },
@@ -87,6 +162,179 @@ const buildIndicators = (
   const fearGreedNote = fearGreedRuntime?.stale
     ? `当前返回的是缓存快照，系统已在后台自动刷新。${fearGreedSourceText}`
     : `常用于判断情绪是否处于极端区间，可作为减仓或反向布局的辅助信号。${fearGreedSourceText}`;
+
+  const etfSeriesFallback = [0.62, 0.48, -0.12, 1.2, 0.86, 0.31, 0.73];
+  const etfSeries = etfFlowRuntime?.series && etfFlowRuntime.series.length > 0
+    ? etfFlowRuntime.series.slice(-7)
+    : null;
+  const etfXAxis = etfSeries
+    ? etfSeries.map((item) => new Date(item.ts).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }))
+    : ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const etfBarValues = etfSeries
+    ? etfSeries.map((item) => Number((item.netFlowUsd / 100_000_000).toFixed(2)))
+    : etfSeriesFallback;
+  const etfLatestFlowUsd = etfFlowRuntime?.latestNetFlowUsd ?? 120_000_000;
+  const etfLatestFlowYi = etfLatestFlowUsd / 100_000_000;
+  const etfSample = etfFlowRuntime
+    ? `实时：${etfLatestFlowYi >= 0 ? '+' : ''}${etfLatestFlowYi.toFixed(2)} 亿 USD / 日${etfFlowRuntime.stale ? ' · 过期缓存' : ''}`
+    : '样例：+1.20 亿 USD / 日';
+  const etfSourceText = etfFlowRuntime?.sourceTs
+    ? `数据时间：${new Date(etfFlowRuntime.sourceTs).toLocaleString('zh-CN', { hour12: false })}`
+    : '数据时间：样例';
+  const etfNote = etfFlowRuntime?.stale
+    ? `当前返回的是缓存快照，系统已在后台自动刷新。${etfSourceText}`
+    : `持续净流入通常代表传统资金加仓比特币，净流出则可能对应情绪降温或获利了结。${etfSourceText}`;
+  const etfBarData = etfBarValues.map((value) => ({
+    value,
+    itemStyle: {
+      color: value >= 0 ? palette.colorSuccess : palette.colorDanger,
+    },
+  }));
+
+  const fallbackHeatmapXAxisLabels = Array.from({ length: 24 }, (_, index) => `${String(index).padStart(2, '0')}:00`);
+  const fallbackHeatmapPriceValues = [62000, 62500, 63000, 63500, 64000, 64500, 65000];
+  const heatmapXAxisLabels = liquidationHeatmapRuntime?.xAxisTimestamps && liquidationHeatmapRuntime.xAxisTimestamps.length > 0
+    ? liquidationHeatmapRuntime.xAxisTimestamps.map((item) => formatHeatmapAxisTime(item))
+    : fallbackHeatmapXAxisLabels;
+  const heatmapPriceValues = liquidationHeatmapRuntime?.yAxis && liquidationHeatmapRuntime.yAxis.length > 0
+    ? liquidationHeatmapRuntime.yAxis
+    : fallbackHeatmapPriceValues;
+  const heatmapYAxisLabels = heatmapPriceValues.map((price) => price.toFixed(2));
+  const heatmapPointPriceData = liquidationHeatmapRuntime?.points && liquidationHeatmapRuntime.points.length > 0
+    ? liquidationHeatmapRuntime.points
+      .filter((point) => (
+        point.xIndex >= 0
+        && point.xIndex < heatmapXAxisLabels.length
+        && point.yIndex >= 0
+        && point.yIndex < heatmapPriceValues.length
+      ))
+      .map((point) => [point.xIndex, heatmapPriceValues[point.yIndex], point.liquidationUsd])
+    : [
+      [2, 62500, 1200000],
+      [8, 63200, 3000000],
+      [12, 63800, 1500000],
+      [15, 64400, 900000],
+    ];
+  const heatmapPointData = heatmapPointPriceData
+    .map((point) => {
+      const xIndex = Number(point[0]);
+      const price = Number(point[1]);
+      const liquidationUsd = Number(point[2]);
+      const yIndex = heatmapPriceValues.findIndex((value) => value === price);
+      if (yIndex < 0) {
+        return null;
+      }
+      return [xIndex, heatmapYAxisLabels[yIndex], liquidationUsd];
+    })
+    .filter((item): item is [number, string, number] => item !== null);
+  const heatmapMaxLiquidationUsd = Math.max(
+    liquidationHeatmapRuntime?.maxLiquidationUsd ?? 0,
+    heatmapPointPriceData.reduce((max, item) => Math.max(max, Number(item[2]) || 0), 0),
+    1,
+  );
+  const heatmapPriceMin = Math.min(...heatmapPriceValues);
+  const heatmapPriceMax = Math.max(...heatmapPriceValues);
+  const heatmapCandlestickData = liquidationHeatmapRuntime?.candlesticks && liquidationHeatmapRuntime.candlesticks.length > 0
+    ? liquidationHeatmapRuntime.candlesticks.map((candle) => [candle.open, candle.close, candle.low, candle.high])
+    : [];
+  const fallbackCurrentPrice = heatmapPriceValues[Math.floor(heatmapPriceValues.length / 2)] ?? 0;
+  const currentPrice = liquidationHeatmapRuntime?.currentPrice ?? fallbackCurrentPrice;
+  const priceSpan = Math.max(heatmapPriceMax - heatmapPriceMin, 1);
+  const bucketStep = priceSpan / LIQUIDATION_BUCKET_COUNT;
+  const bucketTotals = Array.from({ length: LIQUIDATION_BUCKET_COUNT }, () => 0);
+  heatmapPointPriceData.forEach((point) => {
+    const price = Number(point[1]);
+    const liquidationUsd = Number(point[2]);
+    if (!Number.isFinite(price) || !Number.isFinite(liquidationUsd) || liquidationUsd <= 0) {
+      return;
+    }
+
+    const bucketIndex = clampNumber(
+      Math.floor(((price - heatmapPriceMin) / priceSpan) * LIQUIDATION_BUCKET_COUNT),
+      0,
+      LIQUIDATION_BUCKET_COUNT - 1,
+    );
+    bucketTotals[bucketIndex] += liquidationUsd;
+  });
+  const bucketCenters = bucketTotals.map((_, index) => heatmapPriceMin + (index + 0.5) * bucketStep);
+  const bucketRanges = bucketTotals.map((_, index) => {
+    const start = heatmapPriceMin + index * bucketStep;
+    const end = start + bucketStep;
+    return `${formatPriceAxisValue(start)} - ${formatPriceAxisValue(end)}`;
+  });
+  const currentBucketIndex = clampNumber(
+    Math.floor(((currentPrice - heatmapPriceMin) / priceSpan) * LIQUIDATION_BUCKET_COUNT),
+    0,
+    LIQUIDATION_BUCKET_COUNT - 1,
+  );
+  const upperBucketCount = LIQUIDATION_BUCKET_COUNT - currentBucketIndex;
+  const lowerBucketCount = currentBucketIndex;
+  const upperTotalLiquidationUsd = bucketTotals
+    .slice(currentBucketIndex)
+    .reduce((sum, value) => sum + value, 0);
+  const lowerTotalLiquidationUsd = bucketTotals
+    .slice(0, currentBucketIndex)
+    .reduce((sum, value) => sum + value, 0);
+  const upperPain = {
+    bucketIndex: currentBucketIndex,
+    liquidationUsd: 0,
+  };
+  for (let index = currentBucketIndex; index < bucketTotals.length; index += 1) {
+    if (bucketTotals[index] > upperPain.liquidationUsd) {
+      upperPain.bucketIndex = index;
+      upperPain.liquidationUsd = bucketTotals[index];
+    }
+  }
+  const lowerPain = {
+    bucketIndex: Math.max(0, currentBucketIndex - 1),
+    liquidationUsd: 0,
+  };
+  for (let index = 0; index < currentBucketIndex; index += 1) {
+    if (bucketTotals[index] > lowerPain.liquidationUsd) {
+      lowerPain.bucketIndex = index;
+      lowerPain.liquidationUsd = bucketTotals[index];
+    }
+  }
+  const upperCumulative: Array<number | null> = Array.from({ length: LIQUIDATION_BUCKET_COUNT }, () => null);
+  let upperRunningTotal = 0;
+  for (let index = currentBucketIndex; index < bucketTotals.length; index += 1) {
+    upperRunningTotal += bucketTotals[index];
+    upperCumulative[index] = upperRunningTotal;
+  }
+  const lowerCumulative: Array<number | null> = Array.from({ length: LIQUIDATION_BUCKET_COUNT }, () => null);
+  let lowerRunningTotal = 0;
+  for (let index = currentBucketIndex - 1; index >= 0; index -= 1) {
+    lowerRunningTotal += bucketTotals[index];
+    lowerCumulative[index] = lowerRunningTotal;
+  }
+  const profileYAxisLabels = bucketCenters.map((price) => formatPriceAxisValue(price));
+  const profileBarData = bucketTotals.map((value, index) => ({
+    value,
+    itemStyle: {
+      color: index < currentBucketIndex ? 'rgba(239, 68, 68, 0.45)' : 'rgba(34, 197, 94, 0.45)',
+    },
+  }));
+  const profileAxisMax = Math.max(
+    bucketTotals.reduce((max, value) => Math.max(max, value), 0),
+    upperCumulative.reduce<number>((max, value) => Math.max(max, value ?? 0), 0),
+    lowerCumulative.reduce<number>((max, value) => Math.max(max, value ?? 0), 0),
+    1,
+  );
+  const heatmapRangeText = liquidationHeatmapRuntime?.range ?? '3d';
+  const heatmapPairText = liquidationHeatmapRuntime
+    ? `${liquidationHeatmapRuntime.exchange} ${liquidationHeatmapRuntime.symbol}`
+    : 'Binance BTCUSDT';
+  const heatmapSample = liquidationHeatmapRuntime
+    ? `实时：${heatmapPairText} · ${heatmapRangeText} · 当前价 ${formatPriceAxisValue(currentPrice)} · 最大清算 ${formatCompactUsd(heatmapMaxLiquidationUsd)}${liquidationHeatmapRuntime.stale ? ' · 过期缓存' : ''}`
+    : '样例：Binance BTCUSDT · 3d · 最大清算 300.00万 USD';
+  const heatmapSourceText = liquidationHeatmapRuntime?.sourceTs
+    ? `数据时间：${new Date(liquidationHeatmapRuntime.sourceTs).toLocaleString('zh-CN', { hour12: false })}`
+    : '数据时间：样例';
+  const heatmapPainText = `上涨最大痛点：${bucketRanges[upperPain.bucketIndex]}（${formatCompactUsd(upperPain.liquidationUsd)}），下跌最大痛点：${bucketRanges[lowerPain.bucketIndex]}（${formatCompactUsd(lowerPain.liquidationUsd)}）。`;
+  const heatmapOrderbookText = `100 桶订单簿：当前位于第 ${currentBucketIndex + 1} 桶（下方 ${lowerBucketCount} 桶 / 上方 ${upperBucketCount} 桶），下方累计 ${formatCompactUsd(lowerTotalLiquidationUsd)}，上方累计 ${formatCompactUsd(upperTotalLiquidationUsd)}。`;
+  const heatmapNote = liquidationHeatmapRuntime?.stale
+    ? `当前返回的是缓存快照，系统已在后台自动刷新。${heatmapPainText}${heatmapOrderbookText}${heatmapSourceText}`
+    : `黄色方块透明度按区间最小值到最大值线性映射，值越大越接近纯黄色。${heatmapPainText}${heatmapOrderbookText}${heatmapSourceText}`;
 
   return [
     {
@@ -170,16 +418,16 @@ const buildIndicators = (
       id: 'etf-flow',
       name: '比特币现货 ETF 净流入',
       category: '资金流向',
-      sample: '样例：+1.20 亿 USD / 日',
+      sample: etfSample,
       description:
         '统计主流 BTC 现货 ETF 的申赎资金，正值表示资金净流入，负值表示资金净流出。',
-      note: '持续净流入通常代表传统资金加仓比特币，净流出则可能对应情绪降温或获利了结。',
+      note: etfNote,
       chartOption: {
         tooltip: buildTooltip(palette),
         grid: { left: 36, right: 12, top: 28, bottom: 24 },
         xAxis: {
           type: 'category',
-          data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+          data: etfXAxis,
           ...categoryAxisStyle,
         },
         yAxis: {
@@ -192,15 +440,254 @@ const buildIndicators = (
           {
             type: 'bar',
             barWidth: '56%',
-            data: [
-              { value: 0.62, itemStyle: { color: palette.colorPrimary } },
-              { value: 0.48, itemStyle: { color: palette.colorSecondary } },
-              { value: -0.12, itemStyle: { color: palette.colorDanger } },
-              { value: 1.2, itemStyle: { color: palette.colorSuccess } },
-              { value: 0.86, itemStyle: { color: palette.colorPrimary } },
-              { value: 0.31, itemStyle: { color: palette.colorSecondary } },
-              { value: 0.73, itemStyle: { color: palette.colorPrimary } },
-            ],
+            data: etfBarData,
+          },
+        ],
+      },
+    },
+    {
+      id: 'liquidation-heatmap',
+      name: '交易对爆仓热力图（模型1）',
+      category: '风险事件',
+      sample: heatmapSample,
+      description:
+        'X 轴为时间、Y 轴为价格，网格方块亮度（黄色透明度）表示该时间与价格附近的清算强度。',
+      note: heatmapNote,
+      chartWrapClassName: 'indicator-module-chart-wrap--heatmap',
+      chartOption: {
+        animation: false,
+        tooltip: {
+          trigger: 'item',
+          backgroundColor: palette.tooltipBg,
+          borderColor: palette.tooltipBorder,
+          borderWidth: 1,
+          textStyle: { color: palette.textPrimary },
+          formatter: (params: any) => {
+            const seriesName = typeof params?.seriesName === 'string' ? params.seriesName : '';
+            if (seriesName === '清算热力') {
+              const row = Array.isArray(params?.data) ? params.data : [];
+              const xIndex = Number(row[0] ?? 0);
+              const price = Number(row[1] ?? 0);
+              const liquidationUsd = Number(row[2] ?? 0);
+              const timeText = heatmapXAxisLabels[xIndex] ?? '--';
+              return [
+                `时间：${timeText}`,
+                `价格：${Number.isFinite(price) ? formatPriceAxisValue(price) : String(row[1] ?? '--')}`,
+                `清算强度：${formatCompactUsd(liquidationUsd)}`,
+              ].join('<br/>');
+            }
+
+            if (seriesName === 'K线') {
+              const row = Array.isArray(params?.data) ? params.data : [];
+              const timeText = heatmapXAxisLabels[Number(params?.dataIndex ?? 0)] ?? '--';
+              const open = Number(row[0] ?? 0);
+              const close = Number(row[1] ?? 0);
+              const low = Number(row[2] ?? 0);
+              const high = Number(row[3] ?? 0);
+              return [
+                `时间：${timeText}`,
+                `开：${formatPriceAxisValue(open)} · 收：${formatPriceAxisValue(close)}`,
+                `低：${formatPriceAxisValue(low)} · 高：${formatPriceAxisValue(high)}`,
+              ].join('<br/>');
+            }
+
+            const bucketIndex = Number(params?.dataIndex ?? -1);
+            if (bucketIndex < 0 || bucketIndex >= bucketRanges.length) {
+              return '--';
+            }
+
+            const bucketRange = bucketRanges[bucketIndex];
+            if (seriesName === '100桶分布') {
+              const liquidationUsd = Number(params?.data?.value ?? params?.data ?? 0);
+              return [
+                `价格桶：${bucketRange}`,
+                `桶内总清算：${formatCompactUsd(liquidationUsd)}`,
+              ].join('<br/>');
+            }
+
+            if (seriesName === '上方累计' || seriesName === '下方累计') {
+              const cumulativeUsd = Number(params?.data ?? 0);
+              return [
+                `价格桶：${bucketRange}`,
+                `${seriesName}：${formatCompactUsd(cumulativeUsd)}`,
+              ].join('<br/>');
+            }
+
+            return '--';
+          },
+        },
+        grid: [
+          { left: 50, right: '26%', top: 12, bottom: 46 },
+          { left: 50, right: '26%', top: 12, bottom: 46 },
+          { left: '76%', right: 10, top: 12, bottom: 46 },
+        ],
+        xAxis: [
+          {
+            type: 'category',
+            gridIndex: 0,
+            data: heatmapXAxisLabels,
+            axisLabel: {
+              color: palette.textSecondary,
+              fontSize: 10,
+              interval: 'auto',
+              formatter: (value: string) => value.split(' ')[1] ?? value,
+            },
+            axisLine: { lineStyle: { color: palette.axisLine } },
+            axisTick: { show: false },
+            splitArea: { show: false },
+          },
+          {
+            type: 'category',
+            gridIndex: 1,
+            data: heatmapXAxisLabels,
+            show: false,
+          },
+          {
+            type: 'value',
+            gridIndex: 2,
+            min: 0,
+            max: profileAxisMax,
+            axisLabel: {
+              color: palette.textSecondary,
+              fontSize: 9,
+              formatter: (value: number) => formatCompactUsd(value),
+            },
+            axisLine: { lineStyle: { color: palette.axisLine } },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: palette.splitLine } },
+          },
+        ],
+        yAxis: [
+          {
+            type: 'category',
+            gridIndex: 0,
+            data: heatmapYAxisLabels,
+            axisLabel: {
+              color: palette.textSecondary,
+              fontSize: 10,
+              formatter: (value: string) => formatPriceAxisValue(Number(value)),
+            },
+            axisLine: { lineStyle: { color: palette.axisLine } },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: palette.splitLine } },
+          },
+          {
+            type: 'value',
+            gridIndex: 1,
+            min: heatmapPriceMin,
+            max: heatmapPriceMax,
+            scale: true,
+            show: false,
+          },
+          {
+            type: 'category',
+            gridIndex: 2,
+            data: profileYAxisLabels,
+            inverse: true,
+            axisLabel: {
+              color: palette.textSecondary,
+              fontSize: 9,
+              interval: 9,
+            },
+            axisLine: { lineStyle: { color: palette.axisLine } },
+            axisTick: { show: false },
+            splitLine: { show: false },
+          },
+        ],
+        visualMap: {
+          min: 0,
+          max: heatmapMaxLiquidationUsd,
+          dimension: 2,
+          seriesIndex: 0,
+          show: false,
+          calculable: false,
+          inRange: {
+            color: ['rgba(250, 204, 21, 0)', 'rgba(250, 204, 21, 1)'],
+          },
+        },
+        series: [
+          {
+            name: '清算热力',
+            type: 'heatmap',
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            data: heatmapPointData,
+            progressive: 1000,
+            emphasis: {
+              itemStyle: {
+                borderColor: 'rgba(250, 204, 21, 0.75)',
+                borderWidth: 1,
+              },
+            },
+          },
+          {
+            name: 'K线',
+            type: 'candlestick',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: heatmapCandlestickData,
+            itemStyle: {
+              color: '#00E5C0',
+              color0: '#FF5B6E',
+              borderColor: '#00E5C0',
+              borderColor0: '#FF5B6E',
+            },
+            z: 3,
+            emphasis: {
+              itemStyle: {
+                borderWidth: 1.2,
+              },
+            },
+          },
+          {
+            name: '100桶分布',
+            type: 'bar',
+            xAxisIndex: 2,
+            yAxisIndex: 2,
+            data: profileBarData,
+            barWidth: '70%',
+            markLine: {
+              symbol: 'none',
+              silent: true,
+              lineStyle: {
+                width: 1,
+                type: 'dashed',
+                color: 'rgba(250, 204, 21, 0.8)',
+              },
+              label: {
+                color: palette.textSecondary,
+                formatter: '当前价桶',
+              },
+              data: [{ yAxis: profileYAxisLabels[currentBucketIndex] }],
+            },
+          },
+          {
+            name: '上方累计',
+            type: 'line',
+            xAxisIndex: 2,
+            yAxisIndex: 2,
+            data: upperCumulative,
+            showSymbol: false,
+            connectNulls: false,
+            smooth: 0.25,
+            lineStyle: {
+              width: 2,
+              color: '#2DD4BF',
+            },
+          },
+          {
+            name: '下方累计',
+            type: 'line',
+            xAxisIndex: 2,
+            yAxisIndex: 2,
+            data: lowerCumulative,
+            showSymbol: false,
+            connectNulls: false,
+            smooth: 0.25,
+            lineStyle: {
+              width: 2,
+              color: '#F87171',
+            },
           },
         ],
       },
@@ -456,11 +943,13 @@ const IndicatorChart: React.FC<{ option: EChartsOption }> = ({ option }) => {
   const chartRef = useRef<ECharts | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current) {
+    const dom = containerRef.current;
+    if (!dom) {
       return;
     }
 
-    const chart = echarts.init(containerRef.current);
+    // 避免严格模式与热更新下重复初始化同一个 DOM。
+    const chart = echarts.getInstanceByDom(dom) ?? echarts.init(dom);
     chartRef.current = chart;
     chart.setOption(option, true);
 
@@ -468,7 +957,7 @@ const IndicatorChart: React.FC<{ option: EChartsOption }> = ({ option }) => {
     const resizeObserver = new ResizeObserver(() => {
       chart.resize();
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(dom);
 
     return () => {
       resizeObserver.disconnect();
@@ -495,7 +984,7 @@ const IndicatorCard: React.FC<{ indicator: IndicatorCardData }> = ({ indicator }
     </header>
     <p className="indicator-module-card-text">{indicator.description}</p>
     <p className="indicator-module-card-note">{indicator.note}</p>
-    <div className="indicator-module-chart-wrap">
+    <div className={`indicator-module-chart-wrap ${indicator.chartWrapClassName ?? ''}`}>
       <IndicatorChart option={indicator.chartOption} />
     </div>
   </article>
@@ -552,6 +1041,231 @@ const parseFearGreedRuntime = (latest: IndicatorLatestItem): FearGreedRuntime | 
   };
 };
 
+const parseEtfFlowRuntime = (latest: IndicatorLatestItem): EtfFlowRuntime | null => {
+  if (!latest.payload || typeof latest.payload !== 'object') {
+    return null;
+  }
+
+  const payload = latest.payload as Record<string, unknown>;
+  const value = toNumber(payload.netFlowUsd) ?? toNumber(payload.value);
+
+  const seriesRaw = Array.isArray(payload.series)
+    ? payload.series
+    : [];
+  const parsedSeries = seriesRaw
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const point = item as Record<string, unknown>;
+      const ts = toNumber(point.ts) ?? toNumber(point.timestamp) ?? toNumber(point.time);
+      const netFlowUsd = toNumber(point.netFlowUsd) ?? toNumber(point.value) ?? toNumber(point.flowUsd) ?? toNumber(point.flow_usd);
+      if (ts === null || netFlowUsd === null) {
+        return null;
+      }
+
+      return {
+        ts,
+        netFlowUsd,
+      };
+    })
+    .filter((item): item is { ts: number; netFlowUsd: number } => item !== null)
+    .sort((left, right) => left.ts - right.ts);
+
+  const payloadSourceTs = toNumber(payload.sourceTs);
+  const latestPoint = parsedSeries.length > 0 ? parsedSeries[parsedSeries.length - 1] : null;
+  const latestNetFlowUsd = value ?? latestPoint?.netFlowUsd;
+  if (latestNetFlowUsd === null || latestNetFlowUsd === undefined) {
+    return null;
+  }
+
+  const sourceTs = payloadSourceTs ?? latestPoint?.ts ?? latest.sourceTs;
+  const normalizedSeries = parsedSeries.length > 0
+    ? parsedSeries
+    : sourceTs
+      ? [{ ts: sourceTs, netFlowUsd: latestNetFlowUsd }]
+      : [];
+
+  return {
+    latestNetFlowUsd,
+    stale: latest.stale,
+    sourceTs,
+    series: normalizedSeries,
+  };
+};
+
+const toNonEmptyString = (input: unknown): string | null => {
+  if (typeof input !== 'string') {
+    return null;
+  }
+
+  const trimmed = input.trim();
+  return trimmed ? trimmed : null;
+};
+
+const normalizeTimestampMs = (timestamp: number): number => (timestamp < 100_000_000_000 ? timestamp * 1000 : timestamp);
+
+const parseLiquidationCandlestick = (input: unknown): LiquidationCandlestick | null => {
+  if (Array.isArray(input)) {
+    const ts = toNumber(input[0]);
+    const open = toNumber(input[1]);
+    const high = toNumber(input[2]);
+    const low = toNumber(input[3]);
+    const close = toNumber(input[4]);
+    if (ts === null || open === null || high === null || low === null || close === null) {
+      return null;
+    }
+
+    const normalizedHigh = Math.max(high, open, close, low);
+    const normalizedLow = Math.min(low, open, close, high);
+    return {
+      ts: normalizeTimestampMs(ts),
+      open,
+      high: normalizedHigh,
+      low: normalizedLow,
+      close,
+    };
+  }
+
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const row = input as Record<string, unknown>;
+  const ts = toNumber(row.ts) ?? toNumber(row.timestamp) ?? toNumber(row.time);
+  const open = toNumber(row.open) ?? toNumber(row.openPrice) ?? toNumber(row.o);
+  const high = toNumber(row.high) ?? toNumber(row.highPrice) ?? toNumber(row.h);
+  const low = toNumber(row.low) ?? toNumber(row.lowPrice) ?? toNumber(row.l);
+  const close = toNumber(row.close) ?? toNumber(row.closePrice) ?? toNumber(row.c);
+  if (ts === null || open === null || high === null || low === null || close === null) {
+    return null;
+  }
+
+  const normalizedHigh = Math.max(high, open, close, low);
+  const normalizedLow = Math.min(low, open, close, high);
+  return {
+    ts: normalizeTimestampMs(ts),
+    open,
+    high: normalizedHigh,
+    low: normalizedLow,
+    close,
+  };
+};
+
+const parseLiquidationHeatmapRuntime = (latest: IndicatorLatestItem): LiquidationHeatmapRuntime | null => {
+  if (!latest.payload || typeof latest.payload !== 'object') {
+    return null;
+  }
+
+  const payload = latest.payload as Record<string, unknown>;
+  const yAxisRaw = Array.isArray(payload.yAxis)
+    ? payload.yAxis
+    : Array.isArray(payload.y_axis)
+      ? payload.y_axis
+      : [];
+  const yAxis = yAxisRaw
+    .map((item) => toNumber(item))
+    .filter((item): item is number => item !== null);
+
+  const pointsRaw = Array.isArray(payload.liquidationLeverageData)
+    ? payload.liquidationLeverageData
+    : Array.isArray(payload.liquidation_leverage_data)
+      ? payload.liquidation_leverage_data
+      : [];
+  const points = pointsRaw
+    .map((item) => {
+      if (Array.isArray(item)) {
+        const xIndex = toNumber(item[0]);
+        const yIndex = toNumber(item[1]);
+        const liquidationUsd = toNumber(item[2]);
+        if (xIndex === null || yIndex === null || liquidationUsd === null) {
+          return null;
+        }
+
+        return {
+          xIndex,
+          yIndex,
+          liquidationUsd,
+        };
+      }
+
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const row = item as Record<string, unknown>;
+      const xIndex = toNumber(row.xIndex) ?? toNumber(row.x_index) ?? toNumber(row.x);
+      const yIndex = toNumber(row.yIndex) ?? toNumber(row.y_index) ?? toNumber(row.y);
+      const liquidationUsd = toNumber(row.liquidationUsd) ?? toNumber(row.liquidation_usd) ?? toNumber(row.value);
+      if (xIndex === null || yIndex === null || liquidationUsd === null) {
+        return null;
+      }
+
+      return {
+        xIndex,
+        yIndex,
+        liquidationUsd,
+      };
+    })
+    .filter((item): item is { xIndex: number; yIndex: number; liquidationUsd: number } => item !== null)
+    .map((item) => ({
+      xIndex: Math.floor(item.xIndex),
+      yIndex: Math.floor(item.yIndex),
+      liquidationUsd: item.liquidationUsd,
+    }))
+    .filter((item) => item.xIndex >= 0 && item.yIndex >= 0 && item.liquidationUsd >= 0);
+
+  if (yAxis.length === 0 || points.length === 0) {
+    return null;
+  }
+
+  const candlesticksRaw = Array.isArray(payload.priceCandlesticks)
+    ? payload.priceCandlesticks
+    : Array.isArray(payload.price_candlesticks)
+      ? payload.price_candlesticks
+      : [];
+  const candlesticks = candlesticksRaw
+    .map((item) => parseLiquidationCandlestick(item))
+    .filter((item): item is LiquidationCandlestick => item !== null);
+
+  const xAxisTimestamps = candlesticks.map((item) => item.ts);
+  const maxXIndex = points.reduce((max, item) => Math.max(max, item.xIndex), 0);
+  const payloadSourceTs = toNumber(payload.sourceTs);
+  if (xAxisTimestamps.length === 0) {
+    const fallbackSourceTs = payloadSourceTs ?? latest.sourceTs ?? Date.now();
+    const rebuilt = Array.from({ length: maxXIndex + 1 }, (_, index) => fallbackSourceTs - (maxXIndex - index) * 60_000);
+    xAxisTimestamps.push(...rebuilt);
+  } else if (xAxisTimestamps.length <= maxXIndex) {
+    const diff = xAxisTimestamps.length > 1
+      ? Math.abs(xAxisTimestamps[xAxisTimestamps.length - 1] - xAxisTimestamps[xAxisTimestamps.length - 2])
+      : 60_000;
+    const stepMs = diff > 0 ? diff : 60_000;
+    while (xAxisTimestamps.length <= maxXIndex) {
+      const previous = xAxisTimestamps[xAxisTimestamps.length - 1];
+      xAxisTimestamps.push(previous + stepMs);
+    }
+  }
+
+  const maxLiquidationUsd = points.reduce((max, item) => Math.max(max, item.liquidationUsd), 0);
+  const sourceTs = payloadSourceTs ?? latest.sourceTs ?? xAxisTimestamps[xAxisTimestamps.length - 1];
+  const currentPrice = candlesticks.length > 0 ? candlesticks[candlesticks.length - 1].close : undefined;
+
+  return {
+    exchange: toNonEmptyString(payload.exchange) ?? 'Binance',
+    symbol: toNonEmptyString(payload.symbol) ?? 'BTCUSDT',
+    range: toNonEmptyString(payload.range) ?? '3d',
+    stale: latest.stale,
+    sourceTs,
+    yAxis,
+    xAxisTimestamps,
+    points,
+    candlesticks,
+    currentPrice,
+    maxLiquidationUsd,
+  };
+};
+
 type IndicatorModuleProps = {
   focusIndicatorId?: string;
   onFocusHandled?: () => void;
@@ -562,6 +1276,8 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
     document.documentElement.classList.contains('dark-theme'),
   );
   const [fearGreedRuntime, setFearGreedRuntime] = useState<FearGreedRuntime | null>(null);
+  const [etfFlowRuntime, setEtfFlowRuntime] = useState<EtfFlowRuntime | null>(null);
+  const [liquidationHeatmapRuntime, setLiquidationHeatmapRuntime] = useState<LiquidationHeatmapRuntime | null>(null);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -579,26 +1295,49 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
   }, []);
 
   const palette = useMemo(() => createPalette(isDarkMode), [isDarkMode]);
-  const indicators = useMemo(() => buildIndicators(palette, fearGreedRuntime), [palette, fearGreedRuntime]);
+  const indicators = useMemo(
+    () => buildIndicators(palette, fearGreedRuntime, etfFlowRuntime, liquidationHeatmapRuntime),
+    [palette, fearGreedRuntime, etfFlowRuntime, liquidationHeatmapRuntime],
+  );
 
   useEffect(() => {
     let disposed = false;
 
-    const loadFearGreed = async () => {
-      try {
-        const latest = await getIndicatorLatest('coinglass.fear_greed', undefined, { allowStale: true });
-        const runtime = parseFearGreedRuntime(latest);
-        if (!disposed && runtime) {
+    const loadIndicatorRuntime = async () => {
+      const [fearGreedResult, etfFlowResult, liquidationHeatmapResult] = await Promise.allSettled([
+        getIndicatorLatest('coinglass.fear_greed', undefined, { allowStale: true }),
+        getIndicatorLatest('coinglass.etf_flow', undefined, { allowStale: true }),
+        getIndicatorLatest('coinglass.liquidation_heatmap_model1', undefined, { allowStale: true }),
+      ]);
+      if (disposed) {
+        return;
+      }
+
+      if (fearGreedResult.status === 'fulfilled') {
+        const runtime = parseFearGreedRuntime(fearGreedResult.value);
+        if (runtime) {
           setFearGreedRuntime(runtime);
         }
-      } catch {
-        // 接口失败时保留静态兜底数据，避免页面闪断。
+      }
+
+      if (etfFlowResult.status === 'fulfilled') {
+        const runtime = parseEtfFlowRuntime(etfFlowResult.value);
+        if (runtime) {
+          setEtfFlowRuntime(runtime);
+        }
+      }
+
+      if (liquidationHeatmapResult.status === 'fulfilled') {
+        const runtime = parseLiquidationHeatmapRuntime(liquidationHeatmapResult.value);
+        if (runtime) {
+          setLiquidationHeatmapRuntime(runtime);
+        }
       }
     };
 
-    void loadFearGreed();
+    void loadIndicatorRuntime();
     const timer = window.setInterval(() => {
-      void loadFearGreed();
+      void loadIndicatorRuntime();
     }, 60_000);
 
     return () => {

@@ -1,12 +1,19 @@
+/* 整块容器：固定高度填满主内容区，上下与主内容 padding 一致，禁止外层滚动 */
 .discover-module-container {
   width: 100%;
+  height: calc(100vh - var(--header-height, 72px) - 24px - 24px); /* header + main padding top/bottom */
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .discover-layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -26,9 +33,74 @@
   color: var(--text-primary, #111827);
 }
 
-/* 新闻列表（左侧 2/3） */
+.discover-empty-tip {
+  padding: 12px 8px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.discover-empty-tip--error {
+  color: #dc2626;
+}
+
+.discover-list-actions {
+  padding: 10px 6px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.discover-list-more-btn {
+  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.6));
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-secondary, #6b7280);
+  border-radius: 999px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.discover-list-more-btn:hover:not(:disabled) {
+  color: var(--text-primary, #111827);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.discover-list-more-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.discover-inline-error {
+  margin-top: 6px;
+  padding: 0 8px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  color: #dc2626;
+}
+
+/* 新闻列表（左侧 2/3）：占满列高，仅内部列表可滚动 */
 .discover-news-section {
   padding: 4px 4px 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.discover-news-section .discover-section-title,
+.discover-news-section .discover-list-actions {
+  flex-shrink: 0;
+}
+
+.discover-news-list-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .discover-news-list {
@@ -127,11 +199,13 @@
   background: rgba(148, 163, 184, 0.08);
 }
 
-/* 右侧列（1/3）：恐慌&贪婪 + 快讯 */
+/* 右侧列（1/3）：恐慌&贪婪（定高）+ 快讯（可滚动） */
 .discover-right-column {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .discover-fg-card,
@@ -145,6 +219,20 @@
 
 .discover-fg-card {
   padding-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.discover-flash-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.discover-flash-card .discover-section-title-row,
+.discover-flash-card .discover-list-actions {
+  flex-shrink: 0;
 }
 
 /* 恐慌&贪婪指数：与指标中心一致的 ECharts 仪表盘 */
@@ -179,8 +267,11 @@
   color: var(--text-primary, #111827);
 }
 
-/* 快讯列表（右侧下半部分） */
+/* 快讯列表（右侧下半部分）：仅此区域可滚动 */
 .discover-flash-section {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0 0 2px;
 }
 
@@ -311,6 +402,22 @@
 .dark-theme .discover-fg-card,
 .dark-theme .discover-flash-card {
   background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+}
+
+.dark-theme .discover-list-more-btn {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #9ca3af);
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+.dark-theme .discover-list-more-btn:hover:not(:disabled) {
+  color: var(--text-primary, #e5e7eb);
+  border-color: rgba(147, 197, 253, 0.5);
+}
+
+.dark-theme .discover-empty-tip--error,
+.dark-theme .discover-inline-error {
+  color: #f87171;
 }
 
 @media (max-width: 640px) {

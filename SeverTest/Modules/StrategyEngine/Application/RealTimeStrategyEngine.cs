@@ -413,11 +413,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (!pass)
             {
-                _logger.LogDebug(
-                    "筛选器未通过: {Uid} {Stage} 时间={Time}",
-                    context.Strategy.UidCode,
-                    stageLabel,
-                    FormatTimestamp(context.Task.CandleTimestamp));
+                // _logger.LogDebug(
+                //     "筛选器未通过: {Uid} {Stage} 时间={Time}",
+                //     context.Strategy.UidCode,
+                //     stageLabel,
+                //     FormatTimestamp(context.Task.CandleTimestamp));
             }
 
             return pass;
@@ -480,48 +480,48 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                 var checkResults = new List<ConditionEvaluationResult>();
                 var stageLabel = $"{stage}[{i}]";
-                _logger.LogDebug(
-                    "策略检查开始: {Uid} {Stage} 时间={Time}",
-                    context.Strategy.UidCode,
-                    stageLabel,
-                    FormatTimestamp(context.Task.CandleTimestamp));
+                // _logger.LogDebug(
+                //     "策略检查开始: {Uid} {Stage} 时间={Time}",
+                //     context.Strategy.UidCode,
+                //     stageLabel,
+                //     FormatTimestamp(context.Task.CandleTimestamp));
 
                 if (!EvaluateChecks(context, container.Checks, checkResults, stageLabel, metrics))
                 {
-                    _logger.LogDebug(
-                        "策略检查失败: {Uid} {Stage} 时间={Time}",
-                        context.Strategy.UidCode,
-                        stageLabel,
-                        FormatTimestamp(context.Task.CandleTimestamp));
+                    // _logger.LogDebug(
+                    //     "策略检查失败: {Uid} {Stage} 时间={Time}",
+                    //     context.Strategy.UidCode,
+                    //     stageLabel,
+                    //     FormatTimestamp(context.Task.CandleTimestamp));
                     continue;
                 }
 
                 passCount++;
                 aggregatedResults.AddRange(checkResults);
 
-                _logger.LogDebug(
-                    "策略检查通过: {Uid} {Stage} 时间={Time}",
-                    context.Strategy.UidCode,
-                    stageLabel,
-                    FormatTimestamp(context.Task.CandleTimestamp));
+                // _logger.LogDebug(
+                //     "策略检查通过: {Uid} {Stage} 时间={Time}",
+                //     context.Strategy.UidCode,
+                //     stageLabel,
+                //     FormatTimestamp(context.Task.CandleTimestamp));
             }
 
             if (passCount < branch.MinPassConditionContainer)
             {
-                _logger.LogDebug(
-                    "策略容器数量不足: {Uid} {Stage} 需要={Need} 通过={Pass}",
-                    context.Strategy.UidCode,
-                    stage,
-                    branch.MinPassConditionContainer,
-                    passCount);
+                // _logger.LogDebug(
+                //     "策略容器数量不足: {Uid} {Stage} 需要={Need} 通过={Pass}",
+                //     context.Strategy.UidCode,
+                //     stage,
+                //     branch.MinPassConditionContainer,
+                //     passCount);
                 return;
             }
 
-            _logger.LogDebug(
-                "策略检查通过，执行动作: {Uid} {Stage} 时间={Time}",
-                context.Strategy.UidCode,
-                stage,
-                FormatTimestamp(context.Task.CandleTimestamp));
+            // _logger.LogDebug(
+            //     "策略检查通过，执行动作: {Uid} {Stage} 时间={Time}",
+            //     context.Strategy.UidCode,
+            //     stage,
+            //     FormatTimestamp(context.Task.CandleTimestamp));
 
             ExecuteActions(context, branch.OnPass, aggregatedResults, stage, metrics);
         }
@@ -648,15 +648,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     var result = _conditionEvaluator.Evaluate(context, condition);
                     metrics?.IncrementConditionEval();
                     results.Add(result);
-                    _logger.LogDebug(
-                        "条件检查: {Uid} {Stage} 组{Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
-                        context.Strategy.UidCode,
-                        stage,
-                        groupIndex,
-                        condition.Method,
-                        condition.Required,
-                        result.Success,
-                        result.Message);
+                    // _logger.LogDebug(
+                    //     "条件检查: {Uid} {Stage} 组{Group} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
+                    //     context.Strategy.UidCode,
+                    //     stage,
+                    //     groupIndex,
+                    //     condition.Method,
+                    //     condition.Required,
+                    //     result.Success,
+                    //     result.Message);
 
                     if (context.Strategy.State == StrategyState.Testing && _testCheckLogRepository != null)
                     {
@@ -666,12 +666,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                     if (isRequired && !result.Success)
                     {
-                        _logger.LogDebug(
-                            "必需条件失败: {Uid} {Stage} 组{Group} 方法={Method}",
-                            context.Strategy.UidCode,
-                            stage,
-                            groupIndex,
-                            condition.Method);
+                        // _logger.LogDebug(
+                        //     "必需条件失败: {Uid} {Stage} 组{Group} 方法={Method}",
+                        //     context.Strategy.UidCode,
+                        //     stage,
+                        //     groupIndex,
+                        //     condition.Method);
                         requiredFailed = true;
                         return false;
                     }
@@ -735,13 +735,13 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 var pass = optionalPassCount >= group.MinPassConditions;
                 if (!pass)
                 {
-                    _logger.LogDebug(
-                        "条件组数量不足: {Uid} {Stage} 组{Group} 需要{Need} 通过={Pass}",
-                        context.Strategy.UidCode,
-                        stage,
-                        groupIndex,
-                        group.MinPassConditions,
-                        optionalPassCount);
+                    // _logger.LogDebug(
+                    //     "条件组数量不足: {Uid} {Stage} 组{Group} 需要{Need} 通过={Pass}",
+                    //     context.Strategy.UidCode,
+                    //     stage,
+                    //     groupIndex,
+                    //     group.MinPassConditions,
+                    //     optionalPassCount);
                 }
                 else
                 {
@@ -777,14 +777,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 metrics?.IncrementActionExec();
                 hasEnabled = true;
                 var result = ActionMethodRegistry.Run(context, action, triggerResults);
-                _logger.LogDebug(
-                    "动作执行: {Uid} {Stage} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
-                    context.Strategy.UidCode,
-                    stage,
-                    action.Method,
-                    action.Required,
-                    result.Success,
-                    result.Message.ToString());
+                // _logger.LogDebug(
+                //     "动作执行: {Uid} {Stage} 方法={Method} 必需={Required} 结果={Result} 消息={Msg}",
+                //     context.Strategy.UidCode,
+                //     stage,
+                //     action.Method,
+                //     action.Required,
+                //     result.Success,
+                //     result.Message.ToString());
 
                 if (result.Success && IsOpenAction(action))
                 {
@@ -794,11 +794,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
                 if (action.Required && !result.Success)
                 {
-                    _logger.LogDebug(
-                        "动作失败（必需）: {Uid} {Stage} 方法={Method}",
-                        context.Strategy.UidCode,
-                        stage,
-                        action.Method);
+                    // _logger.LogDebug(
+                    //     "动作失败（必需）: {Uid} {Stage} 方法={Method}",
+                    //     context.Strategy.UidCode,
+                    //     stage,
+                    //     action.Method);
                     return;
                 }
 
@@ -815,12 +815,12 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (optionalSuccessCount < actions.MinPassConditions)
             {
-                _logger.LogDebug(
-                    "动作最小通过数未达到: {Uid} {Stage} 需要={Need} 通过={Pass}",
-                    context.Strategy.UidCode,
-                    stage,
-                    actions.MinPassConditions,
-                    optionalSuccessCount);
+                // _logger.LogDebug(
+                //     "动作最小通过数未达到: {Uid} {Stage} 需要={Need} 通过={Pass}",
+                //     context.Strategy.UidCode,
+                //     stage,
+                //     actions.MinPassConditions,
+                //     optionalSuccessCount);
             }
         }
 
@@ -1093,14 +1093,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
             var normalizedTask = new MarketDataTask(exchange, symbol, timeframe, task.CandleTimestamp, task.IsBarClose);
             var indicatorTask = new IndicatorTask(normalizedTask, requestMap.Values.ToList());
             var result = _indicatorEngine.ProcessTaskNow(indicatorTask);
-            _logger.LogDebug(
-                "指标刷新: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Total}",
-                normalizedTask.Exchange,
-                normalizedTask.Symbol,
-                normalizedTask.Timeframe,
-                FormatTimestamp(normalizedTask.CandleTimestamp),
-                result.SuccessCount,
-                result.TotalCount);
+            // _logger.LogDebug(
+            //     "指标刷新: {Exchange} {Symbol} {Timeframe} 时间={Time} 成功={Success}/{Total}",
+            //     normalizedTask.Exchange,
+            //     normalizedTask.Symbol,
+            //     normalizedTask.Timeframe,
+            //     FormatTimestamp(normalizedTask.CandleTimestamp),
+            //     result.SuccessCount,
+            //     result.TotalCount);
         }
 
         private static List<IndicatorRequest> BuildIndicatorRequests(StrategyModel strategy)

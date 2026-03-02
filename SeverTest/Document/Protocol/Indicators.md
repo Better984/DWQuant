@@ -8,6 +8,7 @@
   - `items[]`
     - `code` string
     - `provider` string
+    - `sourceType` string（数据来源类型，例如 `http_pull` / `custom_compute`）
     - `displayName` string
     - `shape` string
     - `unit` string?
@@ -18,6 +19,13 @@
     - `defaultScopeKey` string
     - `enabled` bool
     - `sortOrder` int
+    - `fields[]`
+      - `path` string（字段路径，条件中可作为 `reference.output` 使用）
+      - `displayName` string
+      - `dataType` string（`number` / `boolean` / `string` / `array` / `object`）
+      - `unit` string?
+      - `conditionSupported` bool（是否可用于策略条件）
+      - `description` string?
   - `total` int
 
 ## indicator.latest.get
@@ -70,3 +78,17 @@
     - `sourceTs` number（毫秒）
     - `payload` object
   - `total` int
+- 说明：历史数据在后端按指标独立分表存储（命名规范 `coinglass_{指标代码}_history`），协议层无感知。
+
+## indicator.realtime.channel.get
+- 路径：`POST /api/indicator/realtime/channel/get`
+- data：
+  - `channel` string（必填，例：`funding-rate`）
+  - `allowStale` bool（可选，默认 `true`）
+- 响应 data：
+  - `channel` string
+  - `source` string（当前固定 `coinglass.ws.stream`）
+  - `receivedAt` number（毫秒）
+  - `expireAt` number（毫秒）
+  - `stale` bool（是否已过期）
+  - `payload` object（频道原始 JSON 消息）

@@ -12,16 +12,19 @@ namespace ServerTest.Modules.StrategyEngine.Application
     {
         private readonly IMarketDataProvider _marketDataProvider;
         private readonly IndicatorEngine _indicatorEngine;
+        private readonly PublicIndicatorValueProvider? _publicIndicatorValueProvider;
         private readonly ILogger<IndicatorValueResolver> _logger;
 
         public IndicatorValueResolver(
             IMarketDataProvider marketDataProvider,
             IndicatorEngine indicatorEngine,
-            ILogger<IndicatorValueResolver> logger)
+            ILogger<IndicatorValueResolver> logger,
+            PublicIndicatorValueProvider? publicIndicatorValueProvider = null)
         {
             _marketDataProvider = marketDataProvider ?? throw new ArgumentNullException(nameof(marketDataProvider));
             _indicatorEngine = indicatorEngine ?? throw new ArgumentNullException(nameof(indicatorEngine));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _publicIndicatorValueProvider = publicIndicatorValueProvider;
         }
 
         public bool TryResolvePair(
@@ -153,6 +156,20 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (refType.Equals("Indicator", StringComparison.OrdinalIgnoreCase))
             {
                 return TryResolveIndicator(context, reference, effectiveOffset, out value);
+            }
+
+            if (refType.Equals("PublicIndicator", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_publicIndicatorValueProvider == null)
+                {
+                    _logger.LogInformation(
+                        "公共指标解析失败: 未注册公共指标取值服务 {Uid} indicator={Indicator}",
+                        context.Strategy.UidCode,
+                        reference.Indicator);
+                    return false;
+                }
+
+                return _publicIndicatorValueProvider.TryResolveValue(context, reference, effectiveOffset, out value);
             }
 
             if (refType.Equals("Const", StringComparison.OrdinalIgnoreCase) ||
@@ -347,11 +364,11 @@ namespace ServerTest.Modules.StrategyEngine.Application
             StrategyValueRef reference,
             double value)
         {
-            _logger.LogInformation(
-                "条件检测取值 固定值: {Uid} input={Input} value={Value:F6}",
-                context.Strategy.UidCode,
-                reference?.Input,
-                value);
+            // _logger.LogInformation(
+            //     "条件检测取值 固定值: {Uid} input={Input} value={Value:F6}",
+            //     context.Strategy.UidCode,
+            //     reference?.Input,
+            //     value);
         }
 
         private void LogResolvedField(
@@ -388,14 +405,14 @@ namespace ServerTest.Modules.StrategyEngine.Application
             double value,
             int offset)
         {
-            _logger.LogInformation(
-                "条件检测取值 指标: {Uid} indicator={Indicator} output={Output} timeframe={Timeframe} value={Value:F6} offset={Offset}",
-                context.Strategy.UidCode,
-                reference?.Indicator,
-                reference?.Output,
-                request?.Key.Timeframe,
-                value,
-                offset);
+            // _logger.LogInformation(
+            //     "条件检测取值 指标: {Uid} indicator={Indicator} output={Output} timeframe={Timeframe} value={Value:F6} offset={Offset}",
+            //     context.Strategy.UidCode,
+            //     reference?.Indicator,
+            //     reference?.Output,
+            //     request?.Key.Timeframe,
+            //     value,
+            //     offset);
         }
 
         private static string FormatKlineTime(long timestamp)

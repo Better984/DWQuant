@@ -98,6 +98,12 @@ const HOME_INDICATOR_PREVIEWS: IndicatorPreview[] = [
     sample: '样例：+1.20 亿 USD / 日',
   },
   {
+    id: 'liquidation-heatmap',
+    name: '交易对爆仓热力图（模型1）',
+    category: '风险事件',
+    sample: '样例：热力图 + K线叠加 + 100桶痛点与订单簿统计',
+  },
+  {
     id: 'exchange-flow',
     name: '交易所资金净流入 / 流出',
     category: '资金流向',

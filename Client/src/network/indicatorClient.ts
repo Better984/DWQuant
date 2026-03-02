@@ -19,6 +19,15 @@ export type IndicatorLatestItem = {
   payload: unknown;
 };
 
+export type IndicatorRealtimeChannelItem = {
+  channel: string;
+  source: string;
+  receivedAt: number;
+  expireAt: number;
+  stale: boolean;
+  payload: unknown;
+};
+
 export async function getIndicatorLatest(
   code: string,
   scope?: Record<string, string>,
@@ -41,6 +50,27 @@ export async function getIndicatorLatest(
       scope,
       allowStale: options?.allowStale ?? true,
       forceRefresh: options?.forceRefresh ?? false,
+    },
+    { signal: options?.signal },
+  );
+}
+
+export async function getIndicatorRealtimeChannel(
+  channel: string,
+  options?: {
+    allowStale?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<IndicatorRealtimeChannelItem> {
+  return client.postProtocol<IndicatorRealtimeChannelItem, {
+    channel: string;
+    allowStale?: boolean;
+  }>(
+    "/api/indicator/realtime/channel/get",
+    "indicator.realtime.channel.get",
+    {
+      channel,
+      allowStale: options?.allowStale ?? true,
     },
     { signal: options?.signal },
   );

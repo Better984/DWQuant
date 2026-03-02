@@ -19,6 +19,8 @@ using ServerTest.Modules.AdminBroadcast.Application;
 using ServerTest.Modules.AdminBroadcast.Infrastructure;
 using ServerTest.Modules.Backtest.Application;
 using ServerTest.Modules.Backtest.Infrastructure;
+using ServerTest.Modules.Discover.Application;
+using ServerTest.Modules.Discover.Infrastructure;
 using ServerTest.Modules.ExchangeApiKeys.Infrastructure;
 using ServerTest.Modules.Indicators.Application;
 using ServerTest.Modules.Indicators.Infrastructure;
@@ -214,7 +216,10 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<BacktestWorkerOptions>(configuration.GetSection("BacktestWorker"));
     services.Configure<TalibCoreOptions>(configuration.GetSection("TalibCore"));
     services.Configure<IndicatorFrameworkOptions>(configuration.GetSection("Indicators"));
+    services.Configure<CoinGlassModuleSwitchOptions>(configuration.GetSection("CoinGlassModules"));
     services.Configure<CoinGlassOptions>(configuration.GetSection("CoinGlass"));
+    services.Configure<DiscoverFeedOptions>(configuration.GetSection("DiscoverFeed"));
+    services.Configure<DiscoverCalendarOptions>(configuration.GetSection("DiscoverCalendar"));
 
     services.AddSingleton<IValidateOptions<AiAssistantOptions>, AiAssistantOptionsValidator>();
     services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
@@ -228,6 +233,8 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.AddSingleton<IValidateOptions<BacktestWorkerOptions>, BacktestWorkerOptionsValidator>();
     services.AddSingleton<IValidateOptions<IndicatorFrameworkOptions>, IndicatorFrameworkOptionsValidator>();
     services.AddSingleton<IValidateOptions<CoinGlassOptions>, CoinGlassOptionsValidator>();
+    services.AddSingleton<IValidateOptions<DiscoverFeedOptions>, DiscoverFeedOptionsValidator>();
+    services.AddSingleton<IValidateOptions<DiscoverCalendarOptions>, DiscoverCalendarOptionsValidator>();
 }
 
 static void RegisterCommonServices(
@@ -412,10 +419,33 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
 
     services.AddSingleton<IndicatorRepository>();
     services.AddSingleton<IndicatorCacheStore>();
+    services.AddSingleton<CoinGlassRealtimeCache>();
+    services.AddSingleton<DiscoverFeedRepository>();
+    services.AddSingleton<DiscoverFeedMemoryCache>();
+    services.AddSingleton<DiscoverFeedService>();
+    services.AddSingleton<DiscoverCalendarRepository>();
+    services.AddSingleton<DiscoverCalendarMemoryCache>();
+    services.AddSingleton<DiscoverCalendarService>();
     services.AddSingleton<IndicatorRegistry>();
     services.AddSingleton<IndicatorQueryService>();
-    services.AddSingleton<IIndicatorCollector, CoinGlassFearGreedCollector>();
+    services.AddSingleton<PublicIndicatorValueProvider>();
+    var coinGlassModuleSwitch = configuration.GetSection("CoinGlassModules").Get<CoinGlassModuleSwitchOptions>() ?? new CoinGlassModuleSwitchOptions();
+    if (coinGlassModuleSwitch.FearGreedEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassFearGreedCollector>();
+    }
+    if (coinGlassModuleSwitch.EtfFlowEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassEtfFlowCollector>();
+    }
+    if (coinGlassModuleSwitch.LiquidationHeatmapEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassLiquidationHeatmapCollector>();
+    }
     services.AddHostedService<IndicatorRefreshHostedService>();
+    services.AddHostedService<CoinGlassStreamBridgeHostedService>();
+    services.AddHostedService<DiscoverFeedRefreshHostedService>();
+    services.AddHostedService<DiscoverCalendarRefreshHostedService>();
 
     services.AddSingleton<TalibWasmNodeInvoker>();
     services.AddSingleton<IndicatorEngine>();
@@ -640,6 +670,12 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
             var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
             if (!context.WebSockets.IsWebSocketRequest)
             {
+                logger.LogWarning(
+                    "[websocket 问题排查] 握手拦截：非 WebSocket 请求 | path={Path} method={Method} ip={RemoteIp} traceId={TraceId}",
+                    context.Request.Path.Value,
+                    context.Request.Method,
+                    context.Connection.RemoteIpAddress?.ToString(),
+                    context.TraceIdentifier);
                 await WriteWsErrorAsync(context, StatusCodes.Status400BadRequest, ProtocolErrorCodes.InvalidRequest, "WebSocket request required")
                     .ConfigureAwait(false);
                 return;
@@ -648,6 +684,11 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
             var system = context.Request.Query["system"].ToString();
             if (string.IsNullOrWhiteSpace(system))
             {
+                logger.LogWarning(
+                    "[websocket 问题排查] 握手拦截：缺少 system 参数 | path={Path} ip={RemoteIp} traceId={TraceId}",
+                    context.Request.Path.Value,
+                    context.Connection.RemoteIpAddress?.ToString(),
+                    context.TraceIdentifier);
                 await WriteWsErrorAsync(context, StatusCodes.Status400BadRequest, ProtocolErrorCodes.MissingField, "Missing system")
                     .ConfigureAwait(false);
                 return;
@@ -656,6 +697,11 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
             var token = GetWebSocketToken(context);
             if (string.IsNullOrWhiteSpace(token))
             {
+                logger.LogWarning(
+                    "[websocket 问题排查] 握手拦截：缺少 token | system={System} ip={RemoteIp} traceId={TraceId}",
+                    system,
+                    context.Connection.RemoteIpAddress?.ToString(),
+                    context.TraceIdentifier);
                 await WriteWsErrorAsync(context, StatusCodes.Status401Unauthorized, ProtocolErrorCodes.Unauthorized, "Missing token")
                     .ConfigureAwait(false);
                 return;
@@ -665,6 +711,11 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
             var validation = await tokenService.ValidateTokenAsync(token).ConfigureAwait(false);
             if (!validation.IsValid)
             {
+                logger.LogWarning(
+                    "[websocket 问题排查] 握手拦截：token 校验失败 | system={System} ip={RemoteIp} traceId={TraceId}",
+                    system,
+                    context.Connection.RemoteIpAddress?.ToString(),
+                    context.TraceIdentifier);
                 await WriteWsErrorAsync(context, StatusCodes.Status401Unauthorized, ProtocolErrorCodes.TokenInvalid, "Invalid token")
                     .ConfigureAwait(false);
                 return;
@@ -672,6 +723,11 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
 
             if (string.IsNullOrWhiteSpace(validation.UserId))
             {
+                logger.LogWarning(
+                    "[websocket 问题排查] 握手拦截：token 缺少 userId | system={System} ip={RemoteIp} traceId={TraceId}",
+                    system,
+                    context.Connection.RemoteIpAddress?.ToString(),
+                    context.TraceIdentifier);
                 await WriteWsErrorAsync(context, StatusCodes.Status403Forbidden, ProtocolErrorCodes.Forbidden, "Missing user id")
                     .ConfigureAwait(false);
                 return;
@@ -684,6 +740,13 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
 
             if (!connectionManager.TryReserve(userId, system, connectionId))
             {
+                logger.LogWarning(
+                    "[websocket 问题排查] 连接占位失败：首次 TryReserve 未通过 | userId={UserId} system={System} connectionId={ConnectionId} kickPolicy={KickPolicy} traceId={TraceId}",
+                    userId,
+                    system,
+                    connectionId,
+                    wsConfig.KickPolicy,
+                    context.TraceIdentifier);
                 var reserved = false;
                 if (string.Equals(wsConfig.KickPolicy, "KickOld", StringComparison.OrdinalIgnoreCase))
                 {
@@ -709,11 +772,40 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
                         }
 
                         reserved = connectionManager.TryReserve(userId, system, connectionId);
+                        logger.LogInformation(
+                            "[websocket 问题排查] 连接占位重试结果 | userId={UserId} system={System} connectionId={ConnectionId} attempt={Attempt} reserved={Reserved} traceId={TraceId}",
+                            userId,
+                            system,
+                            connectionId,
+                            attempt + 1,
+                            reserved,
+                            context.TraceIdentifier);
+                    }
+
+                    if (!reserved)
+                    {
+                        // 兜底策略：重试仍失败时，直接清掉该 user/system 的占位，再抢占一次。
+                        connectionManager.ClearUserSystem(userId, system);
+                        reserved = connectionManager.TryReserve(userId, system, connectionId);
+                        logger.LogWarning(
+                            "[websocket 问题排查] 连接占位兜底清理后重试 | userId={UserId} system={System} connectionId={ConnectionId} reserved={Reserved} traceId={TraceId}",
+                            userId,
+                            system,
+                            connectionId,
+                            reserved,
+                            context.TraceIdentifier);
                     }
                 }
 
                 if (!reserved)
                 {
+                    logger.LogWarning(
+                        "[websocket 问题排查] 握手拦截：连接数超限 | userId={UserId} system={System} connectionId={ConnectionId} maxConnectionsPerSystem={MaxConnectionsPerSystem} traceId={TraceId}",
+                        userId,
+                        system,
+                        connectionId,
+                        wsConfig.MaxConnectionsPerSystem,
+                        context.TraceIdentifier);
                     await WriteWsErrorAsync(
                         context,
                         StatusCodes.Status403Forbidden,
@@ -731,9 +823,17 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
                 connection = new WebSocketConnection(connectionId, userId, system, socket, DateTime.UtcNow, remoteIp);
                 connectionManager.RegisterLocal(connection);
             }
-            catch
+            catch (Exception ex)
             {
                 connectionManager.Remove(userId, system, connectionId);
+                logger.LogError(
+                    ex,
+                    "[websocket 问题排查] 握手异常：AcceptWebSocket 失败 | userId={UserId} system={System} connectionId={ConnectionId} ip={RemoteIp} traceId={TraceId}",
+                    userId,
+                    system,
+                    connectionId,
+                    context.Connection.RemoteIpAddress?.ToString(),
+                    context.TraceIdentifier);
                 throw;
             }
 
@@ -742,6 +842,14 @@ static void MapUserWebSocket(WebApplication app, AppWebSocketOptions wsConfig)
                 userId,
                 system,
                 connection.ConnectionId);
+
+            logger.LogInformation(
+                "[websocket 问题排查] 握手成功：连接已建立 | userId={UserId} system={System} connectionId={ConnectionId} ip={RemoteIp} traceId={TraceId}",
+                userId,
+                system,
+                connection.ConnectionId,
+                context.Connection.RemoteIpAddress?.ToString(),
+                context.TraceIdentifier);
 
             try
             {

@@ -226,17 +226,17 @@ namespace ServerTest.Services
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)ticker.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Console.WriteLine(
-                        $"[OKX合约] {symbol} Ticker | " +
-                        $"时间: {timestamp:yyyy-MM-dd HH:mm:ss} | " +
-                        $"最新价: {ticker.last} | " +
-                        $"买一价: {ticker.bid} | " +
-                        $"卖一价: {ticker.ask} | " +
-                        $"24h高: {ticker.high} | " +
-                        $"24h低: {ticker.low} | " +
-                        $"24h涨跌: {ticker.change} | " +
-                        $"24h涨跌幅: {ticker.percentage}% | " +
-                        $"24h成交量: {ticker.baseVolume}");
+                    //Console.WriteLine(
+                    //    $"[OKX合约] {symbol} Ticker | " +
+                    //    $"时间: {timestamp:yyyy-MM-dd HH:mm:ss} | " +
+                    //    $"最新价: {ticker.last} | " +
+                    //    $"买一价: {ticker.bid} | " +
+                    //    $"卖一价: {ticker.ask} | " +
+                    //    $"24h高: {ticker.high} | " +
+                    //    $"24h低: {ticker.low} | " +
+                    //    $"24h涨跌: {ticker.change} | " +
+                    //    $"24h涨跌幅: {ticker.percentage}% | " +
+                    //    $"24h成交量: {ticker.baseVolume}");
                 }
                 catch (Exception ex)
                 {
@@ -262,17 +262,17 @@ namespace ServerTest.Services
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)ticker.timestamp).LocalDateTime
                         : DateTime.Now;
 
-                    Console.WriteLine(
-                        $"[Bitget合约] {symbol} Ticker | " +
-                        $"时间: {timestamp:yyyy-MM-dd HH:mm:ss} | " +
-                        $"最新价: {ticker.last} | " +
-                        $"买一价: {ticker.bid} | " +
-                        $"卖一价: {ticker.ask} | " +
-                        $"24h高: {ticker.high} | " +
-                        $"24h低: {ticker.low} | " +
-                        $"24h涨跌: {ticker.change} | " +
-                        $"24h涨跌幅: {ticker.percentage}% | " +
-                        $"24h成交量: {ticker.baseVolume}");
+                    //Console.WriteLine(
+                    //    $"[Bitget合约] {symbol} Ticker | " +
+                    //    $"时间: {timestamp:yyyy-MM-dd HH:mm:ss} | " +
+                    //    $"最新价: {ticker.last} | " +
+                    //    $"买一价: {ticker.bid} | " +
+                    //    $"卖一价: {ticker.ask} | " +
+                    //    $"24h高: {ticker.high} | " +
+                    //    $"24h低: {ticker.low} | " +
+                    //    $"24h涨跌: {ticker.change} | " +
+                    //    $"24h涨跌幅: {ticker.percentage}% | " +
+                    //    $"24h成交量: {ticker.baseVolume}");
                 }
                 catch (Exception ex)
                 {

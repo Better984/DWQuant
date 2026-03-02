@@ -1,5 +1,8 @@
 using ServerTest.Infrastructure.Db;
 using ServerTest.Modules.Indicators.Domain;
+using ServerTest.Protocol;
+using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 
 namespace ServerTest.Modules.Indicators.Infrastructure
 {
@@ -9,6 +12,8 @@ namespace ServerTest.Modules.Indicators.Infrastructure
     public sealed class IndicatorRepository
     {
         private readonly IDbManager _db;
+        private readonly ConcurrentDictionary<string, byte> _historyTableReady = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _historyTableLocks = new(StringComparer.Ordinal);
 
         public IndicatorRepository(IDbManager db)
         {
@@ -65,19 +70,6 @@ CREATE TABLE IF NOT EXISTS `indicator_snapshots` (
   KEY `idx_fetched` (`fetched_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='指标最新快照表';
 
-CREATE TABLE IF NOT EXISTS `indicator_history` (
-  `id` BIGINT NOT NULL AUTO_INCREMENT,
-  `code` VARCHAR(128) NOT NULL COMMENT '指标编码',
-  `scope_key` VARCHAR(256) NOT NULL COMMENT '范围键',
-  `source_ts` BIGINT NOT NULL COMMENT '指标点位时间戳（毫秒）',
-  `payload_json` LONGTEXT NOT NULL COMMENT '点位负载 JSON',
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_code_scope_ts` (`code`, `scope_key`, `source_ts`),
-  KEY `idx_code_scope_source` (`code`, `scope_key`, `source_ts`),
-  KEY `idx_created` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='指标历史表';
-
 CREATE TABLE IF NOT EXISTS `indicator_refresh_logs` (
   `id` BIGINT NOT NULL AUTO_INCREMENT,
   `code` VARCHAR(128) NOT NULL COMMENT '指标编码',
@@ -94,6 +86,9 @@ CREATE TABLE IF NOT EXISTS `indicator_refresh_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='指标刷新日志表';
 ";
             await _db.ExecuteAsync(sql, null, null, ct).ConfigureAwait(false);
+            await EnsureHistoryTableReadyAsync("coinglass.fear_greed", ct).ConfigureAwait(false);
+            await EnsureHistoryTableReadyAsync("coinglass.etf_flow", ct).ConfigureAwait(false);
+            await EnsureHistoryTableReadyAsync("coinglass.liquidation_heatmap_model1", ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -137,7 +132,25 @@ VALUES
   @SortOrder
 )
 ON DUPLICATE KEY UPDATE
-  code = code
+  config_json = CASE
+    WHEN indicator_definitions.config_json IS NULL
+      OR TRIM(indicator_definitions.config_json) = ''
+      OR TRIM(indicator_definitions.config_json) = '{}'
+    THEN VALUES(config_json)
+    ELSE indicator_definitions.config_json
+  END,
+  source_endpoint = CASE
+    WHEN indicator_definitions.source_endpoint IS NULL
+      OR TRIM(indicator_definitions.source_endpoint) = ''
+    THEN VALUES(source_endpoint)
+    ELSE indicator_definitions.source_endpoint
+  END,
+  default_scope_key = CASE
+    WHEN indicator_definitions.default_scope_key IS NULL
+      OR TRIM(indicator_definitions.default_scope_key) = ''
+    THEN VALUES(default_scope_key)
+    ELSE indicator_definitions.default_scope_key
+  END
 ";
 
             var seed = new[]
@@ -150,14 +163,48 @@ ON DUPLICATE KEY UPDATE
                     Shape = "gauge",
                     Unit = "index",
                     Description = "CoinGlass 贪婪恐慌指数，范围 0-100",
-                    RefreshIntervalSec = 300,
-                    TtlSec = 600,
+                    RefreshIntervalSec = 60 * 20,
+                    TtlSec = 60 * 20,
                     HistoryRetentionDays = 180,
                     SourceEndpoint = "/api/index/fear-greed-history",
                     DefaultScopeKey = "global",
-                    ConfigJson = "{}",
-                    Enabled = true,
+                    ConfigJson = BuildFearGreedConfigJson(),
+                    Enabled = false,
                     SortOrder = 10
+                },
+                new
+                {
+                    Code = "coinglass.etf_flow",
+                    Provider = "coinglass",
+                    DisplayName = "比特币现货 ETF 净流入",
+                    Shape = "timeseries",
+                    Unit = "usd",
+                    Description = "CoinGlass 比特币现货 ETF 每日净流入（美元）",
+                    RefreshIntervalSec = 20,
+                    TtlSec = 20,
+                    HistoryRetentionDays = 365,
+                    SourceEndpoint = "/api/etf/bitcoin/flow-history",
+                    DefaultScopeKey = "global",
+                    ConfigJson = BuildEtfFlowConfigJson(),
+                    Enabled = true,
+                    SortOrder = 20
+                },
+                new
+                {
+                    Code = "coinglass.liquidation_heatmap_model1",
+                    Provider = "coinglass",
+                    DisplayName = "交易对爆仓热力图（模型1）",
+                    Shape = "heatmap",
+                    Unit = "usd",
+                    Description = "CoinGlass 交易对爆仓热力图（模型1），包含价格轴、热力点与K线数据",
+                    RefreshIntervalSec = 20,
+                    TtlSec = 20,
+                    HistoryRetentionDays = 60,
+                    SourceEndpoint = "/api/futures/liquidation/heatmap/model1",
+                    DefaultScopeKey = "exchange=Binance&symbol=BTCUSDT&range=3d",
+                    ConfigJson = BuildLiquidationHeatmapModel1ConfigJson(),
+                    Enabled = true,
+                    SortOrder = 30
                 }
             };
 
@@ -296,24 +343,23 @@ ON DUPLICATE KEY UPDATE
         /// <summary>
         /// 批量写入历史点位。
         /// </summary>
-        public Task UpsertHistoryBatchAsync(string code, string scopeKey, IReadOnlyList<IndicatorHistoryPoint> points, CancellationToken ct = default)
+        public async Task UpsertHistoryBatchAsync(string code, string scopeKey, IReadOnlyList<IndicatorHistoryPoint> points, CancellationToken ct = default)
         {
             if (points.Count == 0)
             {
-                return Task.CompletedTask;
+                return;
             }
 
-            const string sql = @"
-INSERT INTO indicator_history
+            var historyTable = await EnsureHistoryTableReadyAsync(code, ct).ConfigureAwait(false);
+            var sql = $@"
+INSERT INTO `{historyTable}`
 (
-  code,
   scope_key,
   source_ts,
   payload_json
 )
 VALUES
 (
-  @Code,
   @ScopeKey,
   @SourceTs,
   @PayloadJson
@@ -324,13 +370,12 @@ ON DUPLICATE KEY UPDATE
 
             var rows = points.Select(point => new
             {
-                Code = code,
                 ScopeKey = scopeKey,
                 SourceTs = point.SourceTs,
                 PayloadJson = point.PayloadJson
             }).ToList();
 
-            return _db.ExecuteAsync(sql, rows, null, ct);
+            await _db.ExecuteAsync(sql, rows, null, ct).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -344,13 +389,13 @@ ON DUPLICATE KEY UPDATE
             int limit,
             CancellationToken ct = default)
         {
-            const string sql = @"
+            var historyTable = await EnsureHistoryTableReadyAsync(code, ct).ConfigureAwait(false);
+            var sql = $@"
 SELECT
   source_ts AS SourceTs,
   payload_json AS PayloadJson
-FROM indicator_history
-WHERE code = @Code
-  AND scope_key = @ScopeKey
+FROM `{historyTable}`
+WHERE scope_key = @ScopeKey
   AND (@StartMs IS NULL OR source_ts >= @StartMs)
   AND (@EndMs IS NULL OR source_ts <= @EndMs)
 ORDER BY source_ts DESC
@@ -360,7 +405,6 @@ LIMIT @Limit
                 sql,
                 new
                 {
-                    Code = code,
                     ScopeKey = scopeKey,
                     StartMs = startMs,
                     EndMs = endMs,
@@ -422,15 +466,341 @@ VALUES
         /// <summary>
         /// 清理历史数据。
         /// </summary>
-        public Task<int> CleanupHistoryAsync(string code, string scopeKey, long cutoffMs, CancellationToken ct = default)
+        public async Task<int> CleanupHistoryAsync(string code, string scopeKey, long cutoffMs, CancellationToken ct = default)
         {
-            const string sql = @"
-DELETE FROM indicator_history
-WHERE code = @Code
-  AND scope_key = @ScopeKey
+            var historyTable = await EnsureHistoryTableReadyAsync(code, ct).ConfigureAwait(false);
+            var sql = $@"
+DELETE FROM `{historyTable}`
+WHERE scope_key = @ScopeKey
   AND source_ts < @CutoffMs
 ";
-            return _db.ExecuteAsync(sql, new { Code = code, ScopeKey = scopeKey, CutoffMs = cutoffMs }, null, ct);
+            return await _db.ExecuteAsync(sql, new { ScopeKey = scopeKey, CutoffMs = cutoffMs }, null, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 确保指标历史分表存在。
+        /// 表命名规范：coinglass_{指标代码}_history（示例：coinglass_fear_greed_history）。
+        /// </summary>
+        private async Task<string> EnsureHistoryTableReadyAsync(string code, CancellationToken ct)
+        {
+            var historyTable = BuildHistoryTableName(code);
+            if (_historyTableReady.ContainsKey(historyTable))
+            {
+                return historyTable;
+            }
+
+            var tableLock = _historyTableLocks.GetOrAdd(historyTable, _ => new SemaphoreSlim(1, 1));
+            await tableLock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (_historyTableReady.ContainsKey(historyTable))
+                {
+                    return historyTable;
+                }
+
+                var createSql = $@"
+CREATE TABLE IF NOT EXISTS `{historyTable}` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `scope_key` VARCHAR(256) NOT NULL COMMENT '范围键',
+  `source_ts` BIGINT NOT NULL COMMENT '指标点位时间戳（毫秒）',
+  `payload_json` LONGTEXT NOT NULL COMMENT '点位负载 JSON',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_scope_ts` (`scope_key`, `source_ts`),
+  KEY `idx_scope_source` (`scope_key`, `source_ts`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='指标历史分表';
+";
+                await _db.ExecuteAsync(createSql, null, null, ct).ConfigureAwait(false);
+
+                _historyTableReady.TryAdd(historyTable, 0);
+                return historyTable;
+            }
+            finally
+            {
+                tableLock.Release();
+            }
+        }
+
+        private static string BuildHistoryTableName(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                throw new ArgumentException("指标 code 不能为空", nameof(code));
+            }
+
+            var normalized = code.Trim().ToLowerInvariant();
+            if (normalized.StartsWith("coinglass.", StringComparison.Ordinal))
+            {
+                normalized = normalized["coinglass.".Length..];
+            }
+            else if (normalized.StartsWith("coinglass_", StringComparison.Ordinal))
+            {
+                normalized = normalized["coinglass_".Length..];
+            }
+
+            var metricCode = Regex.Replace(normalized, @"[^a-z0-9_]+", "_").Trim('_');
+            if (string.IsNullOrWhiteSpace(metricCode))
+            {
+                metricCode = "metric";
+            }
+
+            var tableName = $"coinglass_{metricCode}_history";
+            if (!Regex.IsMatch(tableName, @"^[a-z0-9_]+$"))
+            {
+                throw new InvalidOperationException($"非法历史表名: {tableName}");
+            }
+
+            return tableName;
+        }
+
+        private static string BuildFearGreedConfigJson()
+        {
+            return ProtocolJson.Serialize(new
+            {
+                source = new
+                {
+                    type = "http_pull",
+                    protocol = "coinglass.http",
+                    mode = "pull",
+                    supportsRealtimeWs = false
+                },
+                fields = new object[]
+                {
+                    new
+                    {
+                        path = "value",
+                        displayName = "贪婪恐慌指数值",
+                        dataType = "number",
+                        unit = "index",
+                        conditionSupported = true,
+                        description = "当前贪婪恐慌指数值，范围 0-100。"
+                    },
+                    new
+                    {
+                        path = "signals.below9",
+                        displayName = "指数低于9",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "当指数 < 9 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.below10",
+                        displayName = "指数低于10",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "当指数 < 10 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.below9StreakDays",
+                        displayName = "低于9连续天数",
+                        dataType = "number",
+                        unit = "day",
+                        conditionSupported = true,
+                        description = "连续低于 9 的天数统计。"
+                    },
+                    new
+                    {
+                        path = "signals.below10StreakDays",
+                        displayName = "低于10连续天数",
+                        dataType = "number",
+                        unit = "day",
+                        conditionSupported = true,
+                        description = "连续低于 10 的天数统计。"
+                    },
+                    new
+                    {
+                        path = "signals.below9Consecutive3d",
+                        displayName = "低于9连续3天",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "连续 3 天低于 9 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.below10Consecutive3d",
+                        displayName = "低于10连续3天",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "连续 3 天低于 10 时为 true。"
+                    }
+                }
+            });
+        }
+
+        private static string BuildEtfFlowConfigJson()
+        {
+            return ProtocolJson.Serialize(new
+            {
+                source = new
+                {
+                    type = "http_pull",
+                    protocol = "coinglass.http",
+                    mode = "pull",
+                    supportsRealtimeWs = false
+                },
+                fields = new object[]
+                {
+                    new
+                    {
+                        path = "value",
+                        displayName = "ETF净流入主值",
+                        dataType = "number",
+                        unit = "usd",
+                        conditionSupported = true,
+                        description = "当日 ETF 净流入，等价于 netFlowUsd。"
+                    },
+                    new
+                    {
+                        path = "netFlowUsd",
+                        displayName = "当日净流入金额",
+                        dataType = "number",
+                        unit = "usd",
+                        conditionSupported = true,
+                        description = "当日净流入金额（美元）。"
+                    },
+                    new
+                    {
+                        path = "signals.isNetInflow",
+                        displayName = "当日是否净流入",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "当日净流入 > 0 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.isNetOutflow",
+                        displayName = "当日是否净流出",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "当日净流入 < 0 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.netInflowStreakDays",
+                        displayName = "连续净流入天数",
+                        dataType = "number",
+                        unit = "day",
+                        conditionSupported = true,
+                        description = "截至当前连续净流入天数。"
+                    },
+                    new
+                    {
+                        path = "signals.netOutflowStreakDays",
+                        displayName = "连续净流出天数",
+                        dataType = "number",
+                        unit = "day",
+                        conditionSupported = true,
+                        description = "截至当前连续净流出天数。"
+                    },
+                    new
+                    {
+                        path = "signals.netInflow3dAllPositive",
+                        displayName = "近3天持续净流入",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "近 3 天净流入均 > 0 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.netFlow7dSumUsd",
+                        displayName = "近7天净流入总和",
+                        dataType = "number",
+                        unit = "usd",
+                        conditionSupported = true,
+                        description = "近 7 天净流入金额总和。"
+                    },
+                    new
+                    {
+                        path = "signals.netFlow7dSumPositive",
+                        displayName = "近7天净流入总和大于0",
+                        dataType = "boolean",
+                        unit = (string?)null,
+                        conditionSupported = true,
+                        description = "近 7 天净流入总和 > 0 时为 true。"
+                    },
+                    new
+                    {
+                        path = "signals.inflow7dRatio",
+                        displayName = "近7天流入占比",
+                        dataType = "number",
+                        unit = "ratio",
+                        conditionSupported = true,
+                        description = "近 7 天流入占比 = inflow7dUsd / (inflow7dUsd + outflow7dAbsUsd)。"
+                    },
+                    new
+                    {
+                        path = "signals.inflow7dUsd",
+                        displayName = "近7天流入总量",
+                        dataType = "number",
+                        unit = "usd",
+                        conditionSupported = true,
+                        description = "近 7 天正向流入金额合计。"
+                    },
+                    new
+                    {
+                        path = "signals.outflow7dAbsUsd",
+                        displayName = "近7天流出绝对值总量",
+                        dataType = "number",
+                        unit = "usd",
+                        conditionSupported = true,
+                        description = "近 7 天负向流出绝对值金额合计。"
+                    }
+                }
+            });
+        }
+
+        private static string BuildLiquidationHeatmapModel1ConfigJson()
+        {
+            return ProtocolJson.Serialize(new
+            {
+                source = new
+                {
+                    type = "http_pull",
+                    protocol = "coinglass.http",
+                    mode = "pull",
+                    supportsRealtimeWs = false
+                },
+                fields = new object[]
+                {
+                    new
+                    {
+                        path = "yAxis",
+                        displayName = "价格轴",
+                        dataType = "array",
+                        unit = "price",
+                        conditionSupported = false,
+                        description = "热力图价格轴。"
+                    },
+                    new
+                    {
+                        path = "liquidationLeverageData",
+                        displayName = "热力点数据",
+                        dataType = "array",
+                        unit = "usd",
+                        conditionSupported = false,
+                        description = "热力图核心数据。"
+                    },
+                    new
+                    {
+                        path = "priceCandlesticks",
+                        displayName = "价格K线",
+                        dataType = "array",
+                        unit = "price",
+                        conditionSupported = false,
+                        description = "叠加展示 K 线数据。"
+                    }
+                }
+            });
         }
     }
 }

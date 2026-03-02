@@ -41,11 +41,20 @@ namespace ServerTest.Modules.Indicators.Infrastructure
 
         public async Task<IndicatorCollectResult> CollectAsync(IndicatorDefinition definition, string scopeKey, CancellationToken ct)
         {
+            var limit = _coinGlassOptions.FearGreedSeriesLimit;
+            _logger.LogInformation("[coinglass][贪婪恐慌] 开始拉取贪婪恐慌指标: limit={Limit}, scopeKey={ScopeKey}", limit, scopeKey);
+
             using var response = await _coinGlassClient
-                .GetFearGreedHistoryAsync(_coinGlassOptions.FearGreedSeriesLimit, ct)
+                .GetFearGreedHistoryAsync(limit, ct)
                 .ConfigureAwait(false);
 
             var points = ExtractPoints(response.RootElement);
+            _logger.LogInformation(
+                "[coinglass][贪婪恐慌] 贪婪恐慌接口返回解析: 原始根类型={RootKind},数据{Json} 解析得到点位数量={PointCount}",
+                response.RootElement.ValueKind.ToString(),
+                response.RootElement,
+                points.Count);
+
             if (points.Count == 0)
             {
                 throw new InvalidOperationException("CoinGlass 贪婪恐慌接口返回格式无法解析有效点位");
@@ -54,44 +63,89 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             var ordered = points
                 .OrderBy(point => point.Timestamp)
                 .ToList();
-            var latest = ordered[^1];
+            var series = BuildSeriesWithSignals(ordered);
+            var latest = series[^1];
 
             var latestPayload = new
             {
-                value = latest.Value,
-                classification = latest.Classification,
-                sourceTs = latest.Timestamp,
-                series = ordered.Select(point => new
+                value = latest.Point.Value,
+                classification = latest.Point.Classification,
+                sourceTs = latest.Point.Timestamp,
+                signals = ToSignalPayload(latest.Signals),
+                series = series.Select(item => new
                 {
-                    ts = point.Timestamp,
-                    value = point.Value,
-                    classification = point.Classification
+                    ts = item.Point.Timestamp,
+                    value = item.Point.Value,
+                    classification = item.Point.Classification,
+                    signals = ToSignalPayload(item.Signals)
                 }).ToList()
             };
 
-            var history = ordered
-                .Select(point => new IndicatorHistoryPoint
+            var history = series
+                .Select(item => new IndicatorHistoryPoint
                 {
-                    SourceTs = point.Timestamp,
+                    SourceTs = item.Point.Timestamp,
                     PayloadJson = ProtocolJson.Serialize(new
                     {
-                        value = point.Value,
-                        classification = point.Classification
+                        value = item.Point.Value,
+                        classification = item.Point.Classification,
+                        signals = ToSignalPayload(item.Signals)
                     })
                 })
                 .ToList();
 
             _logger.LogInformation(
-                "CoinGlass 贪婪恐慌采集完成: count={Count}, latestValue={LatestValue}, latestTs={LatestTs}",
-                ordered.Count,
-                latest.Value,
-                latest.Timestamp);
+                "[coinglass][贪婪恐慌] 贪婪恐慌采集完成: count={Count}, latestValue={LatestValue}, latestClassification={LatestClassification}, latestTs={LatestTs}",
+                series.Count,
+                latest.Point.Value,
+                latest.Point.Classification ?? "(null)",
+                latest.Point.Timestamp);
 
             return new IndicatorCollectResult
             {
-                SourceTs = latest.Timestamp,
+                SourceTs = latest.Point.Timestamp,
                 PayloadJson = ProtocolJson.Serialize(latestPayload),
                 History = history
+            };
+        }
+
+        private static List<FearGreedSeriesPoint> BuildSeriesWithSignals(IReadOnlyList<FearGreedPoint> ordered)
+        {
+            var result = new List<FearGreedSeriesPoint>(ordered.Count);
+            var below9Streak = 0;
+            var below10Streak = 0;
+
+            foreach (var point in ordered)
+            {
+                var below9 = point.Value < 9m;
+                var below10 = point.Value < 10m;
+                below9Streak = below9 ? below9Streak + 1 : 0;
+                below10Streak = below10 ? below10Streak + 1 : 0;
+
+                var signals = new FearGreedDerivedSignals(
+                    Below9: below9,
+                    Below10: below10,
+                    Below9StreakDays: below9Streak,
+                    Below10StreakDays: below10Streak,
+                    Below9Consecutive3d: below9Streak >= 3,
+                    Below10Consecutive3d: below10Streak >= 3);
+
+                result.Add(new FearGreedSeriesPoint(point, signals));
+            }
+
+            return result;
+        }
+
+        private static object ToSignalPayload(FearGreedDerivedSignals signals)
+        {
+            return new
+            {
+                below9 = signals.Below9,
+                below10 = signals.Below10,
+                below9StreakDays = signals.Below9StreakDays,
+                below10StreakDays = signals.Below10StreakDays,
+                below9Consecutive3d = signals.Below9Consecutive3d,
+                below10Consecutive3d = signals.Below10Consecutive3d
             };
         }
 
@@ -144,6 +198,12 @@ namespace ServerTest.Modules.Indicators.Infrastructure
                 return;
             }
 
+            // 兼容 CoinGlass 的列式历史结构：data.values + data.dates（可选 labels/classifications）。
+            if (TryCollectColumnarPoints(element, output))
+            {
+                return;
+            }
+
             foreach (var property in element.EnumerateObject())
             {
                 if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
@@ -192,6 +252,53 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             return true;
         }
 
+        private static bool TryCollectColumnarPoints(JsonElement obj, List<FearGreedPoint> output)
+        {
+            var values = TryReadDecimalArray(obj, "values")
+                ?? TryReadDecimalArray(obj, "valueList")
+                ?? TryReadDecimalArray(obj, "fearGreedValues");
+            if (values == null || values.Count == 0)
+            {
+                return false;
+            }
+
+            var timestamps = TryReadTimestampArray(obj, "dates")
+                ?? TryReadTimestampArray(obj, "timestamps")
+                ?? TryReadTimestampArray(obj, "times");
+            if (timestamps == null || timestamps.Count == 0)
+            {
+                return false;
+            }
+
+            var classifications = TryReadStringArray(obj, "classifications")
+                ?? TryReadStringArray(obj, "labels")
+                ?? TryReadStringArray(obj, "texts");
+
+            var count = Math.Min(values.Count, timestamps.Count);
+            var added = 0;
+            for (var index = 0; index < count; index++)
+            {
+                if (!values[index].HasValue || !timestamps[index].HasValue)
+                {
+                    continue;
+                }
+
+                string? classification = null;
+                if (classifications != null && index < classifications.Count)
+                {
+                    classification = classifications[index];
+                }
+
+                output.Add(new FearGreedPoint(
+                    timestamps[index]!.Value,
+                    values[index]!.Value,
+                    classification));
+                added++;
+            }
+
+            return added > 0;
+        }
+
         private static long? TryReadTimestamp(JsonElement obj, string fieldName)
         {
             if (!obj.TryGetProperty(fieldName, out var value))
@@ -226,6 +333,47 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             return null;
         }
 
+        private static List<long?>? TryReadTimestampArray(JsonElement obj, string fieldName)
+        {
+            if (!obj.TryGetProperty(fieldName, out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var result = new List<long?>();
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Number && item.TryGetInt64(out var numeric))
+                {
+                    result.Add(NormalizeTimestamp(numeric));
+                    continue;
+                }
+
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var text = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        if (long.TryParse(text, out var numericText))
+                        {
+                            result.Add(NormalizeTimestamp(numericText));
+                            continue;
+                        }
+
+                        if (DateTimeOffset.TryParse(text, out var dateTime))
+                        {
+                            result.Add(dateTime.ToUnixTimeMilliseconds());
+                            continue;
+                        }
+                    }
+                }
+
+                result.Add(null);
+            }
+
+            return result;
+        }
+
         private static decimal? TryReadDecimal(JsonElement obj, string fieldName)
         {
             if (!obj.TryGetProperty(fieldName, out var value))
@@ -250,6 +398,38 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             return null;
         }
 
+        private static List<decimal?>? TryReadDecimalArray(JsonElement obj, string fieldName)
+        {
+            if (!obj.TryGetProperty(fieldName, out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var result = new List<decimal?>();
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Number && item.TryGetDecimal(out var numeric))
+                {
+                    result.Add(numeric);
+                    continue;
+                }
+
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var text = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(text) && decimal.TryParse(text, out var numericText))
+                    {
+                        result.Add(numericText);
+                        continue;
+                    }
+                }
+
+                result.Add(null);
+            }
+
+            return result;
+        }
+
         private static string? TryReadString(JsonElement obj, string fieldName)
         {
             if (!obj.TryGetProperty(fieldName, out var value))
@@ -265,6 +445,22 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             return null;
         }
 
+        private static List<string?>? TryReadStringArray(JsonElement obj, string fieldName)
+        {
+            if (!obj.TryGetProperty(fieldName, out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var result = new List<string?>();
+            foreach (var item in value.EnumerateArray())
+            {
+                result.Add(item.ValueKind == JsonValueKind.String ? item.GetString() : null);
+            }
+
+            return result;
+        }
+
         private static long NormalizeTimestamp(long raw)
         {
             // 小于 10^11 基本可判定为秒级时间戳。
@@ -272,5 +468,15 @@ namespace ServerTest.Modules.Indicators.Infrastructure
         }
 
         private readonly record struct FearGreedPoint(long Timestamp, decimal Value, string? Classification);
+
+        private readonly record struct FearGreedSeriesPoint(FearGreedPoint Point, FearGreedDerivedSignals Signals);
+
+        private readonly record struct FearGreedDerivedSignals(
+            bool Below9,
+            bool Below10,
+            int Below9StreakDays,
+            int Below10StreakDays,
+            bool Below9Consecutive3d,
+            bool Below10Consecutive3d);
     }
 }

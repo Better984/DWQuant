@@ -1,6 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts';
 import type { ECharts, EChartsOption } from 'echarts';
+import { HttpError } from '../../network/httpClient';
+import type { DiscoverFeedItem } from '../../network/discover/feedClient';
+import { pullDiscoverArticles, pullDiscoverNewsflashes } from '../../network/discover/feedClient';
 import './DiscoverModule.css';
 
 interface ChartPalette {
@@ -10,6 +13,11 @@ interface ChartPalette {
   colorPrimary: string;
   colorWarning: string;
 }
+
+const INITIAL_LIMIT = 20;
+const HISTORY_LIMIT = 20;
+const INCREMENT_LIMIT = 200;
+const POLL_INTERVAL_MS = 8000;
 
 const createPalette = (isDarkMode: boolean): ChartPalette => ({
   textPrimary: isDarkMode ? '#F3F4F6' : '#0F172A',
@@ -137,117 +145,20 @@ type DiscoverModuleProps = {
 };
 
 const DiscoverModule: React.FC<DiscoverModuleProps> = ({ focusNewsId, onFocusHandled }) => {
-  const newsItems = [
-    {
-      id: 'backpack-ipo',
-      time: '22:34',
-      title: '代币经济学新范式？当 Backpack 开始让 VC「延迟满足」',
-      source: 'BLOCKBEATS',
-      summary:
-        '原文标题：《长期主义：Backpack 的 IPO 豪赌》。Backpack 通过 IPO 约束 VC 与团队的变现节奏，对传统「短期套现」模式形成对冲。',
-    },
-    {
-      id: 'jump-prediction',
-      time: '22:30',
-      title: '华尔街顶级量化机构 Jump Trading 杀入预测市场，散户时代结束了？',
-      source: 'chaincatcher',
-      summary:
-        'Jump Trading 将通过为 Kalshi 与 Polymarket 提供流动性换取股权，机构化做市有望显著提升预测市场的深度与效率。',
-    },
-    {
-      id: 'megaeth-launch',
-      time: '21:12',
-      title: 'L2 疲软当头、Vitalik 转向悲观，MegaETH 此时上线胜算几何？',
-      source: 'chaincatcher',
-      summary:
-        'Layer 2 网络 MegaETH 在 L2 叙事降温时选择上线主网，主打「即时区块链」，但能否在性能与开发者生态上突围仍存不确定性。',
-    },
-    {
-      id: 'rootdata-transparency',
-      time: '21:08',
-      title: 'RootData：2026 年 1 月加密交易所透明度研究报告',
-      source: 'chaincatcher',
-      summary:
-        '报告指出 2026 年 1 月全球交易所整体交易量同比下滑超 50%，市值回落 20%+，交易所资产证明与真实流动性成为行业焦点。',
-    },
-    {
-      id: 'ark-stablecoin',
-      time: '21:00',
-      title: 'ARK Invest：稳定币，下一代货币体系的基石？',
-      source: 'ODAILY',
-      summary:
-        'ARK 数字资产研究团队认为，在 GENIUS 法案等监管进展推动下，稳定币有望从加密原生资产升级为全球支付与结算网络的关键基础设施。',
-    },
-    {
-      id: 'openclaw-deploy',
-      time: '20:00',
-      title: 'OpenClaw 极简部署：最快 1 分钟搞定，纯小白友好教程',
-      source: 'ODAILY',
-      summary:
-        'Biteye 团队总结 6 种 OpenClaw 部署路径，从云端到本地一键脚本，帮助非技术用户用最低门槛拥有自己的 AI 员工。',
-    },
-    {
-      id: 'crypto-2002-analogy',
-      time: '19:30',
-      title: '黎明前的黑暗：2026 年的 Crypto = 2002 年的互联网',
-      source: 'PANews',
-      summary:
-        '作者将当下加密市场的沉寂比作 2002 年互联网泡沫破裂后的重建期，认为真正具备长期价值的项目正在这一阶段完成打磨。',
-    },
-    {
-      id: 'daily-intel-0210',
-      time: '19:18',
-      title: '2 月 10 日市场关键情报，你错过了多少？',
-      source: 'BLOCKBEATS',
-      summary:
-        '盘点修复性反弹后的横盘走势、Base 生态代币 BNKR 异动、美政府停摆风险等宏观与微观事件，作为当日情绪与风险偏好的快照。',
-    },
-    {
-      id: 'kalshi-nba',
-      time: '19:00',
-      title: '字母哥入股 Kalshi：当 NBA 巨星成为「利益相关方」',
-      source: 'ODAILY',
-      summary:
-        'NBA 球星字母哥入股预测市场平台 Kalshi，被视为体育明星与金融基础设施深度绑定的新样本，或将带动更广泛的散户参与。',
-    },
-    {
-      id: 'bithumb-2000btc',
-      time: '18:34',
-      title: '2000 枚 BTC 的险情背后：CEX 账本的根本问题',
-      source: 'ODAILY',
-      summary:
-        '韩国交易所 Bithumb 在一次营销活动中意外引发 2000 BTC 级别资金错配事故，暴露中心化交易所内部账本与风控流程的结构性风险。',
-    },
-  ];
-
-  const flashItems = [
-    {
-      time: '21:00',
-      title: 'ARK Invest：稳定币，下一代货币体系的基石？',
-      source: 'ODAILY',
-      summary:
-        '稳定币供应与使用数据创新高，ARK 认为其有望成为跨境支付与结算的新基础设施。',
-    },
-    {
-      time: '20:00',
-      title: 'OpenClaw 极简部署：最快 1 分钟搞定，纯小白友好教程',
-      source: 'ODAILY',
-      summary:
-        '横评 6 种 OpenClaw 部署方式，从 Docker 到一键脚本，帮助非技术用户快速搭建 AI 代理。',
-    },
-    {
-      time: '19:30',
-      title: '黎明前的黑暗：2026 年的 Crypto = 2002 年的互联网',
-      source: 'PANews',
-      summary: '作者将当前加密寒冬类比 2002 年互联网谷底，强调长周期创新与耐心的重要性。',
-    },
-    {
-      time: '19:18',
-      title: '2 月 10 日市场关键情报，你错过了多少？',
-      source: 'BLOCKBEATS',
-      summary: '汇总当日宏观要闻、交易所动向与项目进展，作为盘后情报笔记。',
-    },
-  ];
+  const [newsItems, setNewsItems] = useState<DiscoverFeedItem[]>([]);
+  const [flashItems, setFlashItems] = useState<DiscoverFeedItem[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [flashLoading, setFlashLoading] = useState(false);
+  const [newsLoadingMore, setNewsLoadingMore] = useState(false);
+  const [flashLoadingMore, setFlashLoadingMore] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
+  const [flashError, setFlashError] = useState<string | null>(null);
+  const [newsHasMore, setNewsHasMore] = useState(true);
+  const [flashHasMore, setFlashHasMore] = useState(true);
+  const newsItemsRef = useRef<DiscoverFeedItem[]>([]);
+  const flashItemsRef = useRef<DiscoverFeedItem[]>([]);
+  const newsIncrementRunningRef = useRef(false);
+  const flashIncrementRunningRef = useRef(false);
 
   const fearGreed = {
     today: 10,
@@ -257,41 +168,183 @@ const DiscoverModule: React.FC<DiscoverModuleProps> = ({ focusNewsId, onFocusHan
   };
 
   useEffect(() => {
+    newsItemsRef.current = newsItems;
+  }, [newsItems]);
+
+  useEffect(() => {
+    flashItemsRef.current = flashItems;
+  }, [flashItems]);
+
+  const loadInitialFeeds = useCallback(async (signal?: AbortSignal) => {
+    setNewsLoading(true);
+    setFlashLoading(true);
+    setNewsError(null);
+    setFlashError(null);
+
+    const [articleResult, flashResult] = await Promise.allSettled([
+      pullDiscoverArticles({ limit: INITIAL_LIMIT }, { signal }),
+      pullDiscoverNewsflashes({ limit: INITIAL_LIMIT }, { signal }),
+    ]);
+
+    if (articleResult.status === 'fulfilled') {
+      const sorted = sortItemsDesc(articleResult.value.items);
+      setNewsItems(sorted);
+      setNewsHasMore(articleResult.value.hasMore);
+      setNewsError(null);
+    } else {
+      setNewsError(resolveHttpErrorMessage(articleResult.reason, '新闻加载失败'));
+    }
+    setNewsLoading(false);
+
+    if (flashResult.status === 'fulfilled') {
+      const sorted = sortItemsDesc(flashResult.value.items);
+      setFlashItems(sorted);
+      setFlashHasMore(flashResult.value.hasMore);
+      setFlashError(null);
+    } else {
+      setFlashError(resolveHttpErrorMessage(flashResult.reason, '快讯加载失败'));
+    }
+    setFlashLoading(false);
+  }, []);
+
+  const pullIncrementalArticles = useCallback(async () => {
+    const current = newsItemsRef.current;
+    if (current.length <= 0 || newsIncrementRunningRef.current) {
+      return;
+    }
+
+    const latestId = current[0]?.id;
+    if (!latestId || latestId <= 0) {
+      return;
+    }
+
+    newsIncrementRunningRef.current = true;
+    try {
+      const result = await pullDiscoverArticles({ latestId, limit: INCREMENT_LIMIT });
+      if (!result.items || result.items.length <= 0) {
+        return;
+      }
+
+      setNewsItems((prev) => mergeItemsDesc(prev, sortItemsDesc(result.items)));
+    } catch (error) {
+      console.warn('[Discover] 新闻增量拉取失败', error);
+    } finally {
+      newsIncrementRunningRef.current = false;
+    }
+  }, []);
+
+  const pullIncrementalFlashes = useCallback(async () => {
+    const current = flashItemsRef.current;
+    if (current.length <= 0 || flashIncrementRunningRef.current) {
+      return;
+    }
+
+    const latestId = current[0]?.id;
+    if (!latestId || latestId <= 0) {
+      return;
+    }
+
+    flashIncrementRunningRef.current = true;
+    try {
+      const result = await pullDiscoverNewsflashes({ latestId, limit: INCREMENT_LIMIT });
+      if (!result.items || result.items.length <= 0) {
+        return;
+      }
+
+      setFlashItems((prev) => mergeItemsDesc(prev, sortItemsDesc(result.items)));
+    } catch (error) {
+      console.warn('[Discover] 快讯增量拉取失败', error);
+    } finally {
+      flashIncrementRunningRef.current = false;
+    }
+  }, []);
+
+  const loadMoreNews = useCallback(async () => {
+    const newsList = newsItemsRef.current;
+    const oldestId = newsList.length > 0 ? newsList[newsList.length - 1]?.id : undefined;
+    if (!oldestId || oldestId <= 0 || newsLoadingMore || !newsHasMore) {
+      return;
+    }
+
+    setNewsLoadingMore(true);
+    setNewsError(null);
+    try {
+      const result = await pullDiscoverArticles({ beforeId: oldestId, limit: HISTORY_LIMIT });
+      setNewsItems((prev) => mergeItemsDesc(prev, sortItemsDesc(result.items)));
+      setNewsHasMore(result.hasMore);
+    } catch (error) {
+      setNewsError(resolveHttpErrorMessage(error, '新闻加载失败'));
+    } finally {
+      setNewsLoadingMore(false);
+    }
+  }, [newsHasMore, newsLoadingMore]);
+
+  const loadMoreFlashes = useCallback(async () => {
+    const flashList = flashItemsRef.current;
+    const oldestId = flashList.length > 0 ? flashList[flashList.length - 1]?.id : undefined;
+    if (!oldestId || oldestId <= 0 || flashLoadingMore || !flashHasMore) {
+      return;
+    }
+
+    setFlashLoadingMore(true);
+    setFlashError(null);
+    try {
+      const result = await pullDiscoverNewsflashes({ beforeId: oldestId, limit: HISTORY_LIMIT });
+      setFlashItems((prev) => mergeItemsDesc(prev, sortItemsDesc(result.items)));
+      setFlashHasMore(result.hasMore);
+    } catch (error) {
+      setFlashError(resolveHttpErrorMessage(error, '快讯加载失败'));
+    } finally {
+      setFlashLoadingMore(false);
+    }
+  }, [flashHasMore, flashLoadingMore]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadInitialFeeds(controller.signal);
+
+    const intervalId = window.setInterval(() => {
+      void pullIncrementalArticles();
+      void pullIncrementalFlashes();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [loadInitialFeeds, pullIncrementalArticles, pullIncrementalFlashes]);
+
+  useEffect(() => {
     if (!focusNewsId) {
       return;
     }
 
-    // 先等待当前页面与列表渲染完成，再执行滚动与高亮动画，保证切换动作线性进行
     const scrollTimer = window.setTimeout(() => {
       const element = document.getElementById(`discover-news-${focusNewsId}`);
       if (!element) {
-        onFocusHandled?.();
+        if (newsItems.length > 0) {
+          onFocusHandled?.();
+        }
         return;
       }
 
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
       const animationTimer = window.setTimeout(() => {
         element.classList.add('discover-news-item--focused');
         const cleanupTimer = window.setTimeout(() => {
           element.classList.remove('discover-news-item--focused');
           onFocusHandled?.();
         }, 800);
-
-        return () => {
-          window.clearTimeout(cleanupTimer);
-        };
+        return () => window.clearTimeout(cleanupTimer);
       }, 500);
 
-      return () => {
-        window.clearTimeout(animationTimer);
-      };
+      return () => window.clearTimeout(animationTimer);
     }, 0);
 
     return () => {
       window.clearTimeout(scrollTimer);
     };
-  }, [focusNewsId, onFocusHandled]);
+  }, [focusNewsId, onFocusHandled, newsItems.length]);
 
   return (
     <div className="module-container discover-module-container">
@@ -300,30 +353,52 @@ const DiscoverModule: React.FC<DiscoverModuleProps> = ({ focusNewsId, onFocusHan
       </div>
 
       <div className="discover-layout">
-        {/* 左侧新闻列表：约 2/3 宽度 */}
         <section className="discover-news-section">
           <h2 className="discover-section-title">新闻</h2>
-          <ul className="discover-news-list">
-            {newsItems.map((item) => (
-              <li
-                key={item.id}
-                id={`discover-news-${item.id}`}
-                className="discover-news-item"
-              >
-                <div className="discover-news-time">{item.time}</div>
-                <div className="discover-news-main">
-                  <div className="discover-news-title">{item.title}</div>
-                  <p className="discover-news-summary">{item.summary}</p>
-                  <div className="discover-news-meta">
-                    <span className="discover-news-source-chip">{item.source}</span>
+          <div className="discover-news-list-wrapper ui-scrollable">
+            {newsLoading && newsItems.length <= 0 ? (
+              <div className="discover-empty-tip">新闻加载中...</div>
+            ) : null}
+            {!newsLoading && newsError && newsItems.length <= 0 ? (
+              <div className="discover-empty-tip discover-empty-tip--error">{newsError}</div>
+            ) : null}
+            {!newsLoading && !newsError && newsItems.length <= 0 ? (
+              <div className="discover-empty-tip">暂无新闻数据</div>
+            ) : null}
+            <ul className="discover-news-list">
+              {newsItems.map((item) => (
+                <li
+                  key={item.id}
+                  id={`discover-news-${item.id}`}
+                  className="discover-news-item"
+                >
+                  <div className="discover-news-time">{formatReleaseTime(item.releaseTime)}</div>
+                  <div className="discover-news-main">
+                    <div className="discover-news-title">{item.title}</div>
+                    <p className="discover-news-summary">{resolveSummary(item)}</p>
+                    <div className="discover-news-meta">
+                      <span className="discover-news-source-chip">{item.source}</span>
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="discover-list-actions">
+            <button
+              type="button"
+              className="discover-list-more-btn"
+              onClick={() => void loadMoreNews()}
+              disabled={newsLoadingMore || !newsHasMore}
+            >
+              {newsLoadingMore ? '加载中...' : newsHasMore ? '加载更早新闻' : '没有更早新闻'}
+            </button>
+          </div>
+          {newsError && newsItems.length > 0 ? (
+            <div className="discover-inline-error">{newsError}</div>
+          ) : null}
         </section>
 
-        {/* 右侧：恐惧&贪婪指数 + 快讯 */}
         <aside className="discover-right-column">
           <section className="discover-fg-card">
             <div className="discover-section-title-row">
@@ -346,14 +421,23 @@ const DiscoverModule: React.FC<DiscoverModuleProps> = ({ focusNewsId, onFocusHan
             <div className="discover-section-title-row">
               <h2 className="discover-section-title">快讯</h2>
             </div>
-            <div className="discover-flash-section">
+            {flashLoading && flashItems.length <= 0 ? (
+              <div className="discover-empty-tip">快讯加载中...</div>
+            ) : null}
+            {!flashLoading && flashError && flashItems.length <= 0 ? (
+              <div className="discover-empty-tip discover-empty-tip--error">{flashError}</div>
+            ) : null}
+            {!flashLoading && !flashError && flashItems.length <= 0 ? (
+              <div className="discover-empty-tip">暂无快讯数据</div>
+            ) : null}
+            <div className="discover-flash-section ui-scrollable">
               <ul className="discover-flash-list">
-                {flashItems.map((item, index) => (
-                  <li key={index} className="discover-flash-item">
-                    <div className="discover-flash-time">{item.time}</div>
+                {flashItems.map((item) => (
+                  <li key={item.id} className="discover-flash-item">
+                    <div className="discover-flash-time">{formatReleaseTime(item.releaseTime)}</div>
                     <div className="discover-flash-content">
                       <div className="discover-flash-title">{item.title}</div>
-                      <p className="discover-flash-summary">{item.summary}</p>
+                      <p className="discover-flash-summary">{resolveSummary(item)}</p>
                       <div className="discover-flash-meta">
                         <span className="discover-flash-source-chip">{item.source}</span>
                       </div>
@@ -362,6 +446,19 @@ const DiscoverModule: React.FC<DiscoverModuleProps> = ({ focusNewsId, onFocusHan
                 ))}
               </ul>
             </div>
+            <div className="discover-list-actions">
+              <button
+                type="button"
+                className="discover-list-more-btn"
+                onClick={() => void loadMoreFlashes()}
+                disabled={flashLoadingMore || !flashHasMore}
+              >
+                {flashLoadingMore ? '加载中...' : flashHasMore ? '加载更早快讯' : '没有更早快讯'}
+              </button>
+            </div>
+            {flashError && flashItems.length > 0 ? (
+              <div className="discover-inline-error">{flashError}</div>
+            ) : null}
           </section>
         </aside>
       </div>
@@ -369,5 +466,83 @@ const DiscoverModule: React.FC<DiscoverModuleProps> = ({ focusNewsId, onFocusHan
   );
 };
 
-export default DiscoverModule;
+function sortItemsDesc(items: DiscoverFeedItem[]): DiscoverFeedItem[] {
+  return [...items].sort((a, b) => {
+    if (b.releaseTime !== a.releaseTime) {
+      return b.releaseTime - a.releaseTime;
+    }
+    return b.id - a.id;
+  });
+}
 
+function mergeItemsDesc(baseItems: DiscoverFeedItem[], incomingItems: DiscoverFeedItem[]): DiscoverFeedItem[] {
+  if (incomingItems.length <= 0) {
+    return baseItems;
+  }
+
+  const map = new Map<number, DiscoverFeedItem>();
+  for (const item of baseItems) {
+    map.set(item.id, item);
+  }
+  for (const item of incomingItems) {
+    map.set(item.id, item);
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.releaseTime !== a.releaseTime) {
+      return b.releaseTime - a.releaseTime;
+    }
+    return b.id - a.id;
+  });
+}
+
+function resolveSummary(item: DiscoverFeedItem): string {
+  const summary = item.summary?.trim();
+  if (summary) {
+    return summary;
+  }
+
+  return stripHtml(item.contentHtml).slice(0, 280);
+}
+
+function stripHtml(input: string): string {
+  if (!input) {
+    return '';
+  }
+
+  return input
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatReleaseTime(releaseTime: number): string {
+  if (!Number.isFinite(releaseTime) || releaseTime <= 0) {
+    return '--:--';
+  }
+
+  const date = new Date(releaseTime);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--';
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+function resolveHttpErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof HttpError) {
+    return error.message || fallback;
+  }
+
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+
+  return fallback;
+}
+
+export default DiscoverModule;

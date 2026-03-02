@@ -48,6 +48,7 @@ namespace ServerTest.Modules.Backtest.Application
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger<BacktestMainLoop> _logger;
         private readonly TalibWasmNodeInvoker? _wasmInvoker;
+        private readonly PublicIndicatorValueProvider? _publicIndicatorValueProvider;
 
         public BacktestMainLoop(
             IOptions<RuntimeQueueOptions> queueOptions,
@@ -56,7 +57,8 @@ namespace ServerTest.Modules.Backtest.Application
             BacktestProgressPushService progressPushService,
             TalibWasmNodeInvoker? wasmInvoker,
             ILoggerFactory loggerFactory,
-            ILogger<BacktestMainLoop> logger)
+            ILogger<BacktestMainLoop> logger,
+            PublicIndicatorValueProvider? publicIndicatorValueProvider = null)
         {
             _queueOptions = queueOptions?.Value ?? new RuntimeQueueOptions();
             _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
@@ -65,6 +67,7 @@ namespace ServerTest.Modules.Backtest.Application
             _wasmInvoker = wasmInvoker;
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _publicIndicatorValueProvider = publicIndicatorValueProvider;
         }
 
         internal async Task<BacktestMainLoopResult> ExecuteAsync(
@@ -95,7 +98,8 @@ namespace ServerTest.Modules.Backtest.Application
             var valueResolver = new IndicatorValueResolver(
                 provider,
                 indicatorEngine,
-                _loggerFactory.CreateLogger<IndicatorValueResolver>());
+                _loggerFactory.CreateLogger<IndicatorValueResolver>(),
+                _publicIndicatorValueProvider);
             var conditionCache = new ConditionCacheService();
             var conditionEvaluator = new ConditionEvaluator(conditionCache);
 
@@ -953,7 +957,8 @@ namespace ServerTest.Modules.Backtest.Application
             var valueResolver = new IndicatorValueResolver(
                 indicatorProvider,
                 indicatorEngine,
-                _loggerFactory.CreateLogger<IndicatorValueResolver>());
+                _loggerFactory.CreateLogger<IndicatorValueResolver>(),
+                _publicIndicatorValueProvider);
             var evaluator = new ConditionEvaluator(new ConditionCacheService());
             var signalCollector = new BatchSignalCollectorExecutor(runtime.State);
 
