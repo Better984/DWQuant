@@ -205,6 +205,10 @@ namespace ServerTest.Modules.StrategyManagement.Infrastructure
             {
                 return BadRequest(ApiResponse<object>.Error(runtimeError));
             }
+            if (!StrategyConditionConfigValidator.TryValidate(parsedConfig, out var conditionError))
+            {
+                return BadRequest(ApiResponse<object>.Error(conditionError));
+            }
 
             await using var connection = await _db.GetConnectionAsync();
             await using var transaction = await connection.BeginTransactionAsync();
@@ -712,6 +716,10 @@ WHERE us_id = @us_id AND uid = @uid
             if (!StrategyRuntimeConfigValidator.TryValidate(parsedConfig.Runtime, _runtimeTemplateProvider, out var runtimeError))
             {
                 return BadRequest(ApiResponse<object>.Error(runtimeError));
+            }
+            if (!StrategyConditionConfigValidator.TryValidate(parsedConfig, out var conditionError))
+            {
+                return BadRequest(ApiResponse<object>.Error(conditionError));
             }
             var changelog = request.Changelog?.Trim() ?? string.Empty;
             if (changelog.Length > 255)

@@ -5,8 +5,10 @@ import type {
   ConditionItem,
   IndicatorOutputGroup,
   MethodOption,
+  ValueOption,
 } from './StrategyModule.types';
 import { Dialog } from '../ui/index.ts';
+import { filterComparableOptionsByLeftRef } from './strategyConditionGuard';
 
 interface ConditionEditorDialogProps {
   open: boolean;
@@ -15,8 +17,10 @@ interface ConditionEditorDialogProps {
   conditionEditTarget: ConditionEditTarget | null;
   conditionDraft: ConditionItem | null;
   conditionError: string;
+  conditionRuleError: string;
   indicatorOutputGroups: IndicatorOutputGroup[];
   methodOptions: MethodOption[];
+  defaultTimeframe?: string;
   setConditionDraft: React.Dispatch<React.SetStateAction<ConditionItem | null>>;
   buildConditionPreview: (draft: ConditionItem | null) => string;
   renderToggle: (checked: boolean, onChange: () => void, label: string) => React.ReactNode;
@@ -40,8 +44,10 @@ const ConditionEditorDialog: React.FC<ConditionEditorDialogProps> = ({
   conditionEditTarget,
   conditionDraft,
   conditionError,
+  conditionRuleError,
   indicatorOutputGroups,
   methodOptions,
+  defaultTimeframe,
   setConditionDraft,
   buildConditionPreview,
   renderToggle,
@@ -179,6 +185,73 @@ const ConditionEditorDialog: React.FC<ConditionEditorDialogProps> = ({
   const extraArgMode = resolveArgMode(methodMeta, 2);
   const resolvedRightType = rightArgMode === 'both' ? rightValueType : rightArgMode;
   const resolvedExtraType = extraArgMode === 'both' ? extraValueType : extraArgMode;
+  const flatOptions = useMemo<ValueOption[]>(
+    () => indicatorOutputGroups.flatMap((group) => group.options),
+    [indicatorOutputGroups],
+  );
+  const optionMap = useMemo(
+    () => new Map(flatOptions.map((option) => [option.id, option])),
+    [flatOptions],
+  );
+  const leftRef = optionMap.get(conditionDraft?.leftValueId || '')?.ref;
+  const leftLabel = (optionMap.get(conditionDraft?.leftValueId || '')?.label || '').trim();
+  const rightRef = optionMap.get(conditionDraft?.rightValueId || '')?.ref;
+  const rightFieldOptions = useMemo(
+    () => filterComparableOptionsByLeftRef(leftRef, flatOptions, undefined, defaultTimeframe),
+    [defaultTimeframe, leftRef, flatOptions],
+  );
+  const extraFieldOptions = useMemo(
+    () => filterComparableOptionsByLeftRef(leftRef, flatOptions, [rightRef], defaultTimeframe),
+    [defaultTimeframe, leftRef, flatOptions, rightRef],
+  );
+  const filterGroupsByOptions = (options: ValueOption[]) => {
+    const allowedIds = new Set(options.map((option) => option.id));
+    return indicatorOutputGroups
+      .map((group) => ({
+        ...group,
+        options: group.options.filter((option) => allowedIds.has(option.id)),
+      }))
+      .filter((group) => group.options.length > 0);
+  };
+  const rightOutputGroups = useMemo(
+    () => filterGroupsByOptions(rightFieldOptions),
+    [indicatorOutputGroups, rightFieldOptions],
+  );
+  const extraOutputGroups = useMemo(
+    () => filterGroupsByOptions(extraFieldOptions),
+    [indicatorOutputGroups, extraFieldOptions],
+  );
+  // 字段候选为空时显示已选左值，帮助用户快速理解为何当前无法配置字段比较对象。
+  const buildNoMatchedOptionText = (fallback: string) =>
+    leftLabel ? `已选参与值：${leftLabel}，当前没有适配的交互对象` : fallback;
+
+  useEffect(() => {
+    if (!conditionDraft || argsCount < 2 || resolvedRightType !== 'field') {
+      return;
+    }
+    if (!conditionDraft.rightValueId) {
+      return;
+    }
+    const allowed = new Set(rightFieldOptions.map((item) => item.id));
+    if (allowed.has(conditionDraft.rightValueId)) {
+      return;
+    }
+    setConditionDraft((prev) => (prev ? { ...prev, rightValueId: '' } : prev));
+  }, [argsCount, conditionDraft, resolvedRightType, rightFieldOptions, setConditionDraft]);
+
+  useEffect(() => {
+    if (!conditionDraft || argsCount < 3 || resolvedExtraType !== 'field') {
+      return;
+    }
+    if (!conditionDraft.extraValueId) {
+      return;
+    }
+    const allowed = new Set(extraFieldOptions.map((item) => item.id));
+    if (allowed.has(conditionDraft.extraValueId)) {
+      return;
+    }
+    setConditionDraft((prev) => (prev ? { ...prev, extraValueId: '' } : prev));
+  }, [argsCount, conditionDraft, resolvedExtraType, extraFieldOptions, setConditionDraft]);
 
   return (
     <Dialog
@@ -302,8 +375,12 @@ const ConditionEditorDialog: React.FC<ConditionEditorDialogProps> = ({
                       setConditionDraft((prev) => (prev ? { ...prev, rightValueId: event.target.value } : prev))
                     }
                   >
-                    <option value="">请选择字段</option>
-                    {indicatorOutputGroups.map((group) => (
+                    <option value="">
+                      {rightFieldOptions.length > 0
+                        ? '请选择字段'
+                        : buildNoMatchedOptionText('无可选字段，请先选择左侧参与值')}
+                    </option>
+                    {rightOutputGroups.map((group) => (
                       <optgroup key={group.id} label={group.label}>
                         {group.options.map((option) => (
                           <option key={option.id} value={option.id}>
@@ -372,8 +449,12 @@ const ConditionEditorDialog: React.FC<ConditionEditorDialogProps> = ({
                       setConditionDraft((prev) => (prev ? { ...prev, extraValueId: event.target.value } : prev))
                     }
                   >
-                    <option value="">请选择字段</option>
-                    {indicatorOutputGroups.map((group) => (
+                    <option value="">
+                      {extraFieldOptions.length > 0
+                        ? '请选择字段'
+                        : buildNoMatchedOptionText('无可选字段，请先完成前置参数选择')}
+                    </option>
+                    {extraOutputGroups.map((group) => (
                       <optgroup key={group.id} label={group.label}>
                         {group.options.map((option) => (
                           <option key={option.id} value={option.id}>
@@ -429,7 +510,9 @@ const ConditionEditorDialog: React.FC<ConditionEditorDialogProps> = ({
               '必须满足此条件',
             )}
           </div>
-          {conditionError && <div className="condition-form-error">{conditionError}</div>}
+          {(conditionError || conditionRuleError) && (
+            <div className="condition-form-error">{conditionError || conditionRuleError}</div>
+          )}
         </div>
       </div>
     </Dialog>

@@ -12,7 +12,7 @@ import XrpIcon from '../../assets/icons/crypto/XRP.svg';
 import IndicatorGeneratorSelector, { type GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
 import ConditionEditorDialog from './ConditionEditorDialog';
 import StrategyConfigDialog from './StrategyConfigDialog';
-import StrategyEditorShell from './StrategyEditorShell';
+import StrategyWorkbench from './StrategyWorkbench';
 import type {
   ActionSetConfig,
   ConditionContainer,
@@ -38,6 +38,10 @@ import type {
 } from './StrategyModule.types';
 import { Dialog, useNotification } from '../ui/index.ts';
 import { HttpClient, getToken } from '../../network/index.ts';
+import {
+  buildConditionFingerprint,
+  validateConditionArgsSemantics,
+} from './strategyConditionGuard';
 
 export type StrategyEditorSubmitPayload = {
   name: string;
@@ -72,15 +76,29 @@ type IndicatorUsageItem = {
 };
 
 type IndicatorActionState = {
-  action: 'edit' | 'remove';
+  action: 'edit' | 'remove' | 'quick-input' | 'quick-param-edit';
   indicator: GeneratedIndicatorPayload;
   usages: IndicatorUsageItem[];
+  pendingIndicator?: GeneratedIndicatorPayload;
+  pendingInputLabel?: string;
 };
 
 type ExchangeApiKeyItem = {
   id: number;
   exchangeType: string;
   label: string;
+};
+
+type StrategyEditSnapshot = {
+  selectedIndicators: GeneratedIndicatorPayload[];
+  conditionContainers: ConditionContainer[];
+};
+
+type StrategyHistoryRecord = {
+  before: StrategyEditSnapshot;
+  after: StrategyEditSnapshot;
+  undoMessage: string;
+  redoMessage: string;
 };
 
 const KLINE_FIELD_DEFINITIONS = [
@@ -98,14 +116,91 @@ const KLINE_FIELD_DEFINITIONS = [
 
 const normalizeFieldKey = (raw?: string) => (raw || '').trim().toUpperCase();
 
+const FIELD_KEY_TO_INPUT_VALUE: Record<string, string> = {
+  OPEN: 'Open',
+  HIGH: 'High',
+  LOW: 'Low',
+  CLOSE: 'Close',
+  VOLUME: 'Volume',
+  HL2: 'HL2',
+  HLC3: 'HLC3',
+  OHLC4: 'OHLC4',
+  OC2: 'OC2',
+  HLCC4: 'HLCC4',
+};
+
 const buildFieldValueId = (input?: string) => {
   const key = normalizeFieldKey(input);
   return key ? `field:${key}` : '';
 };
 
-const buildIndicatorRefKey = (ref: StrategyValueRef) => {
+const parseFieldValueId = (valueId?: string) => {
+  const normalized = (valueId || '').trim().toUpperCase();
+  if (!normalized.startsWith('FIELD:')) {
+    return '';
+  }
+  return normalizeFieldKey(normalized.slice('FIELD:'.length));
+};
+
+const deepCloneJson = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const isEditableElementTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+};
+
+const normalizeTimeframeToken = (raw?: string) => {
+  const value = (raw || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!value) {
+    return '';
+  }
+  if (/^\d+mo$/.test(value)) {
+    return value;
+  }
+  if (/^mo\d+$/.test(value)) {
+    return `${value.slice(2)}mo`;
+  }
+  if (/^\d+[mhdw]$/.test(value)) {
+    return value;
+  }
+  if (/^[mhdw]\d+$/.test(value)) {
+    return `${value.slice(1)}${value[0]}`;
+  }
+  return value;
+};
+
+const timeframeLabelFromSeconds = (timeframeSec?: number) => {
+  return timeframeSec === 180 ? '3m'
+    : timeframeSec === 300 ? '5m'
+    : timeframeSec === 900 ? '15m'
+    : timeframeSec === 1800 ? '30m'
+    : timeframeSec === 3600 ? '1h'
+    : timeframeSec === 7200 ? '2h'
+    : timeframeSec === 14400 ? '4h'
+    : timeframeSec === 21600 ? '6h'
+    : timeframeSec === 28800 ? '8h'
+    : timeframeSec === 43200 ? '12h'
+    : timeframeSec === 86400 ? '1d'
+    : timeframeSec === 259200 ? '3d'
+    : timeframeSec === 604800 ? '1w'
+    : timeframeSec === 2592000 ? '1mo'
+    : '1m';
+};
+
+const resolveReferenceTimeframe = (raw?: string, fallback?: string) => {
+  const normalized = normalizeTimeframeToken(raw);
+  if (normalized) {
+    return normalized;
+  }
+  return normalizeTimeframeToken(fallback);
+};
+
+const buildIndicatorRefKey = (ref: StrategyValueRef, fallbackTimeframe?: string) => {
   const paramsKey = (ref.params || []).join(',');
-  return `${ref.indicator}|${ref.timeframe}|${ref.input}|${ref.output}|${paramsKey}`;
+  const timeframe = resolveReferenceTimeframe(ref.timeframe, fallbackTimeframe);
+  return `${ref.indicator}|${timeframe}|${ref.input}|${ref.output}|${paramsKey}`;
 };
 
 const normalizeConditionMethod = (raw?: string) => {
@@ -134,9 +229,9 @@ const createDefaultConditionContainers = (): ConditionContainer[] => ([
 ]);
 
 const createDefaultTradeConfig = (): StrategyTradeConfig => ({
-  exchange: 'bitget',
+  exchange: 'binance',
   symbol: 'BTC/USDT',
-  timeframeSec: 60,
+  timeframeSec: 300,
   positionMode: 'Cross',
   openConflictPolicy: 'GiveUp',
   sizing: {
@@ -321,11 +416,16 @@ const mergeRuntimeConfig = (initial?: StrategyRuntimeConfig): StrategyRuntimeCon
 };
 
 // 从 StrategyValueRef 创建 GeneratedIndicatorPayload
-const createIndicatorFromRef = (ref: StrategyValueRef, id: string): GeneratedIndicatorPayload => {
+const createIndicatorFromRef = (
+  ref: StrategyValueRef,
+  id: string,
+  defaultTimeframe: string,
+): GeneratedIndicatorPayload => {
   const params = ref.params || [];
+  const timeframe = resolveReferenceTimeframe(ref.timeframe, defaultTimeframe);
   const config = {
     indicator: ref.indicator,
-    timeframe: ref.timeframe,
+    timeframe,
     input: ref.input,
     params,
     output: ref.output,
@@ -344,7 +444,10 @@ const createIndicatorFromRef = (ref: StrategyValueRef, id: string): GeneratedInd
 };
 
 // 从配置中提取所有指标引用
-const extractIndicatorsFromConfig = (config: StrategyConfig): GeneratedIndicatorPayload[] => {
+const extractIndicatorsFromConfig = (
+  config: StrategyConfig,
+  defaultTimeframe: string,
+): GeneratedIndicatorPayload[] => {
   const indicatorMap = new Map<string, GeneratedIndicatorPayload>();
   let indicatorCounter = 0;
 
@@ -355,10 +458,10 @@ const extractIndicatorsFromConfig = (config: StrategyConfig): GeneratedIndicator
     if ((ref.refType || '').toLowerCase() !== 'indicator') {
       return;
     }
-    const key = `${ref.indicator}|${ref.timeframe}|${ref.input}|${ref.output}|${(ref.params || []).join(',')}`;
+    const key = buildIndicatorRefKey(ref, defaultTimeframe);
     if (!indicatorMap.has(key)) {
       indicatorCounter++;
-      indicatorMap.set(key, createIndicatorFromRef(ref, `loaded-${indicatorCounter}`));
+      indicatorMap.set(key, createIndicatorFromRef(ref, `loaded-${indicatorCounter}`, defaultTimeframe));
     }
   };
 
@@ -405,7 +508,10 @@ const extractIndicatorsFromConfig = (config: StrategyConfig): GeneratedIndicator
 };
 
 // 从配置中解析条件容器
-const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionContainer[] => {
+const parseConditionContainersFromConfig = (
+  config: StrategyConfig,
+  defaultTimeframe: string,
+): ConditionContainer[] => {
   const containers: ConditionContainer[] = [
     { id: 'open-long-filter', title: '开多筛选器', enabled: false, required: false, groups: [] },
     { id: 'open-short-filter', title: '开空筛选器', enabled: false, required: false, groups: [] },
@@ -461,7 +567,7 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
           } else if (refType === 'const' || refType === 'number') {
             leftValueId = '';
           } else {
-            leftValueId = buildIndicatorRefKey(ref);
+            leftValueId = buildIndicatorRefKey(ref, defaultTimeframe);
           }
         }
 
@@ -480,7 +586,7 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
               rightValueId = buildFieldValueId(ref.input);
             } else {
               rightValueType = 'field';
-              rightValueId = buildIndicatorRefKey(ref);
+              rightValueId = buildIndicatorRefKey(ref, defaultTimeframe);
             }
           }
         }
@@ -500,7 +606,7 @@ const parseConditionContainersFromConfig = (config: StrategyConfig): ConditionCo
               extraValueId = buildFieldValueId(ref.input);
             } else {
               extraValueType = 'field';
-              extraValueId = buildIndicatorRefKey(ref);
+              extraValueId = buildIndicatorRefKey(ref, defaultTimeframe);
             }
           }
         }
@@ -595,21 +701,27 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const [indicatorDialogMode, setIndicatorDialogMode] = useState<IndicatorDialogMode>('create');
   const [editingIndicator, setEditingIndicator] = useState<GeneratedIndicatorPayload | null>(null);
   const [indicatorAction, setIndicatorAction] = useState<IndicatorActionState | null>(null);
+  const [skipQuickInputConfirm, setSkipQuickInputConfirm] = useState(false);
+  const [preferIndicatorParamFocus, setPreferIndicatorParamFocus] = useState(false);
+  const initialStrategyTimeframe = useMemo(
+    () => timeframeLabelFromSeconds(initialConfig?.trade?.timeframeSec || initialTradeConfig?.timeframeSec || 60),
+    [initialConfig?.trade?.timeframeSec, initialTradeConfig?.timeframeSec],
+  );
   
   // 从配置中加载初始数据
   const loadedIndicators = useMemo(() => {
     if (!initialConfig) {
       return [];
     }
-    return extractIndicatorsFromConfig(initialConfig);
-  }, [initialConfig]);
+    return extractIndicatorsFromConfig(initialConfig, initialStrategyTimeframe);
+  }, [initialConfig, initialStrategyTimeframe]);
 
   const loadedContainers = useMemo(() => {
     if (!initialConfig) {
       return createDefaultConditionContainers();
     }
-    return parseConditionContainersFromConfig(initialConfig);
-  }, [initialConfig]);
+    return parseConditionContainersFromConfig(initialConfig, initialStrategyTimeframe);
+  }, [initialConfig, initialStrategyTimeframe]);
 
   const [selectedIndicators, setSelectedIndicators] = useState<GeneratedIndicatorPayload[]>(loadedIndicators);
   const [isConfigReviewOpen, setIsConfigReviewOpen] = useState(false);
@@ -648,8 +760,17 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const [conditionDraft, setConditionDraft] = useState<ConditionItem | null>(null);
   const [conditionEditTarget, setConditionEditTarget] = useState<ConditionEditTarget | null>(null);
   const [conditionError, setConditionError] = useState('');
+  const [historyPast, setHistoryPast] = useState<StrategyHistoryRecord[]>([]);
+  const [historyFuture, setHistoryFuture] = useState<StrategyHistoryRecord[]>([]);
+  const pendingHistoryMetaRef = useRef<{ undoMessage: string; redoMessage: string } | null>(null);
+  const historyReadyRef = useRef(false);
+  const historyApplyingRef = useRef(false);
+  const latestSnapshotRef = useRef<StrategyEditSnapshot | null>(null);
+  const HISTORY_LIMIT = 160;
   const MAX_GROUPS_PER_CONTAINER = 3;
   const MAX_CONDITIONS_PER_GROUP = 6;
+  const MAX_TOTAL_CONDITIONS =
+    createDefaultConditionContainers().length * MAX_GROUPS_PER_CONTAINER * MAX_CONDITIONS_PER_GROUP;
 
   const exchangeOptions: TradeOption[] = [
     { value: 'binance', label: '币安', icon: BinanceIcon },
@@ -684,9 +805,49 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     { value: 2592000, label: '1mo' },
   ];
 
-  const timeframeSecondsMap = useMemo(() => {
-    return new Map(timeframeOptions.map((option) => [option.label, option.value]));
-  }, [timeframeOptions]);
+  const tradeDefaultTimeframe = useMemo(() => {
+    const matched = timeframeOptions.find((option) => option.value === tradeConfig.timeframeSec);
+    return (matched?.label || '1m').trim();
+  }, [timeframeOptions, tradeConfig.timeframeSec]);
+  const applyIndicatorTimeframe = (
+    indicator: GeneratedIndicatorPayload,
+    timeframe: string,
+  ): GeneratedIndicatorPayload => {
+    const config = { ...(indicator.config as Record<string, unknown>) };
+    const normalized = resolveReferenceTimeframe(
+      typeof config.timeframe === 'string' ? config.timeframe : '',
+      timeframe,
+    );
+    if (config.timeframe === normalized) {
+      return indicator;
+    }
+    const nextConfig = {
+      ...config,
+      timeframe: normalized,
+    };
+    return {
+      ...indicator,
+      config: nextConfig,
+      configText: JSON.stringify(nextConfig, null, 2),
+    };
+  };
+
+  useEffect(() => {
+    if (!tradeDefaultTimeframe) {
+      return;
+    }
+    setSelectedIndicators((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        const updated = applyIndicatorTimeframe(item, tradeDefaultTimeframe);
+        if (updated !== item) {
+          changed = true;
+        }
+        return updated;
+      });
+      return changed ? next : prev;
+    });
+  }, [tradeDefaultTimeframe]);
 
   const leverageOptions = [10, 20, 50, 100];
   const positionModeOptions: TradeOption[] = [
@@ -840,12 +1001,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       const defaultStrategyName = `${month}月${day}日${hour}时${minute}分创建的策略`;
       setStrategyName(defaultStrategyName);
     }
-    if (selectedIndicators.length > 0 && tradeConfig.timeframeSec === 60) {
-      const derived = resolveTradeTimeframeSec();
-      if (derived) {
-        setTradeConfig((prev) => ({ ...prev, timeframeSec: derived }));
-      }
-    }
   };
 
   const closeConfigReview = () => {
@@ -912,7 +1067,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     };
     return {
       indicatorCode: (config.indicator || indicator.code || '').trim(),
-      timeframe: (config.timeframe || '').trim(),
+      timeframe: resolveReferenceTimeframe(config.timeframe, tradeDefaultTimeframe),
       input: (config.input || '').trim(),
       params: Array.isArray(config.params) ? config.params.map(Number) : [],
       offsetRange: Array.isArray(config.offsetRange) ? config.offsetRange.map(Number) : [],
@@ -927,12 +1082,51 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     const offsetRange = config.offsetRange.length > 0 ? config.offsetRange.join(',') : '';
     return [
       config.indicatorCode,
-      config.timeframe.toLowerCase(),
       config.input,
       params,
       offsetRange,
       config.calcMode,
     ].join('|');
+  };
+
+  const rewriteIndicatorInputSource = (rawInput: string, nextInput: string) => {
+    const text = (rawInput || '').trim();
+    if (!text || !text.includes('=')) {
+      return nextInput;
+    }
+
+    const segments = text
+      .split(';')
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    if (segments.length === 0) {
+      return nextInput;
+    }
+
+    let hasPatched = false;
+    const patched = segments.map((segment, index) => {
+      const [rawKey, ...rest] = segment.split('=');
+      const key = (rawKey || '').trim();
+      if (!key || rest.length === 0) {
+        return segment;
+      }
+      const lowerKey = key.toLowerCase();
+      const shouldPatch = lowerKey === 'real' || (!hasPatched && index === 0);
+      if (shouldPatch) {
+        hasPatched = true;
+        return `${key}=${nextInput}`;
+      }
+      return segment;
+    });
+
+    return patched.join(';');
+  };
+
+  const commitIndicatorUpdate = (nextIndicator: GeneratedIndicatorPayload) => {
+    setSelectedIndicators((prev) =>
+      prev.map((item) => (item.id === nextIndicator.id ? nextIndicator : item)),
+    );
+    syncIndicatorReferences(nextIndicator);
   };
 
   const validateIndicator = (indicator: GeneratedIndicatorPayload, mode: IndicatorDialogMode) => {
@@ -1039,17 +1233,36 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const handleAddIndicator = (indicator: GeneratedIndicatorPayload) => {
-    setSelectedIndicators((prev) => [indicator, ...prev]);
+    const nextIndicator = applyIndicatorTimeframe(indicator, tradeDefaultTimeframe);
+    const name = describeIndicatorForHistory(nextIndicator);
+    markHistoryAction(`新增指标 ${name}`);
+    setSelectedIndicators((prev) => [nextIndicator, ...prev]);
   };
 
   const handleUpdateIndicator = (indicator: GeneratedIndicatorPayload) => {
-    setSelectedIndicators((prev) =>
-      prev.map((item) => (item.id === indicator.id ? indicator : item)),
-    );
-    syncIndicatorReferences(indicator);
+    const nextIndicator = applyIndicatorTimeframe(indicator, tradeDefaultTimeframe);
+    const previous = selectedIndicators.find((item) => item.id === nextIndicator.id);
+    const previousConfig = (previous?.config || {}) as { input?: string; params?: number[] };
+    const nextConfig = (nextIndicator.config || {}) as { input?: string; params?: number[] };
+    const previousInput = String(previousConfig.input || '').trim();
+    const nextInput = String(nextConfig.input || '').trim();
+    const previousParams = Array.isArray(previousConfig.params) ? previousConfig.params.join(',') : '';
+    const nextParams = Array.isArray(nextConfig.params) ? nextConfig.params.join(',') : '';
+    let detail = `修改指标 ${describeIndicatorForHistory(nextIndicator)}`;
+    if (previousInput !== nextInput) {
+      detail = `修改指标输入源 ${describeIndicatorForHistory(nextIndicator)}: ${previousInput || '-'} -> ${nextInput || '-'}`;
+    } else if (previousParams !== nextParams) {
+      detail = `修改指标参数 ${describeIndicatorForHistory(nextIndicator)}: ${previousParams || '-'} -> ${nextParams || '-'}`;
+    }
+    markHistoryAction(detail);
+    commitIndicatorUpdate(nextIndicator);
   };
 
   const removeIndicator = (indicatorId: string) => {
+    const indicator = selectedIndicators.find((item) => item.id === indicatorId);
+    if (indicator) {
+      markHistoryAction(`删除指标 ${describeIndicatorForHistory(indicator)}`);
+    }
     setSelectedIndicators((prev) => prev.filter((item) => item.id !== indicatorId));
     setConditionContainers((prev) =>
       prev.map((container) => ({
@@ -1094,9 +1307,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     setIsIndicatorGeneratorOpen(true);
   };
 
-  const openIndicatorEditor = (indicator: GeneratedIndicatorPayload) => {
+  const openIndicatorEditor = (indicator: GeneratedIndicatorPayload, focusParam = false) => {
     setIndicatorDialogMode('edit');
     setEditingIndicator(indicator);
+    setPreferIndicatorParamFocus(focusParam);
     setIsIndicatorGeneratorOpen(true);
   };
 
@@ -1104,6 +1318,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     setIsIndicatorGeneratorOpen(false);
     setEditingIndicator(null);
     setIndicatorDialogMode('create');
+    setPreferIndicatorParamFocus(false);
   };
 
   const requestEditIndicator = (indicatorId: string) => {
@@ -1132,6 +1347,89 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     removeIndicator(indicatorId);
   };
 
+  const requestQuickEditIndicatorParams = (indicatorId: string) => {
+    const indicator = selectedIndicators.find((item) => item.id === indicatorId);
+    if (!indicator) {
+      error('目标指标不存在，请刷新后重试');
+      return;
+    }
+
+    const config = (indicator.config || {}) as { params?: unknown[] };
+    const hasParams = Array.isArray(config.params) && config.params.length > 0;
+    if (!hasParams) {
+      success('该指标没有可编辑参数，请使用编辑功能调整其他配置');
+      return;
+    }
+
+    const usages = collectIndicatorUsages(indicatorId);
+    if (usages.length > 0) {
+      setIndicatorAction({ action: 'quick-param-edit', indicator, usages });
+      return;
+    }
+    openIndicatorEditor(indicator, true);
+  };
+
+  const quickUpdateIndicatorInput = (
+    indicatorId: string,
+    fieldValueId: string,
+    skipConfirmCheck = false,
+  ) => {
+    const indicator = selectedIndicators.find((item) => item.id === indicatorId);
+    if (!indicator) {
+      error('目标指标不存在，请刷新后重试');
+      return;
+    }
+
+    const fieldKey = parseFieldValueId(fieldValueId);
+    if (!fieldKey) {
+      error('仅支持将K线字段拖拽到指标上修改输入源');
+      return;
+    }
+    const nextInput = FIELD_KEY_TO_INPUT_VALUE[fieldKey] || fieldKey;
+    const currentConfig = (indicator.config || {}) as Record<string, unknown>;
+    const currentInput = String(currentConfig.input || '').trim();
+    const patchedInput = rewriteIndicatorInputSource(currentInput, nextInput);
+    if (!patchedInput || patchedInput === currentInput) {
+      return;
+    }
+
+    const nextConfig = {
+      ...currentConfig,
+      input: patchedInput,
+    };
+    const nextIndicator: GeneratedIndicatorPayload = {
+      ...indicator,
+      config: nextConfig,
+      configText: JSON.stringify(nextConfig),
+    };
+
+    const duplicate = selectedIndicators.some((item) => {
+      if (item.id === nextIndicator.id) {
+        return false;
+      }
+      return buildIndicatorSignature(item) === buildIndicatorSignature(nextIndicator);
+    });
+    if (duplicate) {
+      error('修改后会与现有指标重复，请先删除重复指标或调整参数');
+      return;
+    }
+
+    const usages = collectIndicatorUsages(indicatorId);
+    if (usages.length > 0 && !skipConfirmCheck && !skipQuickInputConfirm) {
+      setIndicatorAction({
+        action: 'quick-input',
+        indicator,
+        usages,
+        pendingIndicator: nextIndicator,
+        pendingInputLabel: nextInput,
+      });
+      return;
+    }
+
+    markHistoryAction(`修改指标输入源 ${describeIndicatorForHistory(indicator)}: ${currentInput || '-'} -> ${patchedInput}`);
+    commitIndicatorUpdate(nextIndicator);
+  };
+
   const closeIndicatorActionDialog = () => {
     setIndicatorAction(null);
   };
@@ -1145,39 +1443,41 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       closeIndicatorActionDialog();
       return;
     }
+    if (indicatorAction.action === 'quick-param-edit') {
+      openIndicatorEditor(indicatorAction.indicator, true);
+      closeIndicatorActionDialog();
+      return;
+    }
+    if (indicatorAction.action === 'quick-input') {
+      if (indicatorAction.pendingIndicator) {
+        const currentInput = String((indicatorAction.indicator.config as { input?: string })?.input || '').trim();
+        const nextInput = String((indicatorAction.pendingIndicator.config as { input?: string })?.input || '').trim();
+        markHistoryAction(
+          `修改指标输入源 ${describeIndicatorForHistory(indicatorAction.indicator)}: ${currentInput || '-'} -> ${nextInput || '-'}`,
+        );
+        commitIndicatorUpdate(indicatorAction.pendingIndicator);
+      }
+      closeIndicatorActionDialog();
+      return;
+    }
     removeIndicator(indicatorAction.indicator.id);
     closeIndicatorActionDialog();
   };
 
-  const parseTimeframeSeconds = (raw: string | undefined) => {
-    if (!raw) {
-      return null;
+  const confirmIndicatorActionAndSkipPrompt = () => {
+    if (!indicatorAction || indicatorAction.action !== 'quick-input') {
+      return;
     }
-    const value = raw.trim().toLowerCase().replace(/\s+/g, '');
-    if (!value) {
-      return null;
+    setSkipQuickInputConfirm(true);
+    if (indicatorAction.pendingIndicator) {
+      const currentInput = String((indicatorAction.indicator.config as { input?: string })?.input || '').trim();
+      const nextInput = String((indicatorAction.pendingIndicator.config as { input?: string })?.input || '').trim();
+      markHistoryAction(
+        `修改指标输入源 ${describeIndicatorForHistory(indicatorAction.indicator)}: ${currentInput || '-'} -> ${nextInput || '-'}`,
+      );
+      commitIndicatorUpdate(indicatorAction.pendingIndicator);
     }
-    const direct = timeframeSecondsMap.get(value);
-    if (direct) {
-      return direct;
-    }
-    const match = value.match(/^([a-z]+)(\d+)$/);
-    if (!match) {
-      return null;
-    }
-    const swapped = `${match[2]}${match[1]}`;
-    return timeframeSecondsMap.get(swapped) ?? null;
-  };
-
-  const resolveTradeTimeframeSec = () => {
-    for (const indicator of selectedIndicators) {
-      const config = indicator.config as { timeframe?: string };
-      const seconds = parseTimeframeSeconds(config.timeframe);
-      if (seconds) {
-        return seconds;
-      }
-    }
-    return 60;
+    closeIndicatorActionDialog();
   };
 
   const updateTradeSizing = (key: keyof StrategyTradeConfig['sizing'], value: number) => {
@@ -1282,15 +1582,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
   const formatIndicatorName = (indicator: GeneratedIndicatorPayload) => {
     const config = indicator.config as {
-      timeframe?: string;
       params?: number[];
     };
-    const timeframe = config.timeframe || '';
     const params = Array.isArray(config.params) && config.params.length > 0
       ? config.params.join(',')
       : '';
-    const periodAndParams = params ? `${timeframe} ${params}` : timeframe;
-    return periodAndParams ? `${indicator.code} ${periodAndParams}` : indicator.code;
+    return params ? `${indicator.code} ${params}` : indicator.code;
   };
 
   const formatIndicatorMeta = (indicator: GeneratedIndicatorPayload) => {
@@ -1440,6 +1737,50 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return resolved || methodOptions[0];
   };
 
+  const tryResolveMethodMeta = (method?: string) => {
+    return methodOptions.find((option) => option.value === method) || null;
+  };
+
+  const resolveArgValueMode = (
+    method: MethodOption | null | undefined,
+    index: number,
+  ): 'field' | 'number' | 'both' => {
+    const mode = method?.argValueTypes?.[index];
+    return mode || 'both';
+  };
+
+  const describeIndicatorForHistory = (indicator: GeneratedIndicatorPayload) => {
+    return formatIndicatorName(indicator);
+  };
+
+  const describeMethodForHistory = (method?: string) => {
+    const meta = tryResolveMethodMeta(method);
+    return meta?.label || method || '未命名方法';
+  };
+
+  const buildEditSnapshot = (
+    indicators: GeneratedIndicatorPayload[],
+    containers: ConditionContainer[],
+  ): StrategyEditSnapshot => ({
+    selectedIndicators: deepCloneJson(indicators),
+    conditionContainers: deepCloneJson(containers),
+  });
+
+  const snapshotSignature = (snapshot: StrategyEditSnapshot) => JSON.stringify(snapshot);
+
+  const markHistoryAction = (undoMessage: string, redoMessage?: string) => {
+    pendingHistoryMetaRef.current = {
+      undoMessage,
+      redoMessage: redoMessage || undoMessage,
+    };
+  };
+
+  const applyHistorySnapshot = (snapshot: StrategyEditSnapshot) => {
+    historyApplyingRef.current = true;
+    setSelectedIndicators(deepCloneJson(snapshot.selectedIndicators));
+    setConditionContainers(deepCloneJson(snapshot.conditionContainers));
+  };
+
   // 创建指标引用到指标值 ID 的映射
   const indicatorRefToValueIdMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -1461,13 +1802,13 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           : [{ key: config.output || 'Value', hint: config.output || 'Value' }];
 
       outputs.forEach((output) => {
-        const refKey = `${indicatorCode}|${config.timeframe || ''}|${config.input || ''}|${output.key}|${params.join(',')}`;
+        const refKey = `${indicatorCode}|${resolveReferenceTimeframe(config.timeframe, tradeDefaultTimeframe)}|${config.input || ''}|${output.key}|${params.join(',')}`;
         const valueId = `${indicator.id}:${output.key}`;
         map.set(refKey, valueId);
       });
     });
     return map;
-  }, [selectedIndicators]);
+  }, [selectedIndicators, tradeDefaultTimeframe]);
 
   // 当指标加载后，更新条件容器中的 ID 映射
   useEffect(() => {
@@ -1552,11 +1893,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       };
       const params = Array.isArray(config.params) ? config.params.map(Number) : [];
       const offsetRange = Array.isArray(config.offsetRange) ? config.offsetRange.map(Number) : [0, 0];
-      const timeframe = config.timeframe || '-';
       const input = config.input || '';
       const paramLabel = params.length > 0 ? params.join(',') : '默认参数';
       const indicatorCode = config.indicator || indicator.code;
-      const groupLabel = [indicatorCode, timeframe, paramLabel, input].filter(Boolean).join(' ');
+      const groupLabel = [indicatorCode, paramLabel, input].filter(Boolean).join(' ');
       const outputs =
         indicator.outputs && indicator.outputs.length > 0
           ? indicator.outputs
@@ -1572,7 +1912,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           ref: {
             refType: 'Indicator',
             indicator: indicatorCode,
-            timeframe: config.timeframe || '',
+            timeframe: resolveReferenceTimeframe(config.timeframe, tradeDefaultTimeframe),
             input: config.input || '',
             params,
             output: output.key,
@@ -1596,7 +1936,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     };
 
     return indicatorGroups.length > 0 ? [...indicatorGroups, fieldGroup] : [fieldGroup];
-  }, [selectedIndicators]);
+  }, [selectedIndicators, tradeDefaultTimeframe]);
 
   const indicatorOutputOptions = useMemo<ValueOption[]>(() => {
     return indicatorOutputGroups.flatMap((group) => group.options);
@@ -1616,24 +1956,48 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return map;
   }, [selectedIndicators]);
 
-  const formatTimeframeLabel = (raw?: string) => {
-    if (!raw) {
-      return '';
+  useEffect(() => {
+    const snapshot = buildEditSnapshot(selectedIndicators, conditionContainers);
+
+    if (!historyReadyRef.current) {
+      latestSnapshotRef.current = snapshot;
+      historyReadyRef.current = true;
+      return;
     }
-    const value = raw.trim().toLowerCase().replace(/\s+/g, '');
-    if (!value) {
-      return '';
+
+    if (historyApplyingRef.current) {
+      latestSnapshotRef.current = snapshot;
+      historyApplyingRef.current = false;
+      pendingHistoryMetaRef.current = null;
+      return;
     }
-    if (timeframeSecondsMap.has(value)) {
-      return value;
+
+    const previous = latestSnapshotRef.current;
+    if (!previous) {
+      latestSnapshotRef.current = snapshot;
+      pendingHistoryMetaRef.current = null;
+      return;
     }
-    const match = value.match(/^([a-z]+)(\d+)$/);
-    if (!match) {
-      return value;
+    if (snapshotSignature(previous) === snapshotSignature(snapshot)) {
+      pendingHistoryMetaRef.current = null;
+      return;
     }
-    const swapped = `${match[2]}${match[1]}`;
-    return swapped;
-  };
+
+    const meta = pendingHistoryMetaRef.current;
+    if (meta) {
+      const record: StrategyHistoryRecord = {
+        before: previous,
+        after: snapshot,
+        undoMessage: meta.undoMessage,
+        redoMessage: meta.redoMessage,
+      };
+      setHistoryPast((prev) => [...prev.slice(-(HISTORY_LIMIT - 1)), record]);
+      setHistoryFuture([]);
+    }
+
+    latestSnapshotRef.current = snapshot;
+    pendingHistoryMetaRef.current = null;
+  }, [conditionContainers, selectedIndicators]);
 
   const formatValueRefLabel = (ref?: StrategyValueRef | null) => {
     if (!ref) {
@@ -1644,17 +2008,14 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       return ref.input?.trim() || '0';
     }
     if (refType === 'field') {
-      const timeframe = formatTimeframeLabel(ref.timeframe);
       const inputLabel = ref.input || 'Field';
-      return timeframe ? `${inputLabel} ${timeframe}` : inputLabel;
+      return inputLabel;
     }
-    const timeframe = formatTimeframeLabel(ref.timeframe);
     const paramsLabel = ref.params && ref.params.length > 0 ? ref.params.join(',') : '默认参数';
     const outputKey = ref.output || 'Value';
     const outputLabel = outputHintMap.get(`${ref.indicator}:${outputKey}`) || outputKey;
     const indicatorLabel = ref.indicator || 'Indicator';
-    const timeframeLabel = timeframe ? ` ${timeframe}` : '';
-    return `${indicatorLabel}${timeframeLabel} (${paramsLabel}) ${outputLabel}`.trim();
+    return `${indicatorLabel} (${paramsLabel}) ${outputLabel}`.trim();
   };
 
   const buildConditionPreview = (draft: ConditionItem | null) => {
@@ -1780,7 +2141,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return {
       refType: 'Const',
       indicator: '',
-      timeframe: fallback?.timeframe ?? 'm1',
+      timeframe: fallback?.timeframe ?? '',
       input: (rawValue || '0').trim(),
       params: [],
       output: 'Value',
@@ -1860,6 +2221,502 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       args,
       param: hasParam ? paramValues : undefined,
     };
+  };
+
+  const validateBuiltConditionMethod = (
+    condition: ConditionItem,
+    methodConfig: StrategyMethodConfig,
+  ): string | null => {
+    const methodMeta = tryResolveMethodMeta(condition.method);
+    if (!methodMeta) {
+      return `不支持的条件方法：${condition.method}`;
+    }
+
+    const expectedArgsCount = methodMeta.argsCount ?? 2;
+    const args = (methodConfig.args || []).filter(
+      (arg): arg is StrategyValueRef => typeof arg === 'object' && arg !== null,
+    );
+    if (args.length < expectedArgsCount) {
+      return '条件参数数量不足';
+    }
+
+    const semanticError = validateConditionArgsSemantics(args, expectedArgsCount, tradeDefaultTimeframe);
+    if (semanticError) {
+      return semanticError;
+    }
+
+    return null;
+  };
+
+  const buildConditionMethodFingerprint = (
+    methodConfig: StrategyMethodConfig,
+  ) => {
+    const args = (methodConfig.args || []).filter(
+      (arg): arg is StrategyValueRef => typeof arg === 'object' && arg !== null,
+    );
+    return buildConditionFingerprint(methodConfig.method, args, methodConfig.param, tradeDefaultTimeframe);
+  };
+
+  const validateConditionDraftByRules = (draft: ConditionItem): string | null => {
+    const methodConfig = buildStrategyMethod(draft);
+    if (!methodConfig) {
+      return null;
+    }
+    return validateBuiltConditionMethod(draft, methodConfig);
+  };
+
+  const applyConditionQuickPatch = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    updater: (condition: ConditionItem) => ConditionItem | null,
+    historyMessage?: string,
+  ) => {
+    let matched = false;
+    let changed = false;
+    let ruleError = '';
+    setConditionContainers((prev) =>
+      prev.map((container) => {
+        if (container.id !== containerId) {
+          return container;
+        }
+        const groups = container.groups.map((group) => {
+          if (group.id !== groupId) {
+            return group;
+          }
+          const conditions = group.conditions.map((condition) => {
+            if (condition.id !== conditionId) {
+              return condition;
+            }
+            matched = true;
+            const next = updater(condition);
+            if (!next) {
+              return condition;
+            }
+            const nextRuleError = validateConditionDraftByRules(next);
+            if (nextRuleError) {
+              ruleError = nextRuleError;
+              return condition;
+            }
+            changed = true;
+            return next;
+          });
+          return { ...group, conditions };
+        });
+        return { ...container, groups };
+      }),
+    );
+
+    if (!matched) {
+      error('目标条件不存在，请刷新后重试');
+      return;
+    }
+    if (ruleError) {
+      error(ruleError);
+      return;
+    }
+    if (changed && historyMessage) {
+      markHistoryAction(historyMessage);
+    }
+  };
+
+  const quickAssignConditionMethod = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    method: string,
+  ) => {
+    const methodMeta = tryResolveMethodMeta(method);
+    if (!methodMeta) {
+      error('不支持的条件方法');
+      return;
+    }
+    const argsCount = methodMeta.argsCount ?? 2;
+    if (argsCount > 2) {
+      error('当前拖拽修改暂不支持三参数条件');
+      return;
+    }
+
+    applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
+      const rightMode = resolveArgValueMode(methodMeta, 1);
+      const next: ConditionItem = {
+        ...condition,
+        method: methodMeta.value,
+        paramValues: methodMeta.params?.map((param) => param.defaultValue || '') || [],
+        extraValueType: 'number',
+        extraValueId: '',
+        extraNumber: '',
+      };
+      if (argsCount < 2) {
+        next.rightValueType = 'number';
+        next.rightValueId = '';
+      } else if (rightMode === 'field') {
+        next.rightValueType = 'field';
+        next.rightValueId = next.rightValueId || indicatorOutputOptions[0]?.id || '';
+      } else if (rightMode === 'number') {
+        next.rightValueType = 'number';
+        next.rightValueId = '';
+        next.rightNumber = next.rightNumber && next.rightNumber.trim() ? next.rightNumber : '0';
+      } else if (next.rightValueType === 'field') {
+        next.rightValueId = next.rightValueId || indicatorOutputOptions[0]?.id || '';
+      } else {
+        next.rightValueType = 'field';
+        next.rightValueId = indicatorOutputOptions[0]?.id || '';
+      }
+      return next;
+    }, `修改条件操作符为 ${describeMethodForHistory(methodMeta.value)}`);
+  };
+
+  const quickAssignConditionValue = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    slot: 'left' | 'right',
+    valueId: string,
+  ) => {
+    if (!indicatorValueMap.has(valueId)) {
+      error('拖拽值无效，请重试');
+      return;
+    }
+
+    const valueLabel = indicatorValueMap.get(valueId)?.fullLabel || indicatorValueMap.get(valueId)?.label || valueId;
+    applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
+      const methodMeta = resolveMethodMeta(condition.method);
+      const argsCount = methodMeta.argsCount ?? 2;
+      if (slot === 'left') {
+        return { ...condition, leftValueId: valueId };
+      }
+
+      if (argsCount < 2) {
+        error('该条件当前不支持右值字段');
+        return null;
+      }
+      const rightMode = resolveArgValueMode(methodMeta, 1);
+      if (rightMode === 'number') {
+        error('该条件右值仅支持数值，不支持字段拖拽');
+        return null;
+      }
+      return {
+        ...condition,
+        rightValueType: 'field',
+        rightValueId: valueId,
+      };
+    }, `修改条件${slot === 'left' ? '左值' : '右值'}为 ${valueLabel}`);
+  };
+
+  const quickAssignConditionNumber = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+  ) => {
+    applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
+      const methodMeta = resolveMethodMeta(condition.method);
+      const argsCount = methodMeta.argsCount ?? 2;
+      if (argsCount < 2) {
+        error('该条件不支持右值配置');
+        return null;
+      }
+      const rightMode = resolveArgValueMode(methodMeta, 1);
+      if (rightMode === 'field') {
+        error('该条件右值仅支持字段，不支持数值');
+        return null;
+      }
+      return {
+        ...condition,
+        rightValueType: 'number',
+        rightValueId: '',
+        rightNumber: condition.rightNumber?.trim() ? condition.rightNumber : '0',
+      };
+    }, '将条件右值切换为数值');
+  };
+
+  const quickUpdateConditionRightNumber = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    value: string,
+  ) => {
+    const raw = (value || '').trim();
+    if (raw && !/^-?\d*\.?\d*$/.test(raw)) {
+      return;
+    }
+
+    let changed = false;
+    setConditionContainers((prev) =>
+      prev.map((container) => {
+        if (container.id !== containerId) {
+          return container;
+        }
+        return {
+          ...container,
+          groups: container.groups.map((group) => {
+            if (group.id !== groupId) {
+              return group;
+            }
+            return {
+              ...group,
+              conditions: group.conditions.map((condition) => {
+                if (condition.id !== conditionId) {
+                  return condition;
+                }
+                if (
+                  condition.rightValueType === 'number'
+                  && (condition.rightNumber || '') === value
+                ) {
+                  return condition;
+                }
+                changed = true;
+                return {
+                  ...condition,
+                  rightValueType: 'number',
+                  rightValueId: '',
+                  rightNumber: value,
+                };
+              }),
+            };
+          }),
+        };
+      }),
+    );
+    if (changed) {
+      markHistoryAction(`修改条件右值数值为 ${value || '空值'}`);
+    }
+  };
+
+  const createQuickConditionDraft = (methodMeta: MethodOption): ConditionItem | null => {
+    const argsCount = methodMeta.argsCount ?? 2;
+    const leftValueId = indicatorOutputOptions[0]?.id || '';
+    const candidateFieldIds = indicatorOutputOptions.map((item) => item.id);
+    const next: ConditionItem = {
+      id: generateId(),
+      enabled: true,
+      required: false,
+      method: methodMeta.value,
+      leftValueId,
+      rightValueType: 'number',
+      rightValueId: '',
+      rightNumber: '0',
+      extraValueType: 'number',
+      extraValueId: '',
+      extraNumber: '0',
+      paramValues: methodMeta.params?.map((param) => param.defaultValue || '') || [],
+    };
+
+    if (!leftValueId) {
+      return null;
+    }
+
+    if (argsCount >= 2) {
+      const rightMode = resolveArgValueMode(methodMeta, 1);
+      const rightCandidate = candidateFieldIds.find((item) => item !== leftValueId) || '';
+      if (rightMode === 'field') {
+        if (!rightCandidate) {
+          return null;
+        }
+        next.rightValueType = 'field';
+        next.rightValueId = rightCandidate;
+        next.rightNumber = '';
+      } else if (rightMode === 'number') {
+        next.rightValueType = 'number';
+        next.rightValueId = '';
+        next.rightNumber = '0';
+      } else if (rightCandidate) {
+        next.rightValueType = 'field';
+        next.rightValueId = rightCandidate;
+        next.rightNumber = '';
+      } else {
+        next.rightValueType = 'number';
+        next.rightValueId = '';
+        next.rightNumber = '0';
+      }
+    }
+
+    if (argsCount >= 3) {
+      const extraMode = resolveArgValueMode(methodMeta, 2);
+      const unavailableIds = new Set<string>([
+        leftValueId,
+        next.rightValueType === 'field' ? next.rightValueId || '' : '',
+      ]);
+      const extraCandidate = candidateFieldIds.find((item) => !unavailableIds.has(item)) || '';
+      if (extraMode === 'field') {
+        if (!extraCandidate) {
+          return null;
+        }
+        next.extraValueType = 'field';
+        next.extraValueId = extraCandidate;
+        next.extraNumber = '';
+      } else if (extraMode === 'number') {
+        next.extraValueType = 'number';
+        next.extraValueId = '';
+        next.extraNumber = '0';
+      } else if (extraCandidate) {
+        next.extraValueType = 'field';
+        next.extraValueId = extraCandidate;
+        next.extraNumber = '';
+      } else {
+        next.extraValueType = 'number';
+        next.extraValueId = '';
+        next.extraNumber = '0';
+      }
+    }
+
+    return next;
+  };
+
+  const quickCreateCondition = (containerId: string, groupId: string | null, method: string) => {
+    const methodMeta = tryResolveMethodMeta(method);
+    if (!methodMeta) {
+      error('不支持的条件方法');
+      return;
+    }
+
+    const draft = createQuickConditionDraft(methodMeta);
+    if (!draft) {
+      error('当前可选指标输出不足，无法快速创建该条件');
+      return;
+    }
+
+    const semanticError = validateConditionDraftByRules(draft);
+    if (semanticError) {
+      error(`快速创建失败：${semanticError}`);
+      return;
+    }
+
+    let matched = false;
+    let changed = false;
+    let createdGroupName = '';
+    let targetGroupName = '';
+    let ruleError = '';
+    setConditionContainers((prev) =>
+      prev.map((container) => {
+        if (container.id !== containerId) {
+          return container;
+        }
+        matched = true;
+
+        let targetGroupId = groupId;
+        const nextGroups = [...container.groups];
+        if (!targetGroupId) {
+          if (nextGroups.length === 0) {
+            if (container.groups.length >= MAX_GROUPS_PER_CONTAINER) {
+              ruleError = `${container.title}最多只能创建三个条件组`;
+              return container;
+            }
+            const newGroup: ConditionGroup = {
+              id: generateId(),
+              name: `条件组${nextGroups.length + 1}`,
+              enabled: true,
+              required: false,
+              conditions: [],
+            };
+            nextGroups.push(newGroup);
+            targetGroupId = newGroup.id;
+            createdGroupName = newGroup.name;
+          } else {
+            targetGroupId = nextGroups[0].id;
+          }
+        }
+
+        const groupIndex = nextGroups.findIndex((group) => group.id === targetGroupId);
+        if (groupIndex < 0) {
+          ruleError = '目标条件组不存在，请刷新后重试';
+          return container;
+        }
+
+        const group = nextGroups[groupIndex];
+        targetGroupName = group.name;
+        if (group.conditions.length >= MAX_CONDITIONS_PER_GROUP) {
+          ruleError = `${container.title}-${group.name}最多只能创建6个条件判断`;
+          return container;
+        }
+
+        const methodConfig = buildStrategyMethod(draft);
+        if (!methodConfig) {
+          ruleError = '新建条件失败：条件参数不完整';
+          return container;
+        }
+        const nextFingerprint = buildConditionMethodFingerprint(methodConfig);
+        const hasDuplicate = group.conditions.some((condition) => {
+          const currentMethod = buildStrategyMethod(condition);
+          if (!currentMethod) {
+            return false;
+          }
+          return buildConditionMethodFingerprint(currentMethod) === nextFingerprint;
+        });
+        if (hasDuplicate) {
+          ruleError = `${container.title}-${group.name}存在重复条件`;
+          return container;
+        }
+
+        nextGroups[groupIndex] = {
+          ...group,
+          conditions: [...group.conditions, draft],
+        };
+        changed = true;
+        return {
+          ...container,
+          groups: nextGroups,
+        };
+      }),
+    );
+
+    if (!matched) {
+      error('目标条件容器不存在，请刷新后重试');
+      return;
+    }
+    if (ruleError) {
+      error(ruleError);
+      return;
+    }
+    if (changed) {
+      const methodLabel = describeMethodForHistory(methodMeta.value);
+      const groupText = createdGroupName
+        ? `${createdGroupName}（自动创建）`
+        : targetGroupName || '目标条件组';
+      markHistoryAction(`在${groupText}新增条件 ${methodLabel}`);
+    }
+  };
+
+  const validateConditionContainersBeforeSubmit = (): string | null => {
+    let totalConditions = 0;
+    for (const container of conditionContainers) {
+      if (container.groups.length > MAX_GROUPS_PER_CONTAINER) {
+        return `${container.title}的条件组不能超过${MAX_GROUPS_PER_CONTAINER}个`;
+      }
+
+      for (const group of container.groups) {
+        if (group.conditions.length > MAX_CONDITIONS_PER_GROUP) {
+          return `${container.title}-${group.name}的条件数量不能超过${MAX_CONDITIONS_PER_GROUP}个`;
+        }
+
+        const duplicateGuard = new Set<string>();
+        for (let index = 0; index < group.conditions.length; index += 1) {
+          totalConditions += 1;
+          if (totalConditions > MAX_TOTAL_CONDITIONS) {
+            return `条件总数不能超过${MAX_TOTAL_CONDITIONS}个`;
+          }
+
+          const condition = group.conditions[index];
+          const methodConfig = buildStrategyMethod(condition);
+          if (!methodConfig) {
+            return `${container.title}-${group.name} 第${index + 1}条条件配置不完整`;
+          }
+
+          const semanticError = validateBuiltConditionMethod(condition, methodConfig);
+          if (semanticError) {
+            return `${container.title}-${group.name} 第${index + 1}条条件不合法：${semanticError}`;
+          }
+
+          const fingerprint = buildConditionMethodFingerprint(methodConfig);
+          if (duplicateGuard.has(fingerprint)) {
+            return `${container.title}-${group.name} 存在重复条件，请删除重复项`;
+          }
+          duplicateGuard.add(fingerprint);
+        }
+      }
+    }
+
+    return null;
   };
 
   const buildConditionGroupConfig = (group: ConditionGroup): ConditionGroupConfig => {
@@ -1989,6 +2846,11 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       error('请选择交易所API');
       return;
     }
+    const conditionValidationError = validateConditionContainersBeforeSubmit();
+    if (conditionValidationError) {
+      error(conditionValidationError);
+      return;
+    }
     const runtimeError = validateRuntimeConfig(runtimeConfig);
     if (runtimeError) {
       error(runtimeError);
@@ -2014,30 +2876,102 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     }
   };
 
+  const handleUndo = () => {
+    setHistoryPast((prev) => {
+      if (prev.length === 0) {
+        success('没有可撤销的操作');
+        return prev;
+      }
+      const nextPast = [...prev];
+      const record = nextPast.pop() as StrategyHistoryRecord;
+      setHistoryFuture((future) => [record, ...future]);
+      applyHistorySnapshot(record.before);
+      success(`撤销：${record.undoMessage}`);
+      return nextPast;
+    });
+  };
+
+  const handleRedo = () => {
+    setHistoryFuture((prev) => {
+      if (prev.length === 0) {
+        success('没有可重做的操作');
+        return prev;
+      }
+      const [record, ...rest] = prev;
+      setHistoryPast((past) => [...past.slice(-(HISTORY_LIMIT - 1)), record]);
+      applyHistorySnapshot(record.after);
+      success(`还原：${record.redoMessage}`);
+      return rest;
+    });
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const ctrlOrCmd = event.ctrlKey || event.metaKey;
+      if (!ctrlOrCmd || event.altKey) {
+        return;
+      }
+      if (isEditableElementTarget(event.target)) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        handleUndo();
+        return;
+      }
+      if (key === 'y' || (key === 'z' && event.shiftKey)) {
+        event.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [historyPast.length, historyFuture.length]);
+
   const addConditionGroup = (containerId: string) => {
+    const targetContainer = conditionContainers.find((container) => container.id === containerId);
+    if (!targetContainer) {
+      error('目标条件容器不存在，请刷新后重试');
+      return;
+    }
+    if (targetContainer.groups.length >= MAX_GROUPS_PER_CONTAINER) {
+      error(`${targetContainer.title}最多只能创建三个条件组`);
+      return;
+    }
+    const nextIndex = targetContainer.groups.length + 1;
+    const newGroup: ConditionGroup = {
+      id: generateId(),
+      name: `条件组${nextIndex}`,
+      enabled: true,
+      required: false,
+      conditions: [],
+    };
+    markHistoryAction(`在${targetContainer.title}新增条件组 ${newGroup.name}`);
     setConditionContainers((prev) =>
       prev.map((container) => {
         if (container.id !== containerId) {
           return container;
         }
-        if (container.groups.length >= MAX_GROUPS_PER_CONTAINER) {
-          error(`${container.title}最多只能创建三个条件组`);
-          return container;
-        }
-        const nextIndex = container.groups.length + 1;
-        const newGroup: ConditionGroup = {
-          id: generateId(),
-          name: `条件组${nextIndex}`,
-          enabled: true,
-          required: false,
-          conditions: [],
-        };
         return { ...container, groups: [...container.groups, newGroup] };
       }),
     );
   };
 
   const toggleGroupFlag = (containerId: string, groupId: string, key: 'enabled' | 'required') => {
+    const targetContainer = conditionContainers.find((container) => container.id === containerId);
+    const targetGroup = targetContainer?.groups.find((group) => group.id === groupId);
+    if (!targetContainer || !targetGroup) {
+      error('目标条件组不存在，请刷新后重试');
+      return;
+    }
+    const nextValue = !targetGroup[key];
+    markHistoryAction(
+      `切换${targetContainer.title}-${targetGroup.name}的${key === 'enabled' ? '启用' : '必选'}为${nextValue ? '开启' : '关闭'}`,
+    );
     setConditionContainers((prev) =>
       prev.map((container) => {
         if (container.id !== containerId) {
@@ -2065,6 +2999,17 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     conditionId: string,
     key: 'enabled' | 'required',
   ) => {
+    const targetContainer = conditionContainers.find((container) => container.id === containerId);
+    const targetGroup = targetContainer?.groups.find((group) => group.id === groupId);
+    const targetCondition = targetGroup?.conditions.find((condition) => condition.id === conditionId);
+    if (!targetContainer || !targetGroup || !targetCondition) {
+      error('目标条件不存在，请刷新后重试');
+      return;
+    }
+    const nextValue = !targetCondition[key];
+    markHistoryAction(
+      `切换${targetContainer.title}-${targetGroup.name}条件${describeMethodForHistory(targetCondition.method)}的${key === 'enabled' ? '启用' : '必选'}为${nextValue ? '开启' : '关闭'}`,
+    );
     setConditionContainers((prev) =>
       prev.map((container) => {
         if (container.id !== containerId) {
@@ -2094,6 +3039,13 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const removeGroup = (containerId: string, groupId: string) => {
+    const targetContainer = conditionContainers.find((container) => container.id === containerId);
+    const targetGroup = targetContainer?.groups.find((group) => group.id === groupId);
+    if (!targetContainer || !targetGroup) {
+      error('目标条件组不存在，请刷新后重试');
+      return;
+    }
+    markHistoryAction(`删除${targetContainer.title}中的条件组 ${targetGroup.name}`);
     setConditionContainers((prev) =>
       prev.map((container) => {
         if (container.id !== containerId) {
@@ -2105,6 +3057,14 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const removeCondition = (containerId: string, groupId: string, conditionId: string) => {
+    const targetContainer = conditionContainers.find((container) => container.id === containerId);
+    const targetGroup = targetContainer?.groups.find((group) => group.id === groupId);
+    const targetCondition = targetGroup?.conditions.find((condition) => condition.id === conditionId);
+    if (!targetContainer || !targetGroup || !targetCondition) {
+      error('目标条件不存在，请刷新后重试');
+      return;
+    }
+    markHistoryAction(`删除${targetContainer.title}-${targetGroup.name}条件 ${describeMethodForHistory(targetCondition.method)}`);
     setConditionContainers((prev) =>
       prev.map((container) => {
         if (container.id !== containerId) {
@@ -2147,7 +3107,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     }
 
     const defaultLeft = indicatorOutputOptions[0]?.id || '';
-    const defaultRight = indicatorOutputOptions[1]?.id || defaultLeft;
     const defaultMethod = methodOptions[0];
     const defaultParams = defaultMethod.params?.map((param) => param.defaultValue || '') || [];
     setConditionDraft({
@@ -2156,11 +3115,11 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       required: false,
       method: defaultMethod.value,
       leftValueId: defaultLeft,
-      rightValueType: 'field',
-      rightValueId: defaultRight,
+      rightValueType: 'number',
+      rightValueId: '',
       rightNumber: '',
-      extraValueType: 'field',
-      extraValueId: defaultRight,
+      extraValueType: 'number',
+      extraValueId: '',
       extraNumber: '',
       paramValues: defaultParams,
     });
@@ -2173,6 +3132,8 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     setConditionEditTarget(null);
     setConditionError('');
   };
+
+  const conditionRuleError = conditionDraft ? validateConditionDraftByRules(conditionDraft) || '' : '';
 
   const handleSaveCondition = () => {
     if (!conditionDraft || !conditionEditTarget) {
@@ -2225,6 +3186,46 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       }
     }
 
+    const methodConfig = buildStrategyMethod(conditionDraft);
+    if (!methodConfig) {
+      setConditionError('条件参数不完整，请检查后重试');
+      return;
+    }
+
+    const semanticError = validateBuiltConditionMethod(conditionDraft, methodConfig);
+    if (semanticError) {
+      setConditionError(semanticError);
+      return;
+    }
+
+    const targetContainer = conditionContainers.find((container) => container.id === conditionEditTarget.containerId);
+    const targetGroup = targetContainer?.groups.find((group) => group.id === conditionEditTarget.groupId);
+    if (!targetContainer || !targetGroup) {
+      setConditionError('目标条件组不存在，请刷新后重试');
+      return;
+    }
+
+    const nextFingerprint = buildConditionMethodFingerprint(methodConfig);
+    const duplicateInGroup = targetGroup.conditions.some((condition) => {
+      if (condition.id === conditionEditTarget.conditionId) {
+        return false;
+      }
+      const currentMethod = buildStrategyMethod(condition);
+      if (!currentMethod) {
+        return false;
+      }
+      return buildConditionMethodFingerprint(currentMethod) === nextFingerprint;
+    });
+    if (duplicateInGroup) {
+      setConditionError('同一条件组内不允许重复条件');
+      return;
+    }
+
+    const saveActionLabel = conditionEditTarget.conditionId ? '修改' : '新增';
+    markHistoryAction(
+      `${saveActionLabel}${targetContainer.title}-${targetGroup.name}条件 ${describeMethodForHistory(conditionDraft.method)}`,
+    );
+
     setConditionContainers((prev) =>
       prev.map((container) => {
         if (container.id !== conditionEditTarget.containerId) {
@@ -2266,15 +3267,15 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   return (
     <>
       {!openConfigDirectly && (
-        <StrategyEditorShell
+        <StrategyWorkbench
           selectedIndicators={selectedIndicators}
           formatIndicatorName={formatIndicatorName}
           formatIndicatorMeta={formatIndicatorMeta}
           onOpenIndicatorGenerator={openCreateIndicator}
           onEditIndicator={requestEditIndicator}
           onRemoveIndicator={requestRemoveIndicator}
+          logicContainers={logicContainers}
           filterContainers={filterContainers}
-          conditionContainers={logicContainers}
           maxGroupsPerContainer={MAX_GROUPS_PER_CONTAINER}
           buildConditionPreview={buildConditionPreview}
           onAddConditionGroup={addConditionGroup}
@@ -2285,26 +3286,96 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           onRemoveCondition={removeCondition}
           renderToggle={renderToggle}
           onClose={() => onClose?.()}
-          onGenerateConfig={openConfigReview}
+          onOpenSettings={openConfigReview}
+          exchangeOptions={exchangeOptions}
+          selectedExchange={tradeConfig.exchange}
+          onExchangeChange={handleExchangeChange}
+          symbolOptions={symbolOptions}
+          selectedSymbol={tradeConfig.symbol}
+          onSymbolChange={handleSymbolChange}
+          timeframeOptions={timeframeOptions}
+          selectedTimeframeSec={tradeConfig.timeframeSec}
+          onTimeframeChange={handleTimeframeChange}
+          takeProfitPct={tradeConfig.risk.takeProfitPct}
+          stopLossPct={tradeConfig.risk.stopLossPct}
+          leverage={tradeConfig.sizing.leverage}
+          orderQty={tradeConfig.sizing.orderQty}
+          onTakeProfitPctChange={(value) => updateTradeRisk('takeProfitPct', value)}
+          onStopLossPctChange={(value) => updateTradeRisk('stopLossPct', value)}
+          onLeverageChange={(value) => updateTradeSizing('leverage', value)}
+          onOrderQtyChange={(value) => updateTradeSizing('orderQty', value)}
+          indicatorOutputGroups={indicatorOutputGroups}
+          methodOptions={methodOptions}
+          onQuickAssignConditionMethod={quickAssignConditionMethod}
+          onQuickAssignConditionValue={quickAssignConditionValue}
+          onQuickAssignConditionNumber={quickAssignConditionNumber}
+          onQuickUpdateConditionRightNumber={quickUpdateConditionRightNumber}
+          onQuickUpdateIndicatorInput={quickUpdateIndicatorInput}
+          onQuickEditIndicatorParams={requestQuickEditIndicatorParams}
+          onQuickCreateCondition={quickCreateCondition}
         />
       )}
       <Dialog
         open={Boolean(indicatorAction)}
         onClose={closeIndicatorActionDialog}
-        title={indicatorAction?.action === 'edit' ? '修改指标确认' : '移除指标确认'}
+        title={
+          indicatorAction?.action === 'edit'
+            ? '修改指标确认'
+            : indicatorAction?.action === 'quick-param-edit'
+              ? '修改指标参数确认'
+            : indicatorAction?.action === 'quick-input'
+              ? '修改输入源确认'
+              : '移除指标确认'
+        }
         cancelText="取消"
-        confirmText={indicatorAction?.action === 'edit' ? '继续修改' : '确认移除'}
+        confirmText={
+          indicatorAction?.action === 'remove'
+            ? '确认移除'
+            : '继续修改'
+        }
         onCancel={closeIndicatorActionDialog}
         onConfirm={confirmIndicatorAction}
         className="indicator-usage-dialog"
+        footer={
+          indicatorAction?.action === 'quick-input' ? (
+            <>
+              <button
+                className="ui-dialog__button ui-dialog__button--cancel"
+                onClick={closeIndicatorActionDialog}
+              >
+                取消
+              </button>
+              <button
+                className="ui-dialog__button ui-dialog__button--confirm"
+                onClick={confirmIndicatorAction}
+              >
+                继续修改
+              </button>
+              <button
+                className="ui-dialog__button ui-dialog__button--confirm indicator-usage-dialog__confirm-once"
+                onClick={confirmIndicatorActionAndSkipPrompt}
+              >
+                修改且本次不再提示
+              </button>
+            </>
+          ) : undefined
+        }
       >
         {indicatorAction && (
           <div className="indicator-usage-dialog__content">
             <div className="indicator-usage-dialog__title">
-              指标 {formatIndicatorName(indicatorAction.indicator)} 已在以下位置使用：
+              指标 {formatIndicatorName(indicatorAction.indicator)}
+              {indicatorAction.action === 'quick-input' && indicatorAction.pendingInputLabel
+                ? ` 将改为输入源 ${indicatorAction.pendingInputLabel}`
+                : ''}
+              已在以下位置使用：
             </div>
             <div className="indicator-usage-dialog__hint">
-              修改将同步影响这些引用；移除会清空对应的引用字段。
+              {indicatorAction.action === 'remove'
+                ? '移除会清空对应的引用字段。'
+                : indicatorAction.action === 'quick-param-edit'
+                  ? '参数修改将同步影响这些引用。'
+                  : '修改将同步影响这些引用。'}
             </div>
             <ul className="indicator-usage-dialog__list">
               {indicatorAction.usages.map((usage) => (
@@ -2329,7 +3400,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         mode={indicatorDialogMode}
         initialIndicator={editingIndicator}
         validateIndicator={validateIndicator}
+        fixedTimeframe={tradeDefaultTimeframe}
+        hideTimeframeSelector={true}
         autoCloseOnGenerate={true}
+        preferParamFocus={preferIndicatorParamFocus}
       />
       <ConditionEditorDialog
         open={isConditionModalOpen}
@@ -2338,8 +3412,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         conditionEditTarget={conditionEditTarget}
         conditionDraft={conditionDraft}
         conditionError={conditionError}
+        conditionRuleError={conditionRuleError}
         indicatorOutputGroups={indicatorOutputGroups}
         methodOptions={methodOptions}
+        defaultTimeframe={tradeDefaultTimeframe}
         setConditionDraft={setConditionDraft}
         buildConditionPreview={buildConditionPreview}
         renderToggle={renderToggle}

@@ -103,6 +103,9 @@ interface IndicatorGeneratorSelectorProps {
   mode?: IndicatorDialogMode;
   initialIndicator?: GeneratedIndicatorPayload | null;
   validateIndicator?: (indicator: GeneratedIndicatorPayload, mode: IndicatorDialogMode) => string | null;
+  fixedTimeframe?: string;
+  hideTimeframeSelector?: boolean;
+  preferParamFocus?: boolean;
 }
 
 const INPUT_OPTIONS = [
@@ -356,6 +359,9 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
   mode = 'create',
   initialIndicator,
   validateIndicator,
+  fixedTimeframe,
+  hideTimeframeSelector = false,
+  preferParamFocus = false,
 }) => {
   const { success, error } = useNotification();
   const [catalog, setCatalog] = useState<TalibRoot | null>(null);
@@ -376,6 +382,17 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
   const [paramValues, setParamValues] = useState<string[]>([]);
   const [generatedConfig, setGeneratedConfig] = useState<string | null>(null);
   const isEditMode = mode === 'edit';
+  const normalizedFixedTimeframe = useMemo(() => {
+    if (!fixedTimeframe) {
+      return '';
+    }
+    const normalized = normalizeTimeframe(fixedTimeframe);
+    if (!normalized) {
+      return '';
+    }
+    const matched = TIMEFRAME_OPTIONS.find((option) => option.value === normalized);
+    return matched?.value || normalized;
+  }, [fixedTimeframe]);
 
   useEffect(() => {
     if (!open) {
@@ -383,6 +400,13 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     }
     setStep(isEditMode ? 'config' : 'select');
   }, [open, isEditMode]);
+
+  useEffect(() => {
+    if (!open || !normalizedFixedTimeframe) {
+      return;
+    }
+    setTimeframe(normalizedFixedTimeframe);
+  }, [normalizedFixedTimeframe, open]);
 
   useEffect(() => {
     if (!open) {
@@ -670,7 +694,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       const offsetMaxValue = Number(
         offsetRange.length > 1 ? offsetRange[1] : offsetRange[0] ?? OFFSET_DEFAULT.max,
       );
-      setTimeframe(knownTimeframe);
+      setTimeframe(normalizedFixedTimeframe || knownTimeframe);
       setCalcMode(nextCalcMode);
       setOffsetMin(Number.isFinite(offsetMinValue) ? String(offsetMinValue) : OFFSET_DEFAULT.min);
       setOffsetMax(Number.isFinite(offsetMaxValue) ? String(offsetMaxValue) : OFFSET_DEFAULT.max);
@@ -697,7 +721,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       return;
     }
 
-    setTimeframe('m1');
+    setTimeframe(normalizedFixedTimeframe || 'm1');
     setCalcMode('OnBarClose');
     setOffsetMin(OFFSET_DEFAULT.min);
     setOffsetMax(OFFSET_DEFAULT.max);
@@ -713,7 +737,15 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
       return String(fallback);
     });
     setParamValues(defaults);
-  }, [activeIndicator, configurableInputSlots, initialIndicator, isEditMode, outputOptions, paramDefinitions]);
+  }, [
+    activeIndicator,
+    configurableInputSlots,
+    initialIndicator,
+    isEditMode,
+    normalizedFixedTimeframe,
+    outputOptions,
+    paramDefinitions,
+  ]);
 
   const handleSelectIndicator = (indicator: TalibIndicator) => {
     setActiveIndicator(indicator);
@@ -763,7 +795,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     activeIndicator &&
       !hasInvalidOffsets &&
       !hasInvalidParams &&
-      timeframe.trim() &&
+      (normalizedFixedTimeframe || timeframe).trim() &&
       outputSelection.trim(),
   );
 
@@ -780,10 +812,11 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
     });
     const input = buildConfigInputValue(configurableInputSlots, inputSelections);
 
+    const resolvedTimeframe = (normalizedFixedTimeframe || timeframe).trim() || 'm1';
     const config = {
       refType: 'Indicator',
       indicator: activeIndicator.code,
-      timeframe: timeframe.trim() || 'm1',
+      timeframe: resolvedTimeframe,
       input,
       params,
       output: outputSelection.trim() || 'Value',
@@ -1001,6 +1034,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                                     paramValues[index] === value ? 'is-active' : ''
                                   }`}
                                   onClick={() => handleParamChange(index, value)}
+                                  autoFocus={preferParamFocus && index === 0 && option.value === (param.enumOptions?.[0]?.value ?? option.value)}
                                 >
                                   {label}
                                 </button>
@@ -1014,6 +1048,7 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                             onChange={(event) => handleParamChange(index, event.target.value)}
                             type="number"
                             placeholder="请输入"
+                            autoFocus={preferParamFocus && index === 0}
                           />
                         )}
                       </div>
@@ -1110,32 +1145,34 @@ const IndicatorGeneratorSelector: React.FC<IndicatorGeneratorSelectorProps> = ({
                 </div>
               </div>
 
-              <div className="indicator-generator__field">
-                <label className="indicator-generator__label">时间周期</label>
-                <div className="indicator-generator__option-list">
-                  {TIMEFRAME_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`indicator-generator__option-button ${
-                        timeframe === option.value ? 'is-active' : ''
-                      }`}
-                      onClick={() => setTimeframe(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                  {!TIMEFRAME_OPTIONS.some((option) => option.value === timeframe) && timeframe && (
-                    <button
-                      type="button"
-                      className="indicator-generator__option-button is-active"
-                      onClick={() => setTimeframe(timeframe)}
-                    >
-                      {timeframe}
-                    </button>
-                  )}
+              {!hideTimeframeSelector && (
+                <div className="indicator-generator__field">
+                  <label className="indicator-generator__label">时间周期</label>
+                  <div className="indicator-generator__option-list">
+                    {TIMEFRAME_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`indicator-generator__option-button ${
+                          timeframe === option.value ? 'is-active' : ''
+                        }`}
+                        onClick={() => setTimeframe(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                    {!TIMEFRAME_OPTIONS.some((option) => option.value === timeframe) && timeframe && (
+                      <button
+                        type="button"
+                        className="indicator-generator__option-button is-active"
+                        onClick={() => setTimeframe(timeframe)}
+                      >
+                        {timeframe}
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="indicator-generator__field">
                 <label className="indicator-generator__label">偏移范围</label>

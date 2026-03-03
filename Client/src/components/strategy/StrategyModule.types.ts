@@ -57,6 +57,8 @@ export interface ValueOption {
   label: string;
   fullLabel: string;
   ref: StrategyValueRef;
+  paneKind?: 'main' | 'sub';
+  semanticKey?: string;
 }
 
 export interface IndicatorOutputGroup {

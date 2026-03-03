@@ -14,6 +14,7 @@ import StrategyMarketList from './StrategyMarketList';
 import StrategyRecommend from './StrategyRecommend';
 import type { MenuItem } from './StrategyModule.types';
 import { HttpClient, getToken } from '../../network/index.ts';
+import { Dialog } from '../ui/index.ts';
 
 type StrategyModuleProps = {
   initialMenuId?: string;
@@ -22,6 +23,7 @@ type StrategyModuleProps = {
 const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
   const [activeMenuId, setActiveMenuId] = useState<string>(initialMenuId ?? 'recommend');
   const [isStrategyEditorOpen, setIsStrategyEditorOpen] = useState(false);
+  const [isCreateConfirmOpen, setIsCreateConfirmOpen] = useState(false);
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
 
   useEffect(() => {
@@ -39,7 +41,12 @@ const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
     { id: 'create', label: '创建策略', icon: PlusIcon },
   ];
 
+  const requestOpenStrategyEditor = () => {
+    setIsCreateConfirmOpen(true);
+  };
+
   const openStrategyEditor = () => {
+    setIsCreateConfirmOpen(false);
     setIsStrategyEditorOpen(true);
   };
 
@@ -97,7 +104,7 @@ const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
             </div>
           )}
           {activeMenuId === 'create' && !isStrategyEditorOpen && (
-            <StrategyTemplateOptions onCustomCreate={openStrategyEditor} />
+            <StrategyTemplateOptions onCustomCreate={requestOpenStrategyEditor} />
           )}
           {activeMenuId === 'create' && isStrategyEditorOpen && (
             <StrategyEditorFlow
@@ -110,6 +117,19 @@ const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
           )}
         </div>
       </main>
+      <Dialog
+        open={isCreateConfirmOpen}
+        onClose={() => setIsCreateConfirmOpen(false)}
+        title="跳转创建策略页面"
+        cancelText="取消"
+        confirmText="确认"
+        onCancel={() => setIsCreateConfirmOpen(false)}
+        onConfirm={openStrategyEditor}
+      >
+        <div style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
+          是否跳转到全屏策略创建页面？
+        </div>
+      </Dialog>
     </div>
   );
 };
