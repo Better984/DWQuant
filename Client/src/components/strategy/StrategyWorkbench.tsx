@@ -532,6 +532,14 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return normalized === activeHoverValueId;
   };
 
+  const resolveOutputActiveClass = (valueId?: string) => {
+    const normalized = normalizeText(valueId);
+    if (!normalized || !activeHoverValueId || normalized !== activeHoverValueId) {
+      return '';
+    }
+    return activeHoverHasReference ? 'is-linked-active' : 'is-brief-active';
+  };
+
   const conditionCount = useMemo(() => {
     return [...logicContainers, ...filterContainers].reduce((sum, container) => {
       return sum + container.groups.reduce((groupSum, group) => groupSum + group.conditions.length, 0);
@@ -1300,7 +1308,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                                         valueId: option.id,
                                         label: option.fullLabel || option.label,
                                       }}
-                                      className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                                      className={`strategy-indicator-output-chip ${resolveOutputActiveClass(option.id)}`}
                                       style={outputBadgeStyleMap.get(option.id) || {
                                         background: rgba(color, 0.24 + outputIndex * 0.08),
                                         borderColor: rgba(color, 0.62),
@@ -1360,7 +1368,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               valueId: option.id,
                               label: option.fullLabel || option.label,
                             }}
-                            className={`strategy-indicator-output-chip strategy-indicator-output-chip--field ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                            className={`strategy-indicator-output-chip strategy-indicator-output-chip--field ${resolveOutputActiveClass(option.id)}`}
                             onMouseEnter={() => setActiveHoverValueId(option.id)}
                             onMouseLeave={() => setActiveHoverValueId('')}
                           >

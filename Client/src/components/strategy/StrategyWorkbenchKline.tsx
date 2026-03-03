@@ -125,9 +125,10 @@ type ResolvedChartIndicator = {
 };
 
 const CANDLE_PANE_ID = 'candle_pane';
-const BLINK_STEP_MS = 108;
+const BLINK_STEP_MS_REFERENCED = 108;
+const BLINK_STEP_MS_BRIEF = 160;
 const BLINK_PHASES_REFERENCED = [true, false, true, false, true, false];
-const BLINK_PHASES_BRIEF = [true, false, true, false];
+const BLINK_PHASES_BRIEF = [true, false];
 const HIGHLIGHT_COLOR_ON = 'rgba(245, 158, 11, 0.98)';
 const HIGHLIGHT_COLOR_OFF = 'rgba(251, 191, 36, 0.78)';
 
@@ -729,6 +730,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
 
     // 有引用时和右侧抖动节奏接近；无引用仅做短闪，避免无意义持续动画。
     const phases = hoverHasReference ? BLINK_PHASES_REFERENCED : BLINK_PHASES_BRIEF;
+    const stepMs = hoverHasReference ? BLINK_STEP_MS_REFERENCED : BLINK_STEP_MS_BRIEF;
     let step = 0;
     const runStep = () => {
       const phaseOn = phases[step];
@@ -738,7 +740,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
         applyIndicatorPulse(target, false);
         return;
       }
-      blinkTimerRef.current = window.setTimeout(runStep, BLINK_STEP_MS);
+      blinkTimerRef.current = window.setTimeout(runStep, stepMs);
     };
 
     runStep();

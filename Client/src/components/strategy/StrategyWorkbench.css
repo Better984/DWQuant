@@ -618,7 +618,15 @@
   filter: saturate(1.15);
   transform-origin: center;
   will-change: transform;
-  animation: strategy-linked-shake 0.19s ease-in-out 3;
+  animation: strategy-linked-shake 0.18s ease-in-out 3;
+}
+
+.strategy-indicator-output-chip.is-brief-active {
+  box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.15);
+  filter: saturate(1.12);
+  transform-origin: center;
+  will-change: transform;
+  animation: strategy-linked-shake-brief 0.26s ease-out 1;
 }
 
 @keyframes strategy-linked-shake {
@@ -642,6 +650,21 @@
   }
   78% {
     transform: translateX(1px) scale(1.1);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes strategy-linked-shake-brief {
+  0% {
+    transform: translateX(0) scale(1);
+  }
+  35% {
+    transform: translateX(-0.6px) scale(1.03);
+  }
+  70% {
+    transform: translateX(0.8px) scale(1.05);
   }
   100% {
     transform: translateX(0) scale(1);
