@@ -1590,17 +1590,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return params ? `${indicator.code} ${params}` : indicator.code;
   };
 
-  const formatIndicatorMeta = (indicator: GeneratedIndicatorPayload) => {
-    const config = indicator.config as {
-      input?: string;
-    };
-    const input = config.input || '-';
-    const outputs = indicator.outputs && indicator.outputs.length > 0
-      ? indicator.outputs.map((output) => output.key).join(', ')
-      : '-';
-    return `输入 ${input} · 输出 ${outputs}`;
-  };
-
   const methodOptions: MethodOption[] = [
     { value: 'GreaterThanOrEqual', label: '大于等于 (>=)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
     { value: 'GreaterThan', label: '大于 (>)', category: 'compare', argsCount: 2, argValueTypes: ['field', 'both'] },
@@ -3380,7 +3369,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         <StrategyWorkbench
           selectedIndicators={selectedIndicators}
           formatIndicatorName={formatIndicatorName}
-          formatIndicatorMeta={formatIndicatorMeta}
           onOpenIndicatorGenerator={openCreateIndicator}
           onEditIndicator={requestEditIndicator}
           onRemoveIndicator={requestRemoveIndicator}

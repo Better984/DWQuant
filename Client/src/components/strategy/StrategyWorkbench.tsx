@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   DndContext,
@@ -52,7 +52,6 @@ type DragPayload =
 interface StrategyWorkbenchProps {
   selectedIndicators: GeneratedIndicatorPayload[];
   formatIndicatorName: (indicator: GeneratedIndicatorPayload) => string;
-  formatIndicatorMeta: (indicator: GeneratedIndicatorPayload) => string;
   onOpenIndicatorGenerator: () => void;
   onEditIndicator: (indicatorId: string) => void;
   onRemoveIndicator: (indicatorId: string) => void;
@@ -131,6 +130,20 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_ORDER = ['compare', 'cross', 'range', 'trend', 'change', 'stats', 'channel', 'bandwidth'];
+
+/** 多头相关容器 ID（顺序：筛选器 → 开多 → 平多） */
+const LONG_CONTAINER_IDS = ['open-long-filter', 'open-long', 'close-long'] as const;
+/** 空头相关容器 ID（顺序：筛选器 → 开空 → 平空） */
+const SHORT_CONTAINER_IDS = ['open-short-filter', 'open-short', 'close-short'] as const;
+
+const getDropZoneHint = (containerId: string): string => {
+  if (containerId === 'open-long-filter' || containerId === 'open-short-filter') return '筛选器允许多周期判断完善策略';
+  if (containerId === 'open-long') return '配置开多条件 信号 触发交易';
+  if (containerId === 'open-short') return '配置开空条件 信号 触发交易';
+  if (containerId === 'close-long') return '配置平多 信号 预设离场';
+  if (containerId === 'close-short') return '配置平空 信号 预设离场';
+  return '拖拽操作符到此快速新增条件';
+};
 
 // 指标固定色板：常见指标优先不重复，亮色浅色为主。
 const INDICATOR_COLOR_PRESET: Record<string, string> = {
@@ -323,14 +336,29 @@ const DroppableSlot: React.FC<{
   className: string;
   disabled?: boolean;
   style?: React.CSSProperties;
+  onClick?: () => void;
   children: React.ReactNode;
-}> = ({ id, className, disabled = false, style, children }) => {
+}> = ({ id, className, disabled = false, style, onClick, children }) => {
   const { setNodeRef, isOver } = useDroppable({ id, disabled });
+  const clickable = Boolean(onClick) && !disabled;
   return (
     <div
       ref={setNodeRef}
-      className={`${className} ${isOver ? 'is-over' : ''} ${disabled ? 'is-disabled' : ''}`}
+      className={`${className} ${isOver ? 'is-over' : ''} ${disabled ? 'is-disabled' : ''} ${clickable ? 'is-clickable' : ''}`}
       style={style}
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
     >
       {children}
     </div>
@@ -341,7 +369,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const {
     selectedIndicators,
     formatIndicatorName,
-    formatIndicatorMeta,
     onOpenIndicatorGenerator,
     onEditIndicator,
     onRemoveIndicator,
@@ -387,6 +414,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   } = props;
 
   const [ready, setReady] = useState(false);
+  const [conditionSide, setConditionSide] = useState<'long' | 'short'>('long');
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [dashboardClock, setDashboardClock] = useState(Date.now());
   const [realtimeTicks, setRealtimeTicks] = useState(0);
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
@@ -458,6 +487,19 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     });
     return map;
   }, [operatorGroups]);
+
+  const defaultCreateMethod = useMemo(() => {
+    const compareMethod = firstMethodByCategory.get('compare')?.value;
+    if (compareMethod) {
+      return compareMethod;
+    }
+    for (const group of operatorGroups) {
+      if (group.methods.length > 0) {
+        return group.methods[0].value;
+      }
+    }
+    return '';
+  }, [firstMethodByCategory, operatorGroups]);
 
   const valueLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -752,6 +794,13 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     }
   };
 
+  const onClickCreateCondition = (containerId: string, groupId: string) => {
+    if (!defaultCreateMethod) {
+      return;
+    }
+    onQuickCreateCondition(containerId, groupId, defaultCreateMethod);
+  };
+
   const renderCondition = (
     containerId: string,
     groupId: string,
@@ -931,18 +980,21 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   };
 
   const renderContainer = (container: ConditionContainer) => (
-    <div className="condition-container-card" key={container.id}>
+    <DroppableSlot
+      key={container.id}
+      id={toConditionCreateContainerDropId(container.id)}
+      className="condition-container-card condition-create-drop-zone"
+    >
       <div className="condition-container-header">
-        <div>
-          <div className="condition-container-title">{container.title}</div>
-          <div className="condition-container-meta">
-            条件组 {container.groups.length}/{maxGroupsPerContainer}
-          </div>
+        <div className="condition-container-header-left">
+          <span className="condition-container-title">{container.title}</span>
+          {container.groups.length > 0 && (
+            <span className="condition-container-meta">
+              条件组 {container.groups.length}/{maxGroupsPerContainer}
+            </span>
+          )}
         </div>
         <div className="condition-container-actions">
-          <div className="condition-container-status">
-            {container.enabled ? '容器已启用' : '容器已停用'}
-          </div>
           <button
             type="button"
             className="condition-add-group"
@@ -953,50 +1005,59 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         </div>
       </div>
 
-      <DroppableSlot
-        id={toConditionCreateContainerDropId(container.id)}
-        className="condition-create-drop-zone"
-      >
-        拖拽操作符到此快速新增条件
-      </DroppableSlot>
-
       {container.groups.length === 0 ? (
-        <div className="condition-container-empty">暂无条件组，点击右上角按钮创建</div>
+        <div className="condition-container-drop-hint">{getDropZoneHint(container.id)}</div>
       ) : (
         <div className="condition-group-list">
           {container.groups.map((group, groupIndex) => (
             <div className="condition-group-card" key={group.id}>
               <div className="condition-group-header">
-                <div>
-                  <div className="condition-group-title">
-                    {group.name || `条件组 ${groupIndex + 1}`}
+                <span className="condition-group-title">
+                  {group.name || `条件组 ${groupIndex + 1}`}
+                </span>
+                <span className="condition-group-meta">条件数 {group.conditions.length}</span>
+                <div
+                  className={`condition-group-more-wrap ${expandedGroupId === group.id ? 'is-expanded' : ''}`}
+                  onMouseEnter={() => setExpandedGroupId(group.id)}
+                  onMouseLeave={() => setExpandedGroupId(null)}
+                >
+                  <div
+                    className={`condition-group-actions condition-group-actions--expandable ${expandedGroupId === group.id ? 'is-expanded' : ''}`}
+                  >
+                    {renderToggle(
+                      group.enabled,
+                      () => onToggleGroupFlag(container.id, group.id, 'enabled'),
+                      '启用',
+                    )}
+                    {renderToggle(
+                      group.required,
+                      () => onToggleGroupFlag(container.id, group.id, 'required'),
+                      '必选',
+                    )}
+                    <button
+                      type="button"
+                      className="condition-delete-button"
+                      onClick={() => onOpenConditionModal(container.id, group.id)}
+                    >
+                      新增
+                    </button>
+                    <button
+                      type="button"
+                      className="condition-delete-button"
+                      onClick={() => onRemoveGroup(container.id, group.id)}
+                    >
+                      删除条件组
+                    </button>
                   </div>
-                  <div className="condition-group-meta">条件数 {group.conditions.length}</div>
-                </div>
-                <div className="condition-group-actions">
-                  {renderToggle(
-                    group.enabled,
-                    () => onToggleGroupFlag(container.id, group.id, 'enabled'),
-                    '启用',
-                  )}
-                  {renderToggle(
-                    group.required,
-                    () => onToggleGroupFlag(container.id, group.id, 'required'),
-                    '必选',
-                  )}
                   <button
                     type="button"
-                    className="condition-delete-button"
-                    onClick={() => onOpenConditionModal(container.id, group.id)}
+                    className="condition-more-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedGroupId((prev) => (prev === group.id ? null : group.id));
+                    }}
                   >
-                    新增条件
-                  </button>
-                  <button
-                    type="button"
-                    className="condition-delete-button"
-                    onClick={() => onRemoveGroup(container.id, group.id)}
-                  >
-                    删除条件组
+                    更多
                   </button>
                 </div>
               </div>
@@ -1004,27 +1065,36 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               <DroppableSlot
                 id={toConditionCreateGroupDropId(container.id, group.id)}
                 className="condition-create-drop-zone condition-create-drop-zone--group"
+                onClick={() => onClickCreateCondition(container.id, group.id)}
               >
-                拖拽操作符到该条件组快速新增
+                <span className="condition-drop-zone-bold">点击</span> 或{' '}
+                <span className="condition-drop-zone-bold">拖拽操作符</span>到此处创建条件
               </DroppableSlot>
 
-              {group.conditions.length === 0 ? (
-                <div className="condition-group-empty">该组暂无条件，点击“新增条件”开始配置</div>
-              ) : (
+              {group.conditions.length > 0 ? (
                 <div className="condition-item-list">
                   {group.conditions.map((condition, index) =>
                     renderCondition(container.id, group.id, condition, index),
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
           ))}
         </div>
       )}
-    </div>
+    </DroppableSlot>
   );
 
-  const containers = [...logicContainers, ...filterContainers];
+  const allContainers = useMemo(() => {
+    const map = new Map<string, ConditionContainer>();
+    [...logicContainers, ...filterContainers].forEach((c) => map.set(c.id, c));
+    return map;
+  }, [logicContainers, filterContainers]);
+
+  const containers = useMemo(() => {
+    const ids = conditionSide === 'long' ? LONG_CONTAINER_IDS : SHORT_CONTAINER_IDS;
+    return ids.map((id) => allContainers.get(id)).filter(Boolean) as ConditionContainer[];
+  }, [conditionSide, allContainers]);
 
   const metricRows = [
     { label: '本地时钟', value: formatClock(dashboardClock) },
@@ -1272,6 +1342,12 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                     <div className="strategy-indicator-list strategy-indicator-list--workbench">
                       {selectedIndicators.map((indicator) => {
                         const group = indicatorGroupMap.get(indicator.id);
+                        const options = group?.options || [];
+                        const config = indicator.config as { input?: unknown };
+                        const inputSource =
+                          typeof config.input === 'string' && config.input.trim()
+                            ? config.input.trim()
+                            : '-';
                         const color = indicatorColorMap.get(indicator.id) || '#93C5FD';
                         return (
                           <DroppableSlot
@@ -1283,52 +1359,58 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               borderColor: rgba(color, 0.45),
                             }}
                           >
-                            <div className="strategy-indicator-item-drop-tip">
-                              拖拽K线字段到此可快速修改输入源
-                            </div>
-                            <div className="strategy-indicator-main-row">
-                              <div className="strategy-indicator-info">
-                                <div className="strategy-indicator-name">{formatIndicatorName(indicator)}</div>
-                                <div className="strategy-indicator-meta">{formatIndicatorMeta(indicator)}</div>
-                                <div className="strategy-indicator-output-list">
-                                  {(group?.options || []).map((option, outputIndex) => (
-                                    <DraggableToken
-                                      key={option.id}
-                                      id={`drag-output|${option.id}`}
-                                      payload={{
-                                        kind: 'output',
-                                        valueId: option.id,
-                                        label: option.fullLabel || option.label,
-                                      }}
-                                      className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
-                                      style={outputBadgeStyleMap.get(option.id) || {
-                                        background: rgba(color, 0.24 + outputIndex * 0.08),
-                                        borderColor: rgba(color, 0.62),
-                                        color: '#0f172a',
-                                      }}
-                                      onMouseEnter={() => setActiveHoverValueId(option.id)}
-                                      onMouseLeave={() => setActiveHoverValueId('')}
-                                    >
-                                      {option.label}
-                                    </DraggableToken>
-                                  ))}
+                            <div className="strategy-indicator-layout">
+                              <div className="strategy-indicator-head-row">
+                                <div className="strategy-indicator-title-inline">
+                                  <div className="strategy-indicator-name">{formatIndicatorName(indicator)}</div>
+                                  <span className="strategy-indicator-input-value">{inputSource}</span>
+                                </div>
+                                <div className="strategy-indicator-actions strategy-indicator-actions--compact">
+                                  <button
+                                    type="button"
+                                    className="strategy-indicator-action"
+                                    onClick={() => onEditIndicator(indicator.id)}
+                                  >
+                                    编辑
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="strategy-indicator-action strategy-indicator-remove"
+                                    onClick={() => onRemoveIndicator(indicator.id)}
+                                  >
+                                    删除
+                                  </button>
                                 </div>
                               </div>
-                              <div className="strategy-indicator-actions">
-                                <button
-                                  type="button"
-                                  className="strategy-indicator-action"
-                                  onClick={() => onEditIndicator(indicator.id)}
-                                >
-                                  编辑
-                                </button>
-                                <button
-                                  type="button"
-                                  className="strategy-indicator-action strategy-indicator-remove"
-                                  onClick={() => onRemoveIndicator(indicator.id)}
-                                >
-                                  删除
-                                </button>
+                              <div className="strategy-indicator-output-row">
+                                <span className="strategy-indicator-row-label">输出</span>
+                                <div className="strategy-indicator-output-list">
+                                  {options.length === 0 ? (
+                                    <span className="strategy-indicator-empty-output">-</span>
+                                  ) : (
+                                    options.map((option, outputIndex) => (
+                                      <DraggableToken
+                                        key={option.id}
+                                        id={`drag-output|${option.id}`}
+                                        payload={{
+                                          kind: 'output',
+                                          valueId: option.id,
+                                          label: option.fullLabel || option.label,
+                                        }}
+                                        className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                                        style={outputBadgeStyleMap.get(option.id) || {
+                                          background: rgba(color, 0.24 + outputIndex * 0.08),
+                                          borderColor: rgba(color, 0.62),
+                                          color: '#0f172a',
+                                        }}
+                                        onMouseEnter={() => setActiveHoverValueId(option.id)}
+                                        onMouseLeave={() => setActiveHoverValueId('')}
+                                      >
+                                        {option.label}
+                                      </DraggableToken>
+                                    ))
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </DroppableSlot>
@@ -1375,9 +1457,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 <div className="strategy-workbench-card strategy-workbench-card--operator">
                   <div className="strategy-workbench-card-header">
                     <span className="strategy-workbench-card-title">快捷操作符</span>
-                    <span className="strategy-workbench-card-meta">
-                      可拖拽“分类”或“操作符”到条件中间位
-                    </span>
                   </div>
 
                   <div className="strategy-workbench-operator-list">
@@ -1423,15 +1502,24 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 <div className="strategy-workbench-card">
                   <div className="strategy-workbench-card-header">
                     <span className="strategy-workbench-card-title">策略条件编辑器</span>
-                    <span className="strategy-workbench-card-meta">
-                      左值/操作符/右值均支持拖拽快速修改
-                    </span>
+                  </div>
+                  <div className="strategy-condition-side-tabs">
+                    <button
+                      type="button"
+                      className={`strategy-condition-side-tab strategy-condition-side-tab--long ${conditionSide === 'long' ? 'is-active' : ''}`}
+                      onClick={() => setConditionSide('long')}
+                    >
+                      多头操作
+                    </button>
+                    <button
+                      type="button"
+                      className={`strategy-condition-side-tab strategy-condition-side-tab--short ${conditionSide === 'short' ? 'is-active' : ''}`}
+                      onClick={() => setConditionSide('short')}
+                    >
+                      空头操作
+                    </button>
                   </div>
                   <div className="strategy-condition-section">
-                    <div className="strategy-condition-title">条件容器</div>
-                    <div className="strategy-condition-hint">
-                      开多、开空、平多、平空及筛选器均在同一界面配置。
-                    </div>
                     <div className="strategy-condition-grid">
                       {containers.map((container) => renderContainer(container))}
                     </div>
