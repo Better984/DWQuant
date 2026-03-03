@@ -207,10 +207,6 @@ export const validateReferencePairSemantics = (
     return '不允许同一指标或字段与自身比较';
   }
 
-  if (isFieldRef(left) && isFieldRef(right)) {
-    return '不允许使用K线字段互相比较';
-  }
-
   if (isIndicatorRef(left) && isIndicatorRef(right)) {
     const leftTimeframe = resolveRefTimeframe(left, defaultTimeframe);
     const rightTimeframe = resolveRefTimeframe(right, defaultTimeframe);

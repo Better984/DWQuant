@@ -16,6 +16,8 @@ interface StrategyWorkbenchKlineProps {
   timeframeSec: number;
   selectedIndicators: GeneratedIndicatorPayload[];
   enableRealtime: boolean;
+  hoverValueId?: string;
+  hoverHasReference?: boolean;
 }
 
 type OhlcvDto = {
@@ -116,14 +118,185 @@ type IndicatorPaneType = 'main' | 'sub';
 
 type ResolvedChartIndicator = {
   chartName: string;
+  backendCode: string;
   pane: IndicatorPaneType;
   params?: number[];
   inputMap?: IndicatorInputMap;
 };
 
 const CANDLE_PANE_ID = 'candle_pane';
+const BLINK_STEP_MS = 108;
+const BLINK_PHASES_REFERENCED = [true, false, true, false, true, false];
+const BLINK_PHASES_BRIEF = [true, false, true, false];
+const HIGHLIGHT_COLOR_ON = 'rgba(245, 158, 11, 0.98)';
+const HIGHLIGHT_COLOR_OFF = 'rgba(251, 191, 36, 0.78)';
+
+type FigureType = 'line' | 'bar' | 'circle';
+type FigureAddress = { type: FigureType; index: number };
+type IndicatorHoverEntry = {
+  chartName: string;
+  backendCode: string;
+  outputs: Array<{ key: string; hint?: string }>;
+};
+type IndicatorVisualTarget = {
+  paneId: string;
+  chartName: string;
+  figure: FigureAddress;
+};
+type LineStyleLike = {
+  color?: string;
+  size?: number;
+  smooth?: boolean;
+  style?: unknown;
+  dashedValue?: number[];
+};
+type BarStyleLike = {
+  upColor?: string;
+  downColor?: string;
+  noChangeColor?: string;
+  borderSize?: number;
+  style?: unknown;
+  borderStyle?: unknown;
+  borderDashedValue?: number[];
+};
+type CircleStyleLike = {
+  upColor?: string;
+  downColor?: string;
+  noChangeColor?: string;
+  borderSize?: number;
+  style?: unknown;
+  borderStyle?: unknown;
+  borderDashedValue?: number[];
+};
+
+const BASE_LINE_STYLE: LineStyleLike = {
+  style: 'solid',
+  smooth: false,
+  size: 1,
+  dashedValue: [2, 2],
+  color: '#FF9600',
+};
+
+const BASE_BAR_STYLE: BarStyleLike = {
+  style: 'fill',
+  borderStyle: 'solid',
+  borderSize: 1,
+  borderDashedValue: [2, 2],
+  upColor: 'rgba(34,197,94,0.55)',
+  downColor: 'rgba(239,68,68,0.55)',
+  noChangeColor: '#9ca3af',
+};
+
+const BASE_CIRCLE_STYLE: CircleStyleLike = {
+  style: 'fill',
+  borderStyle: 'solid',
+  borderSize: 1,
+  borderDashedValue: [2, 2],
+  upColor: 'rgba(34,197,94,0.55)',
+  downColor: 'rgba(239,68,68,0.55)',
+  noChangeColor: '#9ca3af',
+};
 
 const normalizeKeyText = (value: string) => value.trim().toUpperCase();
+const normalizeKey = (value?: string) => (value || '').trim().toUpperCase();
+
+const resolveTalibMeta = (
+  rawCode: string,
+  byCode: Map<string, ReturnType<typeof getTalibIndicatorMetaList>[number]>,
+  byChartName: Map<string, ReturnType<typeof getTalibIndicatorMetaList>[number]>,
+) => {
+  const normalized = normalizeKey(rawCode);
+  return byCode.get(normalized)
+    || byChartName.get(normalized)
+    || byChartName.get(`TA_${normalized}`)
+    || null;
+};
+
+const parseIndicatorOutputValueId = (valueId?: string) => {
+  const normalized = (valueId || '').trim();
+  if (!normalized || normalized.toLowerCase().startsWith('field:')) {
+    return null;
+  }
+  const splitIndex = normalized.indexOf(':');
+  if (splitIndex <= 0 || splitIndex >= normalized.length - 1) {
+    return null;
+  }
+  return {
+    indicatorId: normalized.slice(0, splitIndex),
+    outputKey: normalized.slice(splitIndex + 1),
+  };
+};
+
+const guessFigureType = (backendCode: string, output: { key: string; hint?: string }): FigureType => {
+  const code = normalizeKey(backendCode);
+  const hint = `${output.hint || ''} ${output.key || ''}`.toLowerCase();
+  if (code === 'SAR' || code === 'SAREXT') {
+    return 'circle';
+  }
+  if (hint.includes('histogram') || hint.includes('bar') || hint.includes('hist')) {
+    return 'bar';
+  }
+  if (hint.includes('dot') || hint.includes('point') || hint.includes('circle')) {
+    return 'circle';
+  }
+  return 'line';
+};
+
+const resolveFigureAddress = (
+  backendCode: string,
+  outputs: Array<{ key: string; hint?: string }>,
+  outputKey: string,
+): FigureAddress => {
+  const target = normalizeKey(outputKey);
+  let lineIndex = 0;
+  let barIndex = 0;
+  let circleIndex = 0;
+  const list = outputs.length > 0 ? outputs : [{ key: outputKey, hint: outputKey }];
+
+  for (const output of list) {
+    const type = guessFigureType(backendCode, output);
+    if (type === 'line') {
+      const index = lineIndex;
+      lineIndex += 1;
+      if (normalizeKey(output.key) === target) {
+        return { type, index };
+      }
+      continue;
+    }
+    if (type === 'bar') {
+      const index = barIndex;
+      barIndex += 1;
+      if (normalizeKey(output.key) === target) {
+        return { type, index };
+      }
+      continue;
+    }
+    const index = circleIndex;
+    circleIndex += 1;
+    if (normalizeKey(output.key) === target) {
+      return { type, index };
+    }
+  }
+
+  const fallbackType = guessFigureType(backendCode, list[0]);
+  return { type: fallbackType, index: 0 };
+};
+
+const buildStyleList = <T extends object>(
+  source: T[] | undefined,
+  minCount: number,
+  fallback: T,
+) => {
+  const seed = (Array.isArray(source) && source.length > 0 ? source : [fallback]).map(
+    (item) => ({ ...(item as object) } as T),
+  );
+  const targetCount = Math.max(1, minCount);
+  const result = seed.slice(0, targetCount);
+  while (result.length < targetCount) {
+    result.push({ ...(seed[result.length % seed.length] as object) } as T);
+  }
+  return result;
+};
 
 const parseIndicatorInputMap = (
   rawInput: string,
@@ -189,10 +362,7 @@ const toResolvedChartIndicatorList = (
     if (!rawCode) {
       return;
     }
-    const normalized = normalizeKeyText(rawCode);
-    const matched = byCode.get(normalized)
-      || byChartName.get(normalized)
-      || byChartName.get(`TA_${normalized}`);
+    const matched = resolveTalibMeta(rawCode, byCode, byChartName);
     if (!matched) {
       return;
     }
@@ -208,6 +378,7 @@ const toResolvedChartIndicatorList = (
 
     deduped.set(matched.name, {
       chartName: matched.name,
+      backendCode: matched.talibCode || matched.code || rawCode,
       pane: matched.pane === 'main' ? 'main' : 'sub',
       params,
       inputMap,
@@ -223,11 +394,14 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   timeframeSec,
   selectedIndicators,
   enableRealtime,
+  hoverValueId,
+  hoverHasReference = false,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<Chart | null>(null);
   const subPaneIdMapRef = useRef<Map<string, string>>(new Map());
   const mainIndicatorSetRef = useRef<Set<string>>(new Set());
+  const blinkTimerRef = useRef<number | null>(null);
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
   const [bars, setBars] = useState<KLineData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -236,6 +410,30 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
 
   const timeframeKey = TIMEFRAME_TO_KEY[timeframeSec] || 'm5';
   const intervalMs = TIMEFRAME_TO_MS[timeframeSec] || 300_000;
+
+  const hoverIndicatorMap = useMemo(() => {
+    const map = new Map<string, IndicatorHoverEntry>();
+    const metaList = getTalibIndicatorMetaList();
+    const byCode = new Map(metaList.map((item) => [normalizeKeyText(item.code), item]));
+    const byChartName = new Map(metaList.map((item) => [normalizeKeyText(item.name), item]));
+    selectedIndicators.forEach((item) => {
+      const config = (item.config || {}) as { indicator?: string };
+      const rawCode = String(config.indicator || item.code || '').trim();
+      if (!rawCode) {
+        return;
+      }
+      const matched = resolveTalibMeta(rawCode, byCode, byChartName);
+      if (!matched) {
+        return;
+      }
+      map.set(item.id, {
+        chartName: matched.name,
+        backendCode: matched.talibCode || matched.code || rawCode,
+        outputs: Array.isArray(item.outputs) ? item.outputs : [],
+      });
+    });
+    return map;
+  }, [selectedIndicators]);
 
   const loadHistory = useCallback(async (signal: AbortSignal) => {
     setIsLoading(true);
@@ -418,6 +616,138 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     });
   }, [selectedIndicators, talibReady]);
 
+  const clearBlinkTimer = useCallback(() => {
+    if (blinkTimerRef.current !== null) {
+      window.clearTimeout(blinkTimerRef.current);
+      blinkTimerRef.current = null;
+    }
+  }, []);
+
+  const resolveHoverTarget = useCallback((valueId?: string): IndicatorVisualTarget | null => {
+    const parsed = parseIndicatorOutputValueId(valueId);
+    if (!parsed) {
+      return null;
+    }
+    const indicator = hoverIndicatorMap.get(parsed.indicatorId);
+    if (!indicator) {
+      return null;
+    }
+
+    const figure = resolveFigureAddress(indicator.backendCode, indicator.outputs, parsed.outputKey);
+    if (mainIndicatorSetRef.current.has(indicator.chartName)) {
+      return {
+        paneId: CANDLE_PANE_ID,
+        chartName: indicator.chartName,
+        figure,
+      };
+    }
+    const subPaneId = subPaneIdMapRef.current.get(indicator.chartName);
+    if (!subPaneId) {
+      return null;
+    }
+    return {
+      paneId: subPaneId,
+      chartName: indicator.chartName,
+      figure,
+    };
+  }, [hoverIndicatorMap]);
+
+  const applyIndicatorPulse = useCallback((target: IndicatorVisualTarget, phaseOn: boolean) => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    const exists = chart.getIndicatorByPaneId(target.paneId, target.chartName);
+    if (!exists) {
+      return;
+    }
+
+    const indicatorStyles = chart.getStyles().indicator;
+    const lines = buildStyleList(
+      (indicatorStyles.lines || []) as LineStyleLike[],
+      target.figure.type === 'line' ? Math.max(5, target.figure.index + 1) : 5,
+      BASE_LINE_STYLE,
+    );
+    const bars = buildStyleList(
+      (indicatorStyles.bars || []) as BarStyleLike[],
+      target.figure.type === 'bar' ? Math.max(1, target.figure.index + 1) : 1,
+      BASE_BAR_STYLE,
+    );
+    const circles = buildStyleList(
+      (indicatorStyles.circles || []) as CircleStyleLike[],
+      target.figure.type === 'circle' ? Math.max(1, target.figure.index + 1) : 1,
+      BASE_CIRCLE_STYLE,
+    );
+
+    if (target.figure.type === 'line') {
+      lines[target.figure.index] = {
+        ...lines[target.figure.index],
+        color: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        size: phaseOn ? 2.8 : 1.35,
+        smooth: true,
+      };
+    } else if (target.figure.type === 'bar') {
+      bars[target.figure.index] = {
+        ...bars[target.figure.index],
+        upColor: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        downColor: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        noChangeColor: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        borderSize: phaseOn ? 2 : 1,
+      };
+    } else {
+      circles[target.figure.index] = {
+        ...circles[target.figure.index],
+        upColor: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        downColor: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        noChangeColor: phaseOn ? HIGHLIGHT_COLOR_ON : HIGHLIGHT_COLOR_OFF,
+        borderSize: phaseOn ? 2 : 1,
+      };
+    }
+
+    chart.overrideIndicator(
+      {
+        name: target.chartName,
+        styles: {
+          lines: lines as unknown as never[],
+          bars: bars as unknown as never[],
+          circles: circles as unknown as never[],
+        },
+      },
+      target.paneId,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!talibReady) {
+      return;
+    }
+    clearBlinkTimer();
+    const target = resolveHoverTarget(hoverValueId);
+    if (!target) {
+      return;
+    }
+
+    // 有引用时和右侧抖动节奏接近；无引用仅做短闪，避免无意义持续动画。
+    const phases = hoverHasReference ? BLINK_PHASES_REFERENCED : BLINK_PHASES_BRIEF;
+    let step = 0;
+    const runStep = () => {
+      const phaseOn = phases[step];
+      applyIndicatorPulse(target, phaseOn);
+      step += 1;
+      if (step >= phases.length) {
+        applyIndicatorPulse(target, false);
+        return;
+      }
+      blinkTimerRef.current = window.setTimeout(runStep, BLINK_STEP_MS);
+    };
+
+    runStep();
+    return () => {
+      clearBlinkTimer();
+      applyIndicatorPulse(target, false);
+    };
+  }, [applyIndicatorPulse, clearBlinkTimer, hoverHasReference, hoverValueId, resolveHoverTarget, talibReady]);
+
   useEffect(() => {
     if (!containerRef.current || !chartRef.current) {
       return;
@@ -432,6 +762,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
 
   useEffect(() => {
     return () => {
+      clearBlinkTimer();
       if (chartRef.current) {
         dispose(chartRef.current);
         chartRef.current = null;
@@ -439,7 +770,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
       mainIndicatorSetRef.current.clear();
       subPaneIdMapRef.current.clear();
     };
-  }, []);
+  }, [clearBlinkTimer]);
 
   return (
     <div className="strategy-workbench-kline-shell">

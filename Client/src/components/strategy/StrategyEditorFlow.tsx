@@ -2271,7 +2271,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     conditionId: string,
     updater: (condition: ConditionItem) => ConditionItem | null,
     historyMessage?: string,
-  ) => {
+  ): boolean => {
     let matched = false;
     let changed = false;
     let ruleError = '';
@@ -2309,15 +2309,16 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
     if (!matched) {
       error('目标条件不存在，请刷新后重试');
-      return;
+      return false;
     }
     if (ruleError) {
       error(ruleError);
-      return;
+      return false;
     }
     if (changed && historyMessage) {
       markHistoryAction(historyMessage);
     }
+    return changed;
   };
 
   const quickAssignConditionMethod = (
@@ -2373,6 +2374,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     conditionId: string,
     slot: 'left' | 'right',
     valueId: string,
+    source?: {
+      containerId: string;
+      groupId: string;
+      conditionId: string;
+      slot: 'left' | 'right';
+    },
   ) => {
     if (!indicatorValueMap.has(valueId)) {
       error('拖拽值无效，请重试');
@@ -2380,28 +2387,99 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     }
 
     const valueLabel = indicatorValueMap.get(valueId)?.fullLabel || indicatorValueMap.get(valueId)?.label || valueId;
-    applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
+    let degradeByRule = false;
+    const sourceIsSameCondition = Boolean(
+      source
+      && source.containerId === containerId
+      && source.groupId === groupId
+      && source.conditionId === conditionId,
+    );
+    const changed = applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
       const methodMeta = resolveMethodMeta(condition.method);
       const argsCount = methodMeta.argsCount ?? 2;
+      const rightMode = resolveArgValueMode(methodMeta, 1);
       if (slot === 'left') {
-        return { ...condition, leftValueId: valueId };
+        const fromRightToLeft = sourceIsSameCondition && source?.slot === 'right';
+        const next: ConditionItem = fromRightToLeft
+          ? (() => {
+              const oldLeft = condition.leftValueId || '';
+              const oldRight = condition.rightValueType === 'field' ? condition.rightValueId || '' : '';
+              const movedValue = oldRight || valueId;
+              if (!movedValue) {
+                return condition;
+              }
+              const draft: ConditionItem = {
+                ...condition,
+                leftValueId: movedValue,
+                rightValueType: 'field',
+                rightValueId: oldLeft,
+                rightNumber: '',
+              };
+              if (!oldLeft) {
+                draft.rightValueId = '';
+              }
+              return draft;
+            })()
+          : {
+              ...condition,
+              leftValueId: valueId,
+            };
+        const leftRuleError = validateConditionDraftByRules(next);
+        if (!leftRuleError) {
+          return next;
+        }
+        degradeByRule = true;
+        return {
+          ...next,
+          rightValueType: 'field',
+          rightValueId: '',
+          rightNumber: '',
+        };
       }
 
       if (argsCount < 2) {
         error('该条件当前不支持右值字段');
         return null;
       }
-      const rightMode = resolveArgValueMode(methodMeta, 1);
       if (rightMode === 'number') {
         error('该条件右值仅支持数值，不支持字段拖拽');
         return null;
       }
+      const fromLeftToRight = sourceIsSameCondition && source?.slot === 'left';
+      const next: ConditionItem = fromLeftToRight
+        ? (() => {
+            const oldLeft = condition.leftValueId || '';
+            const oldRight = condition.rightValueType === 'field' ? condition.rightValueId || '' : '';
+            const movedValue = oldLeft || valueId;
+            if (!movedValue) {
+              return condition;
+            }
+            return {
+              ...condition,
+              leftValueId: oldRight,
+              rightValueType: 'field',
+              rightValueId: movedValue,
+              rightNumber: '',
+            };
+          })()
+        : {
+            ...condition,
+            rightValueType: 'field',
+            rightValueId: valueId,
+          };
+      const nextRuleError = validateConditionDraftByRules(next);
+      if (!nextRuleError) {
+        return next;
+      }
+      degradeByRule = true;
       return {
-        ...condition,
-        rightValueType: 'field',
-        rightValueId: valueId,
+        ...next,
+        leftValueId: '',
       };
     }, `修改条件${slot === 'left' ? '左值' : '右值'}为 ${valueLabel}`);
+    if (changed && degradeByRule) {
+      success(`提示：该修改暂不合法，已自动将${slot === 'left' ? '右值' : '左值'}置为未配置，可继续编辑或按 Ctrl+Z 撤回。`);
+    }
   };
 
   const quickAssignConditionNumber = (
@@ -2483,7 +2561,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     }
   };
 
-  const createQuickConditionDraft = (methodMeta: MethodOption): ConditionItem | null => {
+  const createQuickConditionDraft = (methodMeta: MethodOption): ConditionItem => {
     const argsCount = methodMeta.argsCount ?? 2;
     const leftValueId = indicatorOutputOptions[0]?.id || '';
     const candidateFieldIds = indicatorOutputOptions.map((item) => item.id);
@@ -2502,17 +2580,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       paramValues: methodMeta.params?.map((param) => param.defaultValue || '') || [],
     };
 
-    if (!leftValueId) {
-      return null;
-    }
-
     if (argsCount >= 2) {
       const rightMode = resolveArgValueMode(methodMeta, 1);
       const rightCandidate = candidateFieldIds.find((item) => item !== leftValueId) || '';
       if (rightMode === 'field') {
-        if (!rightCandidate) {
-          return null;
-        }
         next.rightValueType = 'field';
         next.rightValueId = rightCandidate;
         next.rightNumber = '';
@@ -2525,9 +2596,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         next.rightValueId = rightCandidate;
         next.rightNumber = '';
       } else {
-        next.rightValueType = 'number';
+        next.rightValueType = 'field';
         next.rightValueId = '';
-        next.rightNumber = '0';
+        next.rightNumber = '';
       }
     }
 
@@ -2539,9 +2610,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       ]);
       const extraCandidate = candidateFieldIds.find((item) => !unavailableIds.has(item)) || '';
       if (extraMode === 'field') {
-        if (!extraCandidate) {
-          return null;
-        }
         next.extraValueType = 'field';
         next.extraValueId = extraCandidate;
         next.extraNumber = '';
@@ -2554,10 +2622,55 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         next.extraValueId = extraCandidate;
         next.extraNumber = '';
       } else {
-        next.extraValueType = 'number';
+        next.extraValueType = 'field';
         next.extraValueId = '';
-        next.extraNumber = '0';
+        next.extraNumber = '';
       }
+    }
+
+    return next;
+  };
+
+  const buildUnconfiguredQuickConditionDraft = (
+    methodMeta: MethodOption,
+    base?: ConditionItem,
+  ): ConditionItem => {
+    const argsCount = methodMeta.argsCount ?? 2;
+    const rightMode = resolveArgValueMode(methodMeta, 1);
+    const extraMode = resolveArgValueMode(methodMeta, 2);
+    const next: ConditionItem = {
+      id: base?.id || generateId(),
+      enabled: base?.enabled ?? true,
+      required: base?.required ?? false,
+      method: methodMeta.value,
+      leftValueId: '',
+      rightValueType: 'field',
+      rightValueId: '',
+      rightNumber: '',
+      extraValueType: 'field',
+      extraValueId: '',
+      extraNumber: '',
+      paramValues: methodMeta.params?.map((param) => param.defaultValue || '') || [],
+    };
+
+    if (argsCount >= 2) {
+      if (rightMode === 'number') {
+        next.rightValueType = 'number';
+      } else {
+        next.rightValueType = 'field';
+      }
+    }
+
+    if (argsCount >= 3) {
+      if (extraMode === 'number') {
+        next.extraValueType = 'number';
+      } else {
+        next.extraValueType = 'field';
+      }
+    } else {
+      next.extraValueType = 'number';
+      next.extraValueId = '';
+      next.extraNumber = '';
     }
 
     return next;
@@ -2570,16 +2683,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       return;
     }
 
-    const draft = createQuickConditionDraft(methodMeta);
-    if (!draft) {
-      error('当前可选指标输出不足，无法快速创建该条件');
-      return;
-    }
-
+    let draft = createQuickConditionDraft(methodMeta);
+    let degradedBySemantic = false;
     const semanticError = validateConditionDraftByRules(draft);
     if (semanticError) {
-      error(`快速创建失败：${semanticError}`);
-      return;
+      draft = buildUnconfiguredQuickConditionDraft(methodMeta, draft);
+      degradedBySemantic = true;
     }
 
     let matched = false;
@@ -2631,21 +2740,19 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         }
 
         const methodConfig = buildStrategyMethod(draft);
-        if (!methodConfig) {
-          ruleError = '新建条件失败：条件参数不完整';
-          return container;
-        }
-        const nextFingerprint = buildConditionMethodFingerprint(methodConfig);
-        const hasDuplicate = group.conditions.some((condition) => {
-          const currentMethod = buildStrategyMethod(condition);
-          if (!currentMethod) {
-            return false;
+        if (methodConfig) {
+          const nextFingerprint = buildConditionMethodFingerprint(methodConfig);
+          const hasDuplicate = group.conditions.some((condition) => {
+            const currentMethod = buildStrategyMethod(condition);
+            if (!currentMethod) {
+              return false;
+            }
+            return buildConditionMethodFingerprint(currentMethod) === nextFingerprint;
+          });
+          if (hasDuplicate) {
+            ruleError = `${container.title}-${group.name}存在重复条件`;
+            return container;
           }
-          return buildConditionMethodFingerprint(currentMethod) === nextFingerprint;
-        });
-        if (hasDuplicate) {
-          ruleError = `${container.title}-${group.name}存在重复条件`;
-          return container;
         }
 
         nextGroups[groupIndex] = {
@@ -2674,6 +2781,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         ? `${createdGroupName}（自动创建）`
         : targetGroupName || '目标条件组';
       markHistoryAction(`在${groupText}新增条件 ${methodLabel}`);
+      if (degradedBySemantic) {
+        success('已创建条件：自动补全失败，参与值已置为未配置，请继续拖拽或编辑补全');
+      }
     }
   };
 

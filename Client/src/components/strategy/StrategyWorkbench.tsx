@@ -35,10 +35,18 @@ type DragPayloadMeta = {
   previewText?: string;
 };
 
+type ConditionValueDragSource = {
+  containerId: string;
+  groupId: string;
+  conditionId: string;
+  slot: 'left' | 'right';
+};
+
 type DragPayload =
   | ({ kind: 'output'; valueId: string; label: string } & DragPayloadMeta)
   | ({ kind: 'method'; method: string; label: string; category: string } & DragPayloadMeta)
   | ({ kind: 'category'; category: string; label: string } & DragPayloadMeta)
+  | ({ kind: 'condition-value'; valueId: string; label: string; source: ConditionValueDragSource } & DragPayloadMeta)
   | ({ kind: 'number'; label: string } & DragPayloadMeta);
 
 interface StrategyWorkbenchProps {
@@ -97,6 +105,7 @@ interface StrategyWorkbenchProps {
     conditionId: string,
     slot: 'left' | 'right',
     valueId: string,
+    source?: ConditionValueDragSource,
   ) => void;
   onQuickAssignConditionNumber: (containerId: string, groupId: string, conditionId: string) => void;
   onQuickUpdateConditionRightNumber: (
@@ -271,7 +280,9 @@ const DraggableToken: React.FC<{
   className: string;
   style?: React.CSSProperties;
   children: React.ReactNode;
-}> = ({ id, payload, className, style, children }) => {
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}> = ({ id, payload, className, style, children, onMouseEnter, onMouseLeave }) => {
   const previewText =
     typeof children === 'string' || typeof children === 'number'
       ? String(children)
@@ -297,6 +308,8 @@ const DraggableToken: React.FC<{
         transform: dragTransform,
         opacity: isDragging ? 0 : 1,
       }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       {...listeners}
       {...attributes}
     >
@@ -379,6 +392,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [focusRightNumberKey, setFocusRightNumberKey] = useState('');
+  const [activeHoverValueId, setActiveHoverValueId] = useState('');
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const exchangeLabel = useMemo(() => {
@@ -461,6 +475,63 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       .reduce((sum, group) => sum + group.options.length, 0);
   }, [indicatorOutputGroups]);
 
+  const outputBadgeStyleMap = useMemo(() => {
+    const map = new Map<string, React.CSSProperties>();
+    indicatorOutputGroups.forEach((group) => {
+      if (group.id === 'kline-fields') {
+        return;
+      }
+      const color = indicatorColorMap.get(group.id) || '#93C5FD';
+      group.options.forEach((option, outputIndex) => {
+        map.set(option.id, {
+          background: rgba(color, 0.24 + outputIndex * 0.08),
+          border: `1px solid ${rgba(color, 0.62)}`,
+          color: '#0f172a',
+        });
+      });
+    });
+    return map;
+  }, [indicatorOutputGroups, indicatorColorMap]);
+
+  const conditionValueUsageCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const pushValue = (valueId?: string) => {
+      const normalized = normalizeText(valueId);
+      if (!normalized) {
+        return;
+      }
+      map.set(normalized, (map.get(normalized) || 0) + 1);
+    };
+
+    [...logicContainers, ...filterContainers].forEach((container) => {
+      container.groups.forEach((group) => {
+        group.conditions.forEach((condition) => {
+          pushValue(condition.leftValueId);
+          if (condition.rightValueType === 'field') {
+            pushValue(condition.rightValueId);
+          }
+        });
+      });
+    });
+
+    return map;
+  }, [logicContainers, filterContainers]);
+
+  const activeHoverHasReference = useMemo(() => {
+    if (!activeHoverValueId) {
+      return false;
+    }
+    return (conditionValueUsageCountMap.get(activeHoverValueId) || 0) > 0;
+  }, [activeHoverValueId, conditionValueUsageCountMap]);
+
+  const isLinkedActive = (valueId?: string) => {
+    const normalized = normalizeText(valueId);
+    if (!normalized || !activeHoverHasReference || !activeHoverValueId) {
+      return false;
+    }
+    return normalized === activeHoverValueId;
+  };
+
   const conditionCount = useMemo(() => {
     return [...logicContainers, ...filterContainers].reduce((sum, container) => {
       return sum + container.groups.reduce((groupSum, group) => groupSum + group.conditions.length, 0);
@@ -513,6 +584,34 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return method?.argValueTypes?.[argIndex] || 'both';
   };
 
+  const buildValueBadgeStyle = (valueId?: string): React.CSSProperties | undefined => {
+    const normalized = normalizeText(valueId);
+    if (!normalized) {
+      return undefined;
+    }
+    const outputStyle = outputBadgeStyleMap.get(normalized);
+    if (outputStyle) {
+      return outputStyle;
+    }
+    if (normalized.startsWith('field:')) {
+      return {
+        background: '#f1f5f9',
+        border: '1px solid #cbd5e1',
+        color: '#334155',
+      };
+    }
+    const indicatorId = normalized.split(':')[0] || '';
+    const color = indicatorColorMap.get(indicatorId);
+    if (!color) {
+      return undefined;
+    }
+    return {
+      background: rgba(color, 0.24),
+      border: `1px solid ${rgba(color, 0.62)}`,
+      color: '#0f172a',
+    };
+  };
+
   const renderValueText = (valueId?: string) => {
     if (!valueId) {
       return '未配置';
@@ -525,6 +624,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     if (payload) {
       setActiveDrag(payload);
     }
+    setActiveHoverValueId('');
     const point = extractClientPoint(event.activatorEvent);
     if (point) {
       setDragCursor(point);
@@ -534,6 +634,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const onDragCancel = (_event: DragCancelEvent) => {
     setActiveDrag(null);
     setDragCursor(null);
+    setActiveHoverValueId('');
   };
 
   const onDragEnd = (event: DragEndEvent) => {
@@ -544,6 +645,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const conditionCreateDrop = dropTargetId ? parseConditionCreateDropId(dropTargetId) : null;
     setActiveDrag(null);
     setDragCursor(null);
+    setActiveHoverValueId('');
 
     if (!payload) {
       return;
@@ -588,6 +690,27 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         conditionDrop.conditionId,
         conditionDrop.slot,
         payload.valueId,
+      );
+      return;
+    }
+    if (payload.kind === 'condition-value' && (conditionDrop.slot === 'left' || conditionDrop.slot === 'right')) {
+      const sameCondition =
+        payload.source.containerId === conditionDrop.containerId
+        && payload.source.groupId === conditionDrop.groupId
+        && payload.source.conditionId === conditionDrop.conditionId;
+      if (!sameCondition) {
+        return;
+      }
+      if (payload.source.slot === conditionDrop.slot) {
+        return;
+      }
+      onQuickAssignConditionValue(
+        conditionDrop.containerId,
+        conditionDrop.groupId,
+        conditionDrop.conditionId,
+        conditionDrop.slot,
+        payload.valueId,
+        payload.source,
       );
       return;
     }
@@ -646,6 +769,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const canDropRight = argsCount >= 2 && rightMode !== 'number';
     const canUseRightNumber = argsCount >= 2 && rightMode !== 'field';
     const numberFocusKey = `${containerId}|${groupId}|${condition.id}`;
+    const leftLinkedActive = isLinkedActive(condition.leftValueId);
+    const rightLinkedActive = condition.rightValueType === 'field' && isLinkedActive(condition.rightValueId);
     const rightCandidateCount = Array.from(valueLabelMap.keys()).filter(
       (valueId) => valueId !== condition.leftValueId,
     ).length;
@@ -678,7 +803,30 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             className="condition-dnd-slot"
           >
             <span className="condition-dnd-title">左值</span>
-            <span className="condition-dnd-value">{renderValueText(condition.leftValueId)}</span>
+            {condition.leftValueId ? (
+              <DraggableToken
+                id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|left`}
+                payload={{
+                  kind: 'condition-value',
+                  valueId: condition.leftValueId,
+                  label: renderValueText(condition.leftValueId),
+                  source: {
+                    containerId,
+                    groupId,
+                    conditionId: condition.id,
+                    slot: 'left',
+                  },
+                }}
+                className={`condition-dnd-value condition-dnd-value-badge ${leftLinkedActive ? 'is-linked-active' : ''}`}
+                style={buildValueBadgeStyle(condition.leftValueId)}
+                onMouseEnter={() => setActiveHoverValueId(condition.leftValueId)}
+                onMouseLeave={() => setActiveHoverValueId('')}
+              >
+                {renderValueText(condition.leftValueId)}
+              </DraggableToken>
+            ) : (
+              <span className="condition-dnd-value">{renderValueText(condition.leftValueId)}</span>
+            )}
           </DroppableSlot>
 
           <DroppableSlot
@@ -719,9 +867,35 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 placeholder="输入数值"
               />
             ) : (
-              <span className="condition-dnd-value">
-                {rightNoTargetHint || rightText}
-              </span>
+              condition.rightValueType === 'field' && condition.rightValueId ? (
+                <DraggableToken
+                  id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|right`}
+                  payload={{
+                    kind: 'condition-value',
+                    valueId: condition.rightValueId,
+                    label: renderValueText(condition.rightValueId),
+                    source: {
+                      containerId,
+                      groupId,
+                      conditionId: condition.id,
+                      slot: 'right',
+                    },
+                  }}
+                  className={`condition-dnd-value condition-dnd-value-badge ${rightLinkedActive ? 'is-linked-active' : ''}`}
+                  style={buildValueBadgeStyle(condition.rightValueId)}
+                  onMouseEnter={() => setActiveHoverValueId(condition.rightValueId || '')}
+                  onMouseLeave={() => setActiveHoverValueId('')}
+                >
+                  {rightNoTargetHint || rightText}
+                </DraggableToken>
+              ) : (
+                <span
+                  className={`condition-dnd-value ${condition.rightValueType === 'field' ? 'condition-dnd-value-badge' : ''} ${rightLinkedActive ? 'is-linked-active' : ''}`}
+                  style={condition.rightValueType === 'field' ? buildValueBadgeStyle(condition.rightValueId) : undefined}
+                >
+                  {rightNoTargetHint || rightText}
+                </span>
+              )
             )}
           </DroppableSlot>
         </div>
@@ -982,6 +1156,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                     timeframeSec={selectedTimeframeSec}
                     selectedIndicators={selectedIndicators}
                     enableRealtime={validRiskConfig}
+                    hoverValueId={activeHoverValueId}
+                    hoverHasReference={activeHoverHasReference}
                   />
                 </div>
               </div>
@@ -1124,12 +1300,14 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                                         valueId: option.id,
                                         label: option.fullLabel || option.label,
                                       }}
-                                      className="strategy-indicator-output-chip"
-                                      style={{
+                                      className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                                      style={outputBadgeStyleMap.get(option.id) || {
                                         background: rgba(color, 0.24 + outputIndex * 0.08),
                                         borderColor: rgba(color, 0.62),
                                         color: '#0f172a',
                                       }}
+                                      onMouseEnter={() => setActiveHoverValueId(option.id)}
+                                      onMouseLeave={() => setActiveHoverValueId('')}
                                     >
                                       {option.label}
                                     </DraggableToken>
@@ -1182,7 +1360,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               valueId: option.id,
                               label: option.fullLabel || option.label,
                             }}
-                            className="strategy-indicator-output-chip strategy-indicator-output-chip--field"
+                            className={`strategy-indicator-output-chip strategy-indicator-output-chip--field ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                            onMouseEnter={() => setActiveHoverValueId(option.id)}
+                            onMouseLeave={() => setActiveHoverValueId('')}
                           >
                             {option.label}
                           </DraggableToken>

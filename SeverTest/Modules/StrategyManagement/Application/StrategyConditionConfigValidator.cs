@@ -377,12 +377,6 @@ namespace ServerTest.Modules.StrategyManagement.Application
                 return false;
             }
 
-            if (IsFieldRef(left) && IsFieldRef(right))
-            {
-                error = $"{path} 不允许K线字段互相比较";
-                return false;
-            }
-
             if (IsIndicatorRef(left) && IsIndicatorRef(right))
             {
                 var leftTimeframe = ResolveReferenceTimeframe(left, defaultTimeframe);
