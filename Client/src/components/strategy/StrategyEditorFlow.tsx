@@ -2044,7 +2044,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       indicatorValueMap.get(draft.leftValueId)?.label ||
       '未选择字段';
     const methodMeta = resolveMethodMeta(draft.method);
-    const methodLabel = methodMeta.label || draft.method;
+    const methodValue = methodMeta.value || draft.method;
+    const methodLabel =
+      (methodMeta.label || draft.method).replace(/\s*[\(（][^\)）]*[\)）]/g, '').trim()
+      || draft.method;
     const argsCount = methodMeta.argsCount ?? 2;
 
     const rightLabel =
@@ -2060,31 +2063,60 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           indicatorValueMap.get(draft.extraValueId || '')?.label ||
           '未选择字段';
 
-    let text = `${leftLabel} ${methodLabel}`;
-    if (argsCount >= 2) {
-      text = `${text} ${rightLabel}`;
-    }
-    if (argsCount >= 3) {
-      text = `${text} ${extraLabel}`;
-    }
-
     const paramDefs = methodMeta.params || [];
-    if (paramDefs.length > 0) {
-      const paramValues = draft.paramValues || [];
-      const paramText = paramDefs
-        .map((param, index) => {
-          const rawValue = paramValues[index];
-          const value =
-            rawValue !== undefined && rawValue !== ''
-              ? rawValue
-              : param.defaultValue ?? '未填写';
-          return `${param.label}:${value}`;
-        })
-        .join('，');
-      text = `${text}（${paramText}）`;
+    const paramValues = draft.paramValues || [];
+    const resolveParamValue = (index: number) => {
+      const rawValue = paramValues[index];
+      return rawValue !== undefined && rawValue !== ''
+        ? rawValue
+        : (paramDefs[index]?.defaultValue ?? '未填写');
+    };
+    const periodParamIndex = paramDefs.findIndex((param) =>
+      (param.key || '').toLowerCase().includes('period'),
+    );
+    const periodValue = periodParamIndex >= 0 ? resolveParamValue(periodParamIndex) : '';
+    const consumedParamIndexes = new Set<number>();
+
+    let text = '';
+    if (methodValue === 'Between') {
+      text = `${leftLabel} 在 ${rightLabel} 和 ${extraLabel} 区间内`;
+    } else if (methodValue === 'Outside') {
+      text = `${leftLabel} 在 ${rightLabel} 和 ${extraLabel} 区间外`;
+    } else if (methodValue === 'Rising' || methodValue === 'Falling') {
+      text = `${leftLabel} ${methodLabel}`;
+      if (periodValue) {
+        text = `${text} ${periodValue}个周期`;
+      }
+      if (periodParamIndex >= 0) {
+        consumedParamIndexes.add(periodParamIndex);
+      }
+    } else if (methodValue === 'AboveFor' || methodValue === 'BelowFor') {
+      text = `${leftLabel} ${methodLabel} ${rightLabel}`;
+      if (periodValue) {
+        text = `${text} ${periodValue}个周期`;
+      }
+      if (periodParamIndex >= 0) {
+        consumedParamIndexes.add(periodParamIndex);
+      }
+    } else {
+      text = `${leftLabel} ${methodLabel}`;
+      if (argsCount >= 2) {
+        text = `${text} ${rightLabel}`;
+      }
+      if (argsCount >= 3) {
+        text = `${text} ${extraLabel}`;
+      }
     }
 
-    return text;
+    const remainParams = paramDefs
+      .map((param, index) => ({ param, index }))
+      .filter(({ index }) => !consumedParamIndexes.has(index))
+      .map(({ param, index }) => `${param.label}:${resolveParamValue(index)}`);
+    if (remainParams.length > 0) {
+      text = `${text}（${remainParams.join('，')}）`;
+    }
+
+    return text.replace(/\s{2,}/g, ' ').trim();
   };
 
   const conditionSummarySections = useMemo<ConditionSummarySection[]>(() => {
@@ -2350,7 +2382,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       return;
     }
     const argsCount = methodMeta.argsCount ?? 2;
-    if (argsCount > 2) {
+    if (false && argsCount > 2) {
       error('当前拖拽修改暂不支持三参数条件');
       return;
     }
@@ -2381,6 +2413,25 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         next.rightValueType = 'field';
         next.rightValueId = indicatorOutputOptions[0]?.id || '';
       }
+      if (argsCount >= 3) {
+        const extraMode = resolveArgValueMode(methodMeta, 2);
+        if (extraMode === 'field') {
+          next.extraValueType = 'field';
+          next.extraValueId = next.extraValueId || indicatorOutputOptions[0]?.id || '';
+          next.extraNumber = '';
+        } else if (extraMode === 'number') {
+          next.extraValueType = 'number';
+          next.extraValueId = '';
+          next.extraNumber = next.extraNumber && next.extraNumber.trim() ? next.extraNumber : '0';
+        } else if (next.extraValueType === 'field') {
+          next.extraValueId = next.extraValueId || indicatorOutputOptions[0]?.id || '';
+          next.extraNumber = '';
+        } else {
+          next.extraValueType = 'field';
+          next.extraValueId = indicatorOutputOptions[0]?.id || '';
+          next.extraNumber = '';
+        }
+      }
       return next;
     }, `修改条件操作符为 ${describeMethodForHistory(methodMeta.value)}`);
   };
@@ -2395,7 +2446,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       containerId: string;
       groupId: string;
       conditionId: string;
-      slot: 'left' | 'right';
+      slot: 'left' | 'right' | 'extra';
     },
   ) => {
     if (!indicatorValueMap.has(valueId)) {
@@ -2575,6 +2626,197 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     );
     if (changed) {
       markHistoryAction(`修改条件右值数值为 ${value || '空值'}`);
+    }
+  };
+
+  const quickAssignConditionExtraValue = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    valueId: string,
+    source?: {
+      containerId: string;
+      groupId: string;
+      conditionId: string;
+      slot: 'left' | 'right' | 'extra';
+    },
+  ) => {
+    if (!indicatorValueMap.has(valueId)) {
+      error('拖拽值无效，请重试');
+      return;
+    }
+
+    const valueLabel = indicatorValueMap.get(valueId)?.fullLabel || indicatorValueMap.get(valueId)?.label || valueId;
+    applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
+      const methodMeta = resolveMethodMeta(condition.method);
+      const argsCount = methodMeta.argsCount ?? 2;
+      if (argsCount < 3) {
+        error('该条件当前不支持第三参数');
+        return null;
+      }
+      const extraMode = resolveArgValueMode(methodMeta, 2);
+      if (extraMode === 'number') {
+        error('该条件第三参数仅支持数值，不支持字段拖拽');
+        return null;
+      }
+      const sameCondition = Boolean(
+        source
+        && source.containerId === containerId
+        && source.groupId === groupId
+        && source.conditionId === conditionId,
+      );
+      const fromLeftOrRight = sameCondition && (source?.slot === 'left' || source?.slot === 'right');
+      if (!fromLeftOrRight) {
+        return {
+          ...condition,
+          extraValueType: 'field',
+          extraValueId: valueId,
+          extraNumber: '',
+        };
+      }
+      if (source?.slot === 'left') {
+        return {
+          ...condition,
+          leftValueId: condition.extraValueType === 'field' ? condition.extraValueId || '' : '',
+          extraValueType: 'field',
+          extraValueId: valueId,
+          extraNumber: '',
+        };
+      }
+      return {
+        ...condition,
+        rightValueType: 'field',
+        rightValueId: condition.extraValueType === 'field' ? condition.extraValueId || '' : '',
+        rightNumber: '',
+        extraValueType: 'field',
+        extraValueId: valueId,
+        extraNumber: '',
+      };
+    }, `修改条件第三参数为 ${valueLabel}`);
+  };
+
+  const quickAssignConditionExtraNumber = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+  ) => {
+    applyConditionQuickPatch(containerId, groupId, conditionId, (condition) => {
+      const methodMeta = resolveMethodMeta(condition.method);
+      const argsCount = methodMeta.argsCount ?? 2;
+      if (argsCount < 3) {
+        error('该条件当前不支持第三参数');
+        return null;
+      }
+      const extraMode = resolveArgValueMode(methodMeta, 2);
+      if (extraMode === 'field') {
+        error('该条件第三参数仅支持字段，不支持数值');
+        return null;
+      }
+      return {
+        ...condition,
+        extraValueType: 'number',
+        extraValueId: '',
+        extraNumber: condition.extraNumber?.trim() ? condition.extraNumber : '0',
+      };
+    }, '将条件第三参数切换为数值');
+  };
+
+  const quickUpdateConditionExtraNumber = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    value: string,
+  ) => {
+    const raw = (value || '').trim();
+    if (raw && !/^-?\d*\.?\d*$/.test(raw)) {
+      return;
+    }
+
+    let changed = false;
+    setConditionContainers((prev) =>
+      prev.map((container) => {
+        if (container.id !== containerId) {
+          return container;
+        }
+        return {
+          ...container,
+          groups: container.groups.map((group) => {
+            if (group.id !== groupId) {
+              return group;
+            }
+            return {
+              ...group,
+              conditions: group.conditions.map((condition) => {
+                if (condition.id !== conditionId) {
+                  return condition;
+                }
+                if (
+                  condition.extraValueType === 'number'
+                  && (condition.extraNumber || '') === value
+                ) {
+                  return condition;
+                }
+                changed = true;
+                return {
+                  ...condition,
+                  extraValueType: 'number',
+                  extraValueId: '',
+                  extraNumber: value,
+                };
+              }),
+            };
+          }),
+        };
+      }),
+    );
+    if (changed) {
+      markHistoryAction(`修改条件第三参数数值为 ${value || '空值'}`);
+    }
+  };
+
+  const quickUpdateConditionParamValue = (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    paramIndex: number,
+    value: string,
+  ) => {
+    let changed = false;
+    setConditionContainers((prev) =>
+      prev.map((container) => {
+        if (container.id !== containerId) {
+          return container;
+        }
+        return {
+          ...container,
+          groups: container.groups.map((group) => {
+            if (group.id !== groupId) {
+              return group;
+            }
+            return {
+              ...group,
+              conditions: group.conditions.map((condition) => {
+                if (condition.id !== conditionId) {
+                  return condition;
+                }
+                const nextValues = [...(condition.paramValues || [])];
+                if ((nextValues[paramIndex] || '') === value) {
+                  return condition;
+                }
+                nextValues[paramIndex] = value;
+                changed = true;
+                return {
+                  ...condition,
+                  paramValues: nextValues,
+                };
+              }),
+            };
+          }),
+        };
+      }),
+    );
+    if (changed) {
+      markHistoryAction(`修改条件参数${paramIndex + 1}为 ${value || '空值'}`);
     }
   };
 
@@ -3453,6 +3695,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           onQuickAssignConditionValue={quickAssignConditionValue}
           onQuickAssignConditionNumber={quickAssignConditionNumber}
           onQuickUpdateConditionRightNumber={quickUpdateConditionRightNumber}
+          onQuickAssignConditionExtraValue={quickAssignConditionExtraValue}
+          onQuickAssignConditionExtraNumber={quickAssignConditionExtraNumber}
+          onQuickUpdateConditionExtraNumber={quickUpdateConditionExtraNumber}
+          onQuickUpdateConditionParamValue={quickUpdateConditionParamValue}
           onQuickUpdateIndicatorInput={quickUpdateIndicatorInput}
           onQuickEditIndicatorParams={requestQuickEditIndicatorParams}
           onQuickCreateCondition={quickCreateCondition}
@@ -3614,5 +3860,3 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 };
 
 export default StrategyEditorFlow;
-
-

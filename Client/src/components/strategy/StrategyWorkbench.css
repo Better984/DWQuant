@@ -1341,6 +1341,10 @@
   min-width: 0;
 }
 
+.strategy-workbench .condition-item-dnd-row--method {
+  gap: 4px 6px;
+}
+
 .strategy-workbench .condition-dnd-slot {
   min-height: auto;
   padding: 0;
@@ -1362,8 +1366,20 @@
   opacity: 0.78;
 }
 
+.strategy-workbench .condition-dnd-slot--arg {
+  max-width: 360px;
+}
+
 .strategy-workbench .condition-dnd-slot--operator {
   background: transparent;
+}
+
+.strategy-workbench .condition-dnd-arg-label {
+  font-size: 10px;
+  color: #64748b;
+  font-weight: 600;
+  line-height: 1;
+  margin-right: 2px;
 }
 
 .strategy-workbench .condition-dnd-value {
@@ -1396,6 +1412,35 @@
   border: 1px solid #e2e8f0;
   border-radius: 999px;
   background: #f8fafc;
+}
+
+.strategy-workbench .condition-expression-text {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.strategy-workbench .condition-inline-param {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.strategy-workbench .condition-inline-param-input {
+  width: 68px;
+  height: 24px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+  color: #0f172a;
+  padding: 0 6px;
+  outline: none;
+}
+
+.strategy-workbench .condition-inline-param-input:focus {
+  border-color: #3b82f6;
 }
 
 .strategy-workbench .condition-item-more-wrap {
@@ -1446,6 +1491,46 @@
 .strategy-workbench .condition-item-more-wrap.is-expanded .condition-more-button {
   visibility: hidden;
   pointer-events: none;
+}
+
+.strategy-workbench .condition-param-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.strategy-workbench .condition-param-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe5f1;
+  background: #f8fbff;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.strategy-workbench .condition-param-label {
+  font-size: 11px;
+  color: #475569;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.strategy-workbench .condition-param-input {
+  width: 72px;
+  height: 24px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+  color: #0f172a;
+  padding: 0 6px;
+  outline: none;
+}
+
+.strategy-workbench .condition-param-input:focus {
+  border-color: #3b82f6;
 }
 
 /* ===== Workbench Full UI Refresh (5 block layout preserved) ===== */

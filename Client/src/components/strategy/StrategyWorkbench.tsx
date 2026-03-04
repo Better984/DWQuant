@@ -29,7 +29,7 @@ import { buildEmptyBacktestSummary, runLocalBacktest } from './localBacktestEngi
 import StrategyWorkbenchKline from './StrategyWorkbenchKline';
 import './StrategyWorkbench.css';
 
-type DropSlot = 'left' | 'method' | 'right';
+type DropSlot = 'left' | 'method' | 'right' | 'extra';
 type ArgValueMode = 'field' | 'number' | 'both';
 type IndicatorLabelDisplayMode = 'code-only' | 'code-param' | 'code-input' | 'full';
 
@@ -43,7 +43,7 @@ type ConditionValueDragSource = {
   containerId: string;
   groupId: string;
   conditionId: string;
-  slot: 'left' | 'right';
+  slot: 'left' | 'right' | 'extra';
 };
 
 type DragPayload =
@@ -114,6 +114,27 @@ interface StrategyWorkbenchProps {
     containerId: string,
     groupId: string,
     conditionId: string,
+    value: string,
+  ) => void;
+  onQuickAssignConditionExtraValue: (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    valueId: string,
+    source?: ConditionValueDragSource,
+  ) => void;
+  onQuickAssignConditionExtraNumber: (containerId: string, groupId: string, conditionId: string) => void;
+  onQuickUpdateConditionExtraNumber: (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    value: string,
+  ) => void;
+  onQuickUpdateConditionParamValue: (
+    containerId: string,
+    groupId: string,
+    conditionId: string,
+    paramIndex: number,
     value: string,
   ) => void;
   onQuickUpdateIndicatorInput: (indicatorId: string, fieldValueId: string) => void;
@@ -234,6 +255,9 @@ const methodShortLabel = (label: string, fallback: string) => {
 const stripParenthetical = (value?: string) =>
   normalizeText((value || '').replace(/\s*[\(\（][^\)\）]*[\)\）]/g, '').replace(/\s{2,}/g, ' '));
 
+const stripFieldPrefix = (value?: string) =>
+  normalizeText((value || '').replace(/^K线字段\s*-\s*/i, ''));
+
 const indicatorCode = (indicator: GeneratedIndicatorPayload) =>
   upperText(typeof indicator.config?.indicator === 'string' ? indicator.config.indicator : indicator.code);
 
@@ -269,7 +293,7 @@ const parseDropId = (rawId: string) => {
     return null;
   }
   const slot = parts[4];
-  if (slot !== 'left' && slot !== 'method' && slot !== 'right') {
+  if (slot !== 'left' && slot !== 'method' && slot !== 'right' && slot !== 'extra') {
     return null;
   }
   return {
@@ -453,6 +477,10 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     onQuickAssignConditionValue,
     onQuickAssignConditionNumber,
     onQuickUpdateConditionRightNumber,
+    onQuickAssignConditionExtraValue,
+    onQuickAssignConditionExtraNumber,
+    onQuickUpdateConditionExtraNumber,
+    onQuickUpdateConditionParamValue,
     onQuickUpdateIndicatorInput,
     onQuickEditIndicatorParams,
     onQuickCreateCondition,
@@ -469,6 +497,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [focusRightNumberKey, setFocusRightNumberKey] = useState('');
+  const [focusExtraNumberKey, setFocusExtraNumberKey] = useState('');
   const [activeHoverValueId, setActiveHoverValueId] = useState('');
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -679,6 +708,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           if (condition.rightValueType === 'field') {
             pushValue(condition.rightValueId);
           }
+          if (condition.extraValueType === 'field') {
+            pushValue(condition.extraValueId);
+          }
         });
       });
     });
@@ -843,7 +875,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     if (!valueId) {
       return '未配置';
     }
-    return compactValueLabelMap.get(valueId) || valueLabelMap.get(valueId) || valueId;
+    const rawText = compactValueLabelMap.get(valueId) || valueLabelMap.get(valueId) || valueId;
+    return stripFieldPrefix(rawText);
   };
 
   const onDragStart = (event: DragStartEvent) => {
@@ -910,17 +943,26 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       return;
     }
 
-    if (payload.kind === 'output' && (conditionDrop.slot === 'left' || conditionDrop.slot === 'right')) {
-      onQuickAssignConditionValue(
-        conditionDrop.containerId,
-        conditionDrop.groupId,
-        conditionDrop.conditionId,
-        conditionDrop.slot,
-        payload.valueId,
-      );
+    if (payload.kind === 'output' && (conditionDrop.slot === 'left' || conditionDrop.slot === 'right' || conditionDrop.slot === 'extra')) {
+      if (conditionDrop.slot === 'extra') {
+        onQuickAssignConditionExtraValue(
+          conditionDrop.containerId,
+          conditionDrop.groupId,
+          conditionDrop.conditionId,
+          payload.valueId,
+        );
+      } else {
+        onQuickAssignConditionValue(
+          conditionDrop.containerId,
+          conditionDrop.groupId,
+          conditionDrop.conditionId,
+          conditionDrop.slot,
+          payload.valueId,
+        );
+      }
       return;
     }
-    if (payload.kind === 'condition-value' && (conditionDrop.slot === 'left' || conditionDrop.slot === 'right')) {
+    if (payload.kind === 'condition-value' && (conditionDrop.slot === 'left' || conditionDrop.slot === 'right' || conditionDrop.slot === 'extra')) {
       const sameCondition =
         payload.source.containerId === conditionDrop.containerId
         && payload.source.groupId === conditionDrop.groupId
@@ -931,14 +973,24 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       if (payload.source.slot === conditionDrop.slot) {
         return;
       }
-      onQuickAssignConditionValue(
-        conditionDrop.containerId,
-        conditionDrop.groupId,
-        conditionDrop.conditionId,
-        conditionDrop.slot,
-        payload.valueId,
-        payload.source,
-      );
+      if (conditionDrop.slot === 'extra') {
+        onQuickAssignConditionExtraValue(
+          conditionDrop.containerId,
+          conditionDrop.groupId,
+          conditionDrop.conditionId,
+          payload.valueId,
+          payload.source,
+        );
+      } else {
+        onQuickAssignConditionValue(
+          conditionDrop.containerId,
+          conditionDrop.groupId,
+          conditionDrop.conditionId,
+          conditionDrop.slot,
+          payload.valueId,
+          payload.source,
+        );
+      }
       return;
     }
     if (payload.kind === 'number' && conditionDrop.slot === 'right') {
@@ -948,6 +1000,15 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         conditionDrop.conditionId,
       );
       setFocusRightNumberKey(`${conditionDrop.containerId}|${conditionDrop.groupId}|${conditionDrop.conditionId}`);
+      return;
+    }
+    if (payload.kind === 'number' && conditionDrop.slot === 'extra') {
+      onQuickAssignConditionExtraNumber(
+        conditionDrop.containerId,
+        conditionDrop.groupId,
+        conditionDrop.conditionId,
+      );
+      setFocusExtraNumberKey(`${conditionDrop.containerId}|${conditionDrop.groupId}|${conditionDrop.conditionId}|extra`);
       return;
     }
 
@@ -1000,27 +1061,327 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const methodBriefLabel = methodShortLabel(methodLabel, methodValue);
     const argsCount = methodMeta?.argsCount ?? 2;
     const rightMode = resolveArgMode(methodMeta, 1);
+    const extraMode = resolveArgMode(methodMeta, 2);
+    const canShowRight = argsCount >= 2;
+    const canShowExtra = argsCount >= 3;
     const canDropRight = argsCount >= 2 && rightMode !== 'number';
     const canUseRightNumber = argsCount >= 2 && rightMode !== 'field';
+    const canDropExtra = canShowExtra && extraMode !== 'number';
+    const canUseExtraNumber = canShowExtra && extraMode !== 'field';
     const numberFocusKey = `${containerId}|${groupId}|${condition.id}`;
+    const extraNumberFocusKey = `${containerId}|${groupId}|${condition.id}|extra`;
     const conditionRowKey = `${containerId}|${groupId}|${condition.id}`;
     const isConditionExpanded = expandedConditionKey === conditionRowKey;
     const leftLinkedActive = isLinkedActive(condition.leftValueId);
     const rightLinkedActive = condition.rightValueType === 'field' && isLinkedActive(condition.rightValueId);
+    const extraLinkedActive = condition.extraValueType === 'field' && isLinkedActive(condition.extraValueId);
+    const argLabels = methodMeta?.argLabels || [];
+    const leftArgLabel = argLabels[0] || '左值';
+    const rightArgLabel = argLabels[1] || '右值';
+    const extraArgLabel = argLabels[2] || '第三参数';
+    const paramDefs = methodMeta?.params || [];
+    const rawParamValues = condition.paramValues || [];
+    const periodParamIndex = paramDefs.findIndex((param) =>
+      normalizeText(param.key).toLowerCase().includes('period'),
+    );
+    const inlineParamIndex =
+      (methodValue === 'Rising'
+        || methodValue === 'Falling'
+        || methodValue === 'AboveFor'
+        || methodValue === 'BelowFor')
+      && periodParamIndex >= 0
+        ? periodParamIndex
+        : -1;
+    const visibleParamIndexes = paramDefs
+      .map((_param, paramIndex) => paramIndex)
+      .filter((paramIndex) => paramIndex !== inlineParamIndex);
+
     const rightCandidateCount = Array.from(valueLabelMap.keys()).filter(
       (valueId) => valueId !== condition.leftValueId,
     ).length;
-    const rightNoTargetHint =
-      canDropRight && rightCandidateCount === 0
-        ? '当前没有可用右值'
-        : '';
-
+    const extraCandidateCount = Array.from(valueLabelMap.keys()).filter(
+      (valueId) => valueId !== condition.leftValueId && valueId !== condition.rightValueId,
+    ).length;
+    const rightNoTargetHint = canDropRight && rightCandidateCount === 0 ? '当前没有可用右值' : '';
+    const extraNoTargetHint = canDropExtra && extraCandidateCount === 0 ? '当前没有可用第三参数' : '';
     const rightText =
-      argsCount < 2
-        ? '当前方法仅需左值'
-        : condition.rightValueType === 'number'
-          ? `数值 ${condition.rightNumber || '未填写'}`
-          : renderValueText(condition.rightValueId);
+      condition.rightValueType === 'number'
+        ? `数值 ${condition.rightNumber || '未填写'}`
+        : renderValueText(condition.rightValueId);
+    const extraText =
+      condition.extraValueType === 'number'
+        ? `数值 ${condition.extraNumber || '未填写'}`
+        : renderValueText(condition.extraValueId);
+
+    const renderParamInputControl = (paramIndex: number, className: string) => {
+      const param = paramDefs[paramIndex];
+      if (!param) {
+        return null;
+      }
+      return (
+        <input
+          className={className}
+          type="number"
+          value={rawParamValues[paramIndex] || ''}
+          onChange={(event) =>
+            onQuickUpdateConditionParamValue(
+              containerId,
+              groupId,
+              condition.id,
+              paramIndex,
+              event.target.value,
+            )
+          }
+          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          placeholder={param.placeholder || param.defaultValue || ''}
+        />
+      );
+    };
+
+    const renderLeftSlot = (showLabel = false, label = leftArgLabel) => (
+      <DroppableSlot
+        id={toDropId(containerId, groupId, condition.id, 'left')}
+        className="condition-dnd-slot condition-dnd-slot--arg"
+      >
+        {showLabel ? <span className="condition-dnd-arg-label">{label}</span> : null}
+        {condition.leftValueId ? (
+          <DraggableToken
+            id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|left`}
+            payload={{
+              kind: 'condition-value',
+              valueId: condition.leftValueId,
+              label: renderValueText(condition.leftValueId),
+              source: {
+                containerId,
+                groupId,
+                conditionId: condition.id,
+                slot: 'left',
+              },
+            }}
+            className={`condition-dnd-value condition-dnd-value-badge ${leftLinkedActive ? 'is-linked-active' : ''}`}
+            style={buildValueBadgeStyle(condition.leftValueId)}
+            onMouseEnter={() => setActiveHoverValueId(condition.leftValueId)}
+            onMouseLeave={() => setActiveHoverValueId('')}
+          >
+            {renderValueText(condition.leftValueId)}
+          </DraggableToken>
+        ) : (
+          <span className="condition-dnd-value condition-dnd-value--placeholder">
+            {renderValueText(condition.leftValueId)}
+          </span>
+        )}
+      </DroppableSlot>
+    );
+
+    const renderMethodSlot = (text = methodBriefLabel) => (
+      <DroppableSlot
+        id={toDropId(containerId, groupId, condition.id, 'method')}
+        className="condition-dnd-slot condition-dnd-slot--operator"
+      >
+        <span className="condition-dnd-value">{text}</span>
+      </DroppableSlot>
+    );
+
+    const renderRightSlot = (showLabel = false, label = rightArgLabel) => {
+      if (!canShowRight) {
+        return null;
+      }
+      return (
+        <DroppableSlot
+          id={toDropId(containerId, groupId, condition.id, 'right')}
+          className="condition-dnd-slot condition-dnd-slot--arg"
+          disabled={!canDropRight}
+        >
+          {showLabel ? <span className="condition-dnd-arg-label">{label}</span> : null}
+          {canUseRightNumber && condition.rightValueType === 'number' ? (
+            <input
+              className="condition-dnd-input"
+              type="number"
+              value={condition.rightNumber || ''}
+              onChange={(event) =>
+                onQuickUpdateConditionRightNumber(
+                  containerId,
+                  groupId,
+                  condition.id,
+                  event.target.value,
+                )
+              }
+              onMouseDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              autoFocus={focusRightNumberKey === numberFocusKey}
+              onBlur={() => {
+                if (focusRightNumberKey === numberFocusKey) {
+                  setFocusRightNumberKey('');
+                }
+              }}
+              placeholder="输入数值"
+            />
+          ) : condition.rightValueType === 'field' && condition.rightValueId ? (
+            <DraggableToken
+              id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|right`}
+              payload={{
+                kind: 'condition-value',
+                valueId: condition.rightValueId,
+                label: renderValueText(condition.rightValueId),
+                source: {
+                  containerId,
+                  groupId,
+                  conditionId: condition.id,
+                  slot: 'right',
+                },
+              }}
+              className={`condition-dnd-value condition-dnd-value-badge ${rightLinkedActive ? 'is-linked-active' : ''}`}
+              style={buildValueBadgeStyle(condition.rightValueId)}
+              onMouseEnter={() => setActiveHoverValueId(condition.rightValueId || '')}
+              onMouseLeave={() => setActiveHoverValueId('')}
+            >
+              {rightNoTargetHint || rightText}
+            </DraggableToken>
+          ) : (
+            <span
+              className={`condition-dnd-value ${condition.rightValueType === 'field' ? 'condition-dnd-value-badge' : 'condition-dnd-value--placeholder'} ${rightLinkedActive ? 'is-linked-active' : ''}`}
+              style={condition.rightValueType === 'field' ? buildValueBadgeStyle(condition.rightValueId) : undefined}
+            >
+              {rightNoTargetHint || rightText}
+            </span>
+          )}
+        </DroppableSlot>
+      );
+    };
+
+    const renderExtraSlot = (showLabel = false, label = extraArgLabel) => {
+      if (!canShowExtra) {
+        return null;
+      }
+      return (
+        <DroppableSlot
+          id={toDropId(containerId, groupId, condition.id, 'extra')}
+          className="condition-dnd-slot condition-dnd-slot--arg"
+          disabled={!canDropExtra}
+        >
+          {showLabel ? <span className="condition-dnd-arg-label">{label}</span> : null}
+          {canUseExtraNumber && condition.extraValueType === 'number' ? (
+            <input
+              className="condition-dnd-input"
+              type="number"
+              value={condition.extraNumber || ''}
+              onChange={(event) =>
+                onQuickUpdateConditionExtraNumber(
+                  containerId,
+                  groupId,
+                  condition.id,
+                  event.target.value,
+                )
+              }
+              onMouseDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              autoFocus={focusExtraNumberKey === extraNumberFocusKey}
+              onBlur={() => {
+                if (focusExtraNumberKey === extraNumberFocusKey) {
+                  setFocusExtraNumberKey('');
+                }
+              }}
+              placeholder="输入数值"
+            />
+          ) : condition.extraValueType === 'field' && condition.extraValueId ? (
+            <DraggableToken
+              id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|extra`}
+              payload={{
+                kind: 'condition-value',
+                valueId: condition.extraValueId,
+                label: renderValueText(condition.extraValueId),
+                source: {
+                  containerId,
+                  groupId,
+                  conditionId: condition.id,
+                  slot: 'extra',
+                },
+              }}
+              className={`condition-dnd-value condition-dnd-value-badge ${extraLinkedActive ? 'is-linked-active' : ''}`}
+              style={buildValueBadgeStyle(condition.extraValueId)}
+              onMouseEnter={() => setActiveHoverValueId(condition.extraValueId || '')}
+              onMouseLeave={() => setActiveHoverValueId('')}
+            >
+              {extraNoTargetHint || extraText}
+            </DraggableToken>
+          ) : (
+            <span
+              className={`condition-dnd-value ${condition.extraValueType === 'field' ? 'condition-dnd-value-badge' : 'condition-dnd-value--placeholder'} ${extraLinkedActive ? 'is-linked-active' : ''}`}
+              style={condition.extraValueType === 'field' ? buildValueBadgeStyle(condition.extraValueId) : undefined}
+            >
+              {extraNoTargetHint || extraText}
+            </span>
+          )}
+        </DroppableSlot>
+      );
+    };
+
+    const renderInlinePeriodParam = () => {
+      if (inlineParamIndex < 0) {
+        return null;
+      }
+      return (
+        <span className="condition-inline-param">
+          {renderParamInputControl(inlineParamIndex, 'condition-inline-param-input')}
+          <span className="condition-expression-text">个周期</span>
+        </span>
+      );
+    };
+
+    const renderExpressionFlow = () => {
+      if (methodValue === 'Between' || methodValue === 'Outside') {
+        return (
+          <>
+            {renderLeftSlot(false)}
+            {renderMethodSlot('在')}
+            <span className="condition-expression-text">上界</span>
+            {renderExtraSlot(false, extraArgLabel)}
+            <span className="condition-expression-text">和</span>
+            <span className="condition-expression-text">下界</span>
+            {renderRightSlot(false, rightArgLabel)}
+            <span className="condition-expression-text">
+              {methodValue === 'Between' ? '区间内' : '区间外'}
+            </span>
+          </>
+        );
+      }
+
+      if (methodValue === 'Rising' || methodValue === 'Falling') {
+        return (
+          <>
+            {renderLeftSlot(false)}
+            {renderMethodSlot(methodBriefLabel)}
+            {renderInlinePeriodParam()}
+          </>
+        );
+      }
+
+      if (methodValue === 'AboveFor' || methodValue === 'BelowFor') {
+        return (
+          <>
+            {renderLeftSlot(false)}
+            {renderMethodSlot(methodBriefLabel)}
+            {renderRightSlot(false, rightArgLabel)}
+            {renderInlinePeriodParam()}
+          </>
+        );
+      }
+
+      return (
+        <>
+          {renderLeftSlot(false)}
+          {renderMethodSlot(methodBriefLabel)}
+          {renderRightSlot(false, rightArgLabel)}
+          {canShowExtra ? (
+            <>
+              <span className="condition-expression-text">与</span>
+              {renderExtraSlot(false, extraArgLabel)}
+            </>
+          ) : null}
+        </>
+      );
+    };
 
     return (
       <div className="condition-item-card condition-item-card--advanced" key={condition.id}>
@@ -1035,106 +1396,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 
         <div className="condition-logic-zone">
           <div className="condition-logic-row">
-            <div className="condition-item-dnd-row">
-              <DroppableSlot
-                id={toDropId(containerId, groupId, condition.id, 'left')}
-                className="condition-dnd-slot"
-              >
-                {condition.leftValueId ? (
-                  <DraggableToken
-                    id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|left`}
-                    payload={{
-                      kind: 'condition-value',
-                      valueId: condition.leftValueId,
-                      label: renderValueText(condition.leftValueId),
-                      source: {
-                        containerId,
-                        groupId,
-                        conditionId: condition.id,
-                        slot: 'left',
-                      },
-                    }}
-                    className={`condition-dnd-value condition-dnd-value-badge ${leftLinkedActive ? 'is-linked-active' : ''}`}
-                    style={buildValueBadgeStyle(condition.leftValueId)}
-                    onMouseEnter={() => setActiveHoverValueId(condition.leftValueId)}
-                    onMouseLeave={() => setActiveHoverValueId('')}
-                  >
-                    {renderValueText(condition.leftValueId)}
-                  </DraggableToken>
-                ) : (
-                  <span className="condition-dnd-value condition-dnd-value--placeholder">
-                    {renderValueText(condition.leftValueId)}
-                  </span>
-                )}
-              </DroppableSlot>
-
-              <DroppableSlot
-                id={toDropId(containerId, groupId, condition.id, 'method')}
-                className="condition-dnd-slot condition-dnd-slot--operator"
-              >
-                <span className="condition-dnd-value">{methodBriefLabel}</span>
-              </DroppableSlot>
-
-              <DroppableSlot
-                id={toDropId(containerId, groupId, condition.id, 'right')}
-                className="condition-dnd-slot"
-                disabled={!canDropRight}
-              >
-                {canUseRightNumber && condition.rightValueType === 'number' ? (
-                  <input
-                    className="condition-dnd-input"
-                    type="number"
-                    value={condition.rightNumber || ''}
-                    onChange={(event) =>
-                      onQuickUpdateConditionRightNumber(
-                        containerId,
-                        groupId,
-                        condition.id,
-                        event.target.value,
-                      )
-                    }
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    autoFocus={focusRightNumberKey === numberFocusKey}
-                    onBlur={() => {
-                      if (focusRightNumberKey === numberFocusKey) {
-                        setFocusRightNumberKey('');
-                      }
-                    }}
-                    placeholder="输入数值"
-                  />
-                ) : (
-                  condition.rightValueType === 'field' && condition.rightValueId ? (
-                    <DraggableToken
-                      id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|right`}
-                      payload={{
-                        kind: 'condition-value',
-                        valueId: condition.rightValueId,
-                        label: renderValueText(condition.rightValueId),
-                        source: {
-                          containerId,
-                          groupId,
-                          conditionId: condition.id,
-                          slot: 'right',
-                        },
-                      }}
-                      className={`condition-dnd-value condition-dnd-value-badge ${rightLinkedActive ? 'is-linked-active' : ''}`}
-                      style={buildValueBadgeStyle(condition.rightValueId)}
-                      onMouseEnter={() => setActiveHoverValueId(condition.rightValueId || '')}
-                      onMouseLeave={() => setActiveHoverValueId('')}
-                    >
-                      {rightNoTargetHint || rightText}
-                    </DraggableToken>
-                  ) : (
-                    <span
-                      className={`condition-dnd-value ${condition.rightValueType === 'field' ? 'condition-dnd-value-badge' : 'condition-dnd-value--placeholder'} ${rightLinkedActive ? 'is-linked-active' : ''}`}
-                      style={condition.rightValueType === 'field' ? buildValueBadgeStyle(condition.rightValueId) : undefined}
-                    >
-                      {rightNoTargetHint || rightText}
-                    </span>
-                  )
-                )}
-              </DroppableSlot>
+            <div className="condition-item-dnd-row condition-item-dnd-row--method">
+              {renderExpressionFlow()}
             </div>
 
             <div
@@ -1183,6 +1446,20 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               </button>
             </div>
           </div>
+
+          {visibleParamIndexes.length > 0 ? (
+            <div className="condition-param-row">
+              {visibleParamIndexes.map((paramIndex) => {
+                const param = paramDefs[paramIndex];
+                return (
+                  <label key={param.key} className="condition-param-chip">
+                    <span className="condition-param-label">{param.label}</span>
+                    {renderParamInputControl(paramIndex, 'condition-param-input')}
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -1777,3 +2054,4 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 };
 
 export default StrategyWorkbench;
+
