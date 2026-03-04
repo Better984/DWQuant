@@ -963,7 +963,14 @@ namespace ServerTest.Modules.Backtest.Application
             var signalCollector = new BatchSignalCollectorExecutor(runtime.State);
 
             var logic = runtime.Strategy.StrategyConfig.Logic;
-            if (logic?.Entry?.Long == null)
+            if (logic?.Entry == null)
+            {
+                return new List<BatchOpenCandidate>();
+            }
+
+            var longEntry = logic.Entry.Long;
+            var shortEntry = logic.Entry.Short;
+            if (longEntry == null && shortEntry == null)
             {
                 return new List<BatchOpenCandidate>();
             }
@@ -1025,14 +1032,26 @@ namespace ServerTest.Modules.Backtest.Application
                         continue;
                     }
 
-                    if (!EvaluateEntryFilters(strategyContext, logic.Entry.Long, "Entry.Long", evaluator))
+                    var passLongEntry = longEntry != null
+                        && EvaluateEntryFilters(strategyContext, longEntry, "Entry.Long", evaluator);
+                    var passShortEntry = shortEntry != null
+                        && EvaluateEntryFilters(strategyContext, shortEntry, "Entry.Short", evaluator);
+                    if (!passLongEntry && !passShortEntry)
                     {
                         TryFlushOpenProgress(progressReporter, ref localProcessed, ref localSignals, flushInterval);
                         continue;
                     }
 
                     var beforeCount = signalCollector.Candidates.Count;
-                    ExecuteBranch(strategyContext, logic.Entry.Long, "Entry.Long", evaluator, LogicBranchKind.Entry, null);
+                    // 与实盘一致：按固定顺序依次尝试开多与开空，确保同K线行为可复现。
+                    if (passLongEntry && longEntry != null)
+                    {
+                        ExecuteBranch(strategyContext, longEntry, "Entry.Long", evaluator, LogicBranchKind.Entry, null);
+                    }
+                    if (passShortEntry && shortEntry != null)
+                    {
+                        ExecuteBranch(strategyContext, shortEntry, "Entry.Short", evaluator, LogicBranchKind.Entry, null);
+                    }
                     var afterCount = signalCollector.Candidates.Count;
                     if (afterCount > beforeCount)
                     {
@@ -2448,7 +2467,16 @@ namespace ServerTest.Modules.Backtest.Application
             if (runtimeGate.AllowExit)
             {
                 var exitStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                ExecuteBranch(context, logic.Exit.Long, "Exit.Long", evaluator, LogicBranchKind.Exit, timing);
+                var longExit = logic.Exit.Long;
+                if (longExit != null)
+                {
+                    ExecuteBranch(context, longExit, "Exit.Long", evaluator, LogicBranchKind.Exit, timing);
+                }
+                var shortExit = logic.Exit.Short;
+                if (shortExit != null)
+                {
+                    ExecuteBranch(context, shortExit, "Exit.Short", evaluator, LogicBranchKind.Exit, timing);
+                }
                 timing?.AddBranch(LogicBranchKind.Exit, System.Diagnostics.Stopwatch.GetTimestamp() - exitStart);
             }
 
@@ -2463,7 +2491,13 @@ namespace ServerTest.Modules.Backtest.Application
             }
 
             var filterStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            if (!EvaluateEntryFilters(context, logic.Entry.Long, "Entry.Long", evaluator))
+            var longEntry = logic.Entry.Long;
+            var shortEntry = logic.Entry.Short;
+            var passLongEntry = longEntry != null
+                && EvaluateEntryFilters(context, longEntry, "Entry.Long", evaluator);
+            var passShortEntry = shortEntry != null
+                && EvaluateEntryFilters(context, shortEntry, "Entry.Short", evaluator);
+            if (!passLongEntry && !passShortEntry)
             {
                 if (timing != null)
                 {
@@ -2477,7 +2511,14 @@ namespace ServerTest.Modules.Backtest.Application
             }
 
             var entryStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            ExecuteBranch(context, logic.Entry.Long, "Entry.Long", evaluator, LogicBranchKind.Entry, timing);
+            if (passLongEntry && longEntry != null)
+            {
+                ExecuteBranch(context, longEntry, "Entry.Long", evaluator, LogicBranchKind.Entry, timing);
+            }
+            if (passShortEntry && shortEntry != null)
+            {
+                ExecuteBranch(context, shortEntry, "Entry.Short", evaluator, LogicBranchKind.Entry, timing);
+            }
             timing?.AddBranch(LogicBranchKind.Entry, System.Diagnostics.Stopwatch.GetTimestamp() - entryStart);
         }
 

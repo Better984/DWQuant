@@ -18,6 +18,7 @@ interface StrategyWorkbenchKlineProps {
   enableRealtime: boolean;
   hoverValueId?: string;
   hoverHasReference?: boolean;
+  onBarsUpdate?: (bars: KLineData[]) => void;
 }
 
 type OhlcvDto = {
@@ -397,6 +398,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   enableRealtime,
   hoverValueId,
   hoverHasReference = false,
+  onBarsUpdate,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<Chart | null>(null);
@@ -555,6 +557,10 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     chartRef.current.clearData();
     chartRef.current.applyNewData(bars);
   }, [bars]);
+
+  useEffect(() => {
+    onBarsUpdate?.(bars);
+  }, [bars, onBarsUpdate]);
 
   useEffect(() => {
     const chart = chartRef.current;

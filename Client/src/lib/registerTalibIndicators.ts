@@ -270,6 +270,16 @@ function cloneParamDefinitions(definitions: TalibIndicatorParamDefinition[]): Ta
   }));
 }
 
+function cloneCalcSpec(spec: TalibRuntimeCalcSpec): TalibRuntimeCalcSpec {
+  return {
+    code: spec.code,
+    inputSeries: [...spec.inputSeries],
+    inputs: spec.inputs.map((input) => ({ ...input })),
+    options: spec.options.map((option) => ({ ...option })),
+    outputs: spec.outputs.map((output) => ({ ...output })),
+  };
+}
+
 function sortByPreferred(values: string[], preferred: string[]): string[] {
   const priority = new Map<string, number>(preferred.map((name, index) => [name, index]));
   return values.slice().sort((a, b) => {
@@ -872,4 +882,12 @@ export function getTalibIndicatorMetaList(): TalibRegisteredIndicatorMeta[] {
     }
     return a.name.localeCompare(b.name);
   });
+}
+
+export function getTalibRuntimeCalcSpec(indicatorName: string): TalibRuntimeCalcSpec | null {
+  const spec = runtimeSpecByName.get(indicatorName)?.calcSpec;
+  if (!spec) {
+    return null;
+  }
+  return cloneCalcSpec(spec);
 }

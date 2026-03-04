@@ -357,9 +357,17 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (runtimeGate.AllowExit)
             {
-                ExecuteBranch(context, logic.Exit.Long, "Exit.Long", metrics);
+                var longExit = logic.Exit.Long;
+                if (longExit != null)
+                {
+                    ExecuteBranch(context, longExit, "Exit.Long", metrics);
+                }
+                var shortExit = logic.Exit.Short;
+                if (shortExit != null)
+                {
+                    ExecuteBranch(context, shortExit, "Exit.Short", metrics);
+                }
             }
-            //ExecuteBranch(context, logic.Exit.Short, "Exit.Short");
 
             if (context.Strategy.State == StrategyState.PausedOpenPosition)
             {
@@ -371,13 +379,26 @@ namespace ServerTest.Modules.StrategyEngine.Application
                 return;
             }
 
-            if (!EvaluateEntryFilters(context, logic.Entry.Long, "Entry.Long", metrics))
+            var longEntry = logic.Entry.Long;
+            var shortEntry = logic.Entry.Short;
+            var passLongEntry = longEntry != null
+                && EvaluateEntryFilters(context, longEntry, "Entry.Long", metrics);
+            var passShortEntry = shortEntry != null
+                && EvaluateEntryFilters(context, shortEntry, "Entry.Short", metrics);
+            if (!passLongEntry && !passShortEntry)
             {
                 return;
             }
 
-            ExecuteBranch(context, logic.Entry.Long, "Entry.Long", metrics);
-            //ExecuteBranch(context, logic.Entry.Short, "Entry.Short");
+            // 先执行开多再执行开空，保持分支顺序稳定，避免同K线双向触发时顺序不确定。
+            if (passLongEntry && longEntry != null)
+            {
+                ExecuteBranch(context, longEntry, "Entry.Long", metrics);
+            }
+            if (passShortEntry && shortEntry != null)
+            {
+                ExecuteBranch(context, shortEntry, "Entry.Short", metrics);
+            }
         }
 
         private bool EvaluateEntryFilters(

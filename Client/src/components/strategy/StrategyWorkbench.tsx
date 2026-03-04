@@ -13,8 +13,10 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import type { KLineData } from 'klinecharts';
 
 import type { GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
+import { registerTalibIndicators } from '../../lib/registerTalibIndicators';
 import type {
   ConditionContainer,
   ConditionItem,
@@ -23,6 +25,7 @@ import type {
   TimeframeOption,
   TradeOption,
 } from './StrategyModule.types';
+import { buildEmptyBacktestSummary, runLocalBacktest } from './localBacktestEngine';
 import StrategyWorkbenchKline from './StrategyWorkbenchKline';
 import './StrategyWorkbench.css';
 
@@ -204,6 +207,23 @@ const rgba = (hex: string, alpha: number) => {
 const parseNumberOrNull = (raw: string) => {
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;
+};
+
+const formatSignedNumber = (value: number, digits = 4) => {
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  if (value > 0) {
+    return `+${value.toFixed(digits)}`;
+  }
+  return value.toFixed(digits);
+};
+
+const formatPercentValue = (value: number, digits = 2) => {
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+  return `${(value * 100).toFixed(digits)}%`;
 };
 
 const methodShortLabel = (label: string, fallback: string) => {
@@ -444,6 +464,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [expandedConditionKey, setExpandedConditionKey] = useState<string | null>(null);
   const [dashboardClock, setDashboardClock] = useState(Date.now());
   const [realtimeTicks, setRealtimeTicks] = useState(0);
+  const [klineBars, setKlineBars] = useState<KLineData[]>([]);
+  const [talibReady, setTalibReady] = useState(false);
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
   const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [focusRightNumberKey, setFocusRightNumberKey] = useState('');
@@ -688,18 +710,76 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const validRiskConfig =
     takeProfitPct > 0 && stopLossPct > 0 && leverage > 0 && orderQty > 0;
 
+  const localBacktestSummary = useMemo(() => {
+    if (!ready) {
+      return buildEmptyBacktestSummary('waiting_data', '等待开始创建');
+    }
+    if (!talibReady && selectedIndicators.length > 0) {
+      return buildEmptyBacktestSummary('waiting_data', '指标计算内核初始化中');
+    }
+    return runLocalBacktest({
+      bars: klineBars,
+      selectedIndicators,
+      indicatorOutputGroups,
+      logicContainers,
+      filterContainers,
+      methodOptions,
+      takeProfitPct,
+      stopLossPct,
+      leverage,
+      orderQty,
+    });
+  }, [
+    ready,
+    talibReady,
+    klineBars,
+    selectedIndicators,
+    indicatorOutputGroups,
+    logicContainers,
+    filterContainers,
+    methodOptions,
+    takeProfitPct,
+    stopLossPct,
+    leverage,
+    orderQty,
+  ]);
+
   useEffect(() => {
-    if (!ready || !validRiskConfig) {
+    let disposed = false;
+    registerTalibIndicators()
+      .then(() => {
+        if (!disposed) {
+          setTalibReady(true);
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          setTalibReady(false);
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready) {
       return;
     }
     const timer = window.setInterval(() => {
       setDashboardClock(Date.now());
-      setRealtimeTicks((prev) => prev + 1);
     }, 1000);
     return () => {
       window.clearInterval(timer);
     };
-  }, [ready, validRiskConfig]);
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready || !validRiskConfig || klineBars.length === 0) {
+      return;
+    }
+    setRealtimeTicks((prev) => prev + 1);
+  }, [klineBars, ready, validRiskConfig]);
 
   useEffect(() => {
     if (!activeDrag) {
@@ -1227,15 +1307,26 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 
   const metricRows = [
     { label: '本地时钟', value: formatClock(dashboardClock) },
+    { label: '回测状态', value: localBacktestSummary.message },
+    { label: 'K线数量', value: localBacktestSummary.bars.toString() },
     { label: '已选指标', value: selectedIndicators.length.toString() },
     { label: '指标输出', value: indicatorOutputCount.toString() },
     { label: '条件总数', value: conditionCount.toString() },
+    { label: '信号次数', value: localBacktestSummary.signalCount.toString() },
+    { label: '成交笔数', value: localBacktestSummary.tradeCount.toString() },
+    { label: '胜率', value: formatPercentValue(localBacktestSummary.winRate) },
+    { label: '累计收益', value: formatSignedNumber(localBacktestSummary.totalProfit) },
+    { label: '收益率', value: formatPercentValue(localBacktestSummary.totalReturn) },
+    { label: '最大回撤', value: formatPercentValue(localBacktestSummary.maxDrawdown) },
+    { label: '浮动盈亏', value: formatSignedNumber(localBacktestSummary.unrealizedPnl) },
+    { label: '当前仓位', value: localBacktestSummary.hasOpenPosition ? localBacktestSummary.openPositionSide : '无仓位' },
+    { label: '最新事件', value: localBacktestSummary.lastEvent },
     { label: '止盈%', value: takeProfitPct.toFixed(2) },
     { label: '止损%', value: stopLossPct.toFixed(2) },
     { label: '杠杆', value: leverage.toString() },
     { label: '开仓量', value: orderQty.toString() },
     { label: '实时检测Tick', value: realtimeTicks.toString() },
-    { label: '模式', value: validRiskConfig ? '已启用' : '待参数完善' },
+    { label: '模式', value: localBacktestSummary.branchMode === 'long_short' ? '多空分支对齐后端' : '-' },
     { label: '交易所', value: exchangeLabel },
     { label: '周期', value: timeframeLabel },
   ];
@@ -1357,6 +1448,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                     enableRealtime={validRiskConfig}
                     hoverValueId={activeHoverValueId}
                     hoverHasReference={activeHoverHasReference}
+                    onBarsUpdate={setKlineBars}
                   />
                 </div>
               </div>
@@ -1365,7 +1457,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 <div className="strategy-workbench-card-header">
                   <span className="strategy-workbench-card-title">仪表盘</span>
                   <span className="strategy-workbench-card-meta">
-                    {validRiskConfig ? '参数完整，实时检测已启用' : '请先填写止盈/止损/杠杆/数量'}
+                    {localBacktestSummary.message}
                   </span>
                 </div>
 
@@ -1433,11 +1525,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 </div>
 
                 <div
-                  className={`strategy-workbench-detect-status ${validRiskConfig ? 'is-ready' : 'is-blocked'}`}
+                  className={`strategy-workbench-detect-status ${localBacktestSummary.status === 'running' ? 'is-ready' : 'is-blocked'}`}
                 >
-                  {validRiskConfig
-                    ? '参数已就绪，工作台正在进行本地实时检测。'
-                    : '参数未就绪：请填写止盈、止损、杠杆、开仓数量后再进行实时检测。'}
+                  {localBacktestSummary.status === 'running'
+                    ? `本地回测已执行：${localBacktestSummary.tradeCount} 笔成交，胜率 ${formatPercentValue(localBacktestSummary.winRate)}。`
+                    : localBacktestSummary.message}
                 </div>
 
                 <div className="strategy-workbench-dashboard-grid">
