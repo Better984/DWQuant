@@ -101,6 +101,13 @@ type StrategyHistoryRecord = {
   redoMessage: string;
 };
 
+type ConfigReviewData = {
+  configJson: StrategyConfig;
+  logicPreview: string;
+  usedIndicatorOutputs: string[];
+  conditionSummarySections: ConditionSummarySection[];
+};
+
 const KLINE_FIELD_DEFINITIONS = [
   { key: 'OPEN', label: '开盘价', hint: 'Open' },
   { key: 'HIGH', label: '最高价', hint: 'High' },
@@ -140,6 +147,13 @@ const parseFieldValueId = (valueId?: string) => {
     return '';
   }
   return normalizeFieldKey(normalized.slice('FIELD:'.length));
+};
+
+const removeParentheticalText = (value?: string) => {
+  return (value || '')
+    .replace(/\s*[\(\（][^\)\）]*[\)\）]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 };
 
 const deepCloneJson = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -725,6 +739,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
   const [selectedIndicators, setSelectedIndicators] = useState<GeneratedIndicatorPayload[]>(loadedIndicators);
   const [isConfigReviewOpen, setIsConfigReviewOpen] = useState(false);
+  const [configReviewData, setConfigReviewData] = useState<ConfigReviewData | null>(null);
   const [isLogicPreviewVisible, setIsLogicPreviewVisible] = useState(false);
   const [configStep, setConfigStep] = useState(0); // 0: 基本信息, 1: 详细配置
   const [strategyName, setStrategyName] = useState(initialName ?? '');
@@ -988,7 +1003,13 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     setShowExchangeApiKeySelector(true);
   }, [exchangeApiKeyOptions, isApiKeyLoaded, selectedExchangeApiKeyId]);
 
-  const openConfigReview = () => {
+  const openExportReview = () => {
+    setConfigReviewData({
+      configJson: deepCloneJson(configPreview),
+      logicPreview,
+      usedIndicatorOutputs: [...usedIndicatorOutputs],
+      conditionSummarySections: deepCloneJson(conditionSummarySections),
+    });
     setIsConfigReviewOpen(true);
     setIsLogicPreviewVisible(false);
     setConfigStep(0);
@@ -1006,6 +1027,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const closeConfigReview = () => {
     setIsConfigReviewOpen(false);
     setConfigStep(0);
+    setConfigReviewData(null);
   };
 
   const handleConfigClose = () => {
@@ -1029,7 +1051,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
 
   useEffect(() => {
     if (openConfigDirectly) {
-      openConfigReview();
+      openExportReview();
     }
   }, [openConfigDirectly]);
 
@@ -1892,7 +1914,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           : [{ key: config.output || 'Value', hint: config.output || 'Value' }];
 
       const options = outputs.map((output) => {
-        const outputLabel = output.hint ? `${output.hint} (${output.key})` : output.key;
+        const outputLabel =
+          removeParentheticalText(output.hint || output.key) ||
+          removeParentheticalText(output.key) ||
+          'Value';
         const fullLabel = `${groupLabel} - ${outputLabel}`;
         return {
           id: `${indicator.id}:${output.key}`,
@@ -1939,7 +1964,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     const map = new Map<string, string>();
     selectedIndicators.forEach((indicator) => {
       (indicator.outputs || []).forEach((output) => {
-        map.set(`${indicator.code}:${output.key}`, output.hint || output.key);
+        map.set(
+          `${indicator.code}:${output.key}`,
+          removeParentheticalText(output.hint || output.key) || output.key,
+        );
       });
     });
     return map;
@@ -2004,7 +2032,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     const outputKey = ref.output || 'Value';
     const outputLabel = outputHintMap.get(`${ref.indicator}:${outputKey}`) || outputKey;
     const indicatorLabel = ref.indicator || 'Indicator';
-    return `${indicatorLabel} (${paramsLabel}) ${outputLabel}`.trim();
+    return `${indicatorLabel} ${paramsLabel} ${outputLabel}`.replace(/\s{2,}/g, ' ').trim();
   };
 
   const buildConditionPreview = (draft: ConditionItem | null) => {
@@ -2932,6 +2960,24 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return JSON.stringify(configPreview.logic, null, 2);
   }, [configPreview]);
 
+  useEffect(() => {
+    if (!isConfigReviewOpen) {
+      return;
+    }
+    setConfigReviewData({
+      configJson: deepCloneJson(configPreview),
+      logicPreview,
+      usedIndicatorOutputs: [...usedIndicatorOutputs],
+      conditionSummarySections: deepCloneJson(conditionSummarySections),
+    });
+  }, [
+    conditionSummarySections,
+    configPreview,
+    isConfigReviewOpen,
+    logicPreview,
+    usedIndicatorOutputs,
+  ]);
+
   const handleConfirmGenerate = async () => {
     if (isSubmitting) {
       return;
@@ -2960,7 +3006,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       await onSubmit({
         name: trimmedName,
         description: strategyDescription.trim(),
-        configJson: configPreview,
+        configJson: configReviewData?.configJson || configPreview,
         exchangeApiKeyId: selectedExchangeApiKeyId ?? undefined,
       });
       success(successMessage);
@@ -3375,7 +3421,6 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           logicContainers={logicContainers}
           filterContainers={filterContainers}
           maxGroupsPerContainer={MAX_GROUPS_PER_CONTAINER}
-          buildConditionPreview={buildConditionPreview}
           onAddConditionGroup={addConditionGroup}
           onToggleGroupFlag={toggleGroupFlag}
           onOpenConditionModal={openConditionModal}
@@ -3384,7 +3429,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           onRemoveCondition={removeCondition}
           renderToggle={renderToggle}
           onClose={() => onClose?.()}
-          onOpenSettings={openConfigReview}
+          onOpenExport={openExportReview}
           exchangeOptions={exchangeOptions}
           selectedExchange={tradeConfig.exchange}
           onExchangeChange={handleExchangeChange}
@@ -3527,9 +3572,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         onConfirmGenerate={handleConfirmGenerate}
         isLogicPreviewVisible={isLogicPreviewVisible}
         onToggleLogicPreview={toggleLogicPreview}
-        logicPreview={logicPreview}
-        usedIndicatorOutputs={usedIndicatorOutputs}
-        conditionSummarySections={conditionSummarySections}
+        logicPreview={configReviewData?.logicPreview || logicPreview}
+        usedIndicatorOutputs={configReviewData?.usedIndicatorOutputs || usedIndicatorOutputs}
+        conditionSummarySections={configReviewData?.conditionSummarySections || conditionSummarySections}
         summaryListRef={summaryListRef}
         codeListRef={codeListRef}
         tradeConfigRef={tradeConfigRef}

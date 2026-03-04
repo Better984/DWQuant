@@ -28,6 +28,7 @@ import './StrategyWorkbench.css';
 
 type DropSlot = 'left' | 'method' | 'right';
 type ArgValueMode = 'field' | 'number' | 'both';
+type IndicatorLabelDisplayMode = 'code-only' | 'code-param' | 'code-input' | 'full';
 
 type DragPayloadMeta = {
   previewClassName?: string;
@@ -58,7 +59,6 @@ interface StrategyWorkbenchProps {
   logicContainers: ConditionContainer[];
   filterContainers: ConditionContainer[];
   maxGroupsPerContainer: number;
-  buildConditionPreview: (condition: ConditionItem | null) => string;
   onAddConditionGroup: (containerId: string) => void;
   onToggleGroupFlag: (containerId: string, groupId: string, key: 'enabled' | 'required') => void;
   onOpenConditionModal: (containerId: string, groupId: string, conditionId?: string) => void;
@@ -72,7 +72,7 @@ interface StrategyWorkbenchProps {
   onRemoveCondition: (containerId: string, groupId: string, conditionId: string) => void;
   renderToggle: (checked: boolean, onChange: () => void, label: string) => React.ReactNode;
   onClose: () => void;
-  onOpenSettings: () => void;
+  onOpenExport: () => void;
   exchangeOptions: TradeOption[];
   selectedExchange: string;
   onExchangeChange: (value: string) => void;
@@ -211,8 +211,34 @@ const methodShortLabel = (label: string, fallback: string) => {
   return normalizeText(matched?.[1]) || normalizeText(label) || fallback;
 };
 
+const stripParenthetical = (value?: string) =>
+  normalizeText((value || '').replace(/\s*[\(\（][^\)\）]*[\)\）]/g, '').replace(/\s{2,}/g, ' '));
+
 const indicatorCode = (indicator: GeneratedIndicatorPayload) =>
   upperText(typeof indicator.config?.indicator === 'string' ? indicator.config.indicator : indicator.code);
+
+const getIndicatorLabelMeta = (indicator: GeneratedIndicatorPayload) => {
+  const config = (indicator.config || {}) as {
+    indicator?: unknown;
+    input?: unknown;
+    params?: unknown[];
+  };
+  const code =
+    normalizeText(typeof config.indicator === 'string' ? config.indicator : indicator.code) || 'Indicator';
+  const input = normalizeText(typeof config.input === 'string' ? config.input : '');
+  const params = Array.isArray(config.params)
+    ? config.params.map((item) => normalizeText(String(item))).filter(Boolean)
+    : [];
+  return {
+    id: indicator.id,
+    code,
+    codeKey: upperText(code),
+    input,
+    inputKey: upperText(input),
+    paramsLabel: params.join(' '),
+    paramsKey: params.join(','),
+  };
+};
 
 const toDropId = (containerId: string, groupId: string, conditionId: string, slot: DropSlot) =>
   `cond-drop|${containerId}|${groupId}|${conditionId}|${slot}`;
@@ -375,7 +401,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     logicContainers,
     filterContainers,
     maxGroupsPerContainer,
-    buildConditionPreview,
     onAddConditionGroup,
     onToggleGroupFlag,
     onOpenConditionModal,
@@ -384,7 +409,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     onRemoveCondition,
     renderToggle,
     onClose,
-    onOpenSettings,
+    onOpenExport,
     exchangeOptions,
     selectedExchange,
     onExchangeChange,
@@ -416,6 +441,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [ready, setReady] = useState(false);
   const [conditionSide, setConditionSide] = useState<'long' | 'short'>('long');
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [expandedConditionKey, setExpandedConditionKey] = useState<string | null>(null);
   const [dashboardClock, setDashboardClock] = useState(Date.now());
   const [realtimeTicks, setRealtimeTicks] = useState(0);
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
@@ -501,15 +527,94 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return '';
   }, [firstMethodByCategory, operatorGroups]);
 
+  const indicatorLabelSpecMap = useMemo(() => {
+    const grouped = new Map<string, ReturnType<typeof getIndicatorLabelMeta>[]>();
+    selectedIndicators.forEach((indicator) => {
+      const meta = getIndicatorLabelMeta(indicator);
+      const key = meta.codeKey || meta.code;
+      const list = grouped.get(key) || [];
+      list.push(meta);
+      grouped.set(key, list);
+    });
+
+    const specMap = new Map<string, {
+      code: string;
+      paramsLabel: string;
+      input: string;
+      mode: IndicatorLabelDisplayMode;
+    }>();
+
+    grouped.forEach((items) => {
+      const paramSet = new Set(items.map((item) => item.paramsKey || '__EMPTY__'));
+      const inputSet = new Set(items.map((item) => item.inputKey || '__EMPTY__'));
+      const mode: IndicatorLabelDisplayMode =
+        items.length <= 1
+          ? 'code-only'
+          : paramSet.size > 1 && inputSet.size <= 1
+            ? 'code-param'
+            : paramSet.size <= 1 && inputSet.size > 1
+              ? 'code-input'
+              : paramSet.size <= 1 && inputSet.size <= 1
+                ? 'code-only'
+                : 'full';
+
+      items.forEach((item) => {
+        specMap.set(item.id, {
+          code: item.code,
+          paramsLabel: item.paramsLabel,
+          input: item.input,
+          mode,
+        });
+      });
+    });
+
+    return specMap;
+  }, [selectedIndicators]);
+
   const valueLabelMap = useMemo(() => {
     const map = new Map<string, string>();
     indicatorOutputGroups.forEach((group) => {
       group.options.forEach((option) => {
-        map.set(option.id, option.fullLabel || option.label);
+        if (group.id === 'kline-fields') {
+          map.set(option.id, option.fullLabel || option.label);
+          return;
+        }
+        const plainLabel =
+          stripParenthetical(option.label) || stripParenthetical(option.fullLabel) || option.label;
+        map.set(option.id, plainLabel || option.fullLabel || option.label);
       });
     });
     return map;
   }, [indicatorOutputGroups]);
+
+  const compactValueLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    indicatorOutputGroups.forEach((group) => {
+      group.options.forEach((option) => {
+        if (group.id === 'kline-fields') {
+          map.set(option.id, option.fullLabel || option.label);
+          return;
+        }
+        const outputLabel =
+          stripParenthetical(option.label) || stripParenthetical(option.fullLabel) || option.label;
+        const spec = indicatorLabelSpecMap.get(group.id);
+        if (!spec) {
+          map.set(option.id, outputLabel || option.fullLabel || option.label);
+          return;
+        }
+        const parts = [spec.code];
+        if ((spec.mode === 'code-param' || spec.mode === 'full') && spec.paramsLabel) {
+          parts.push(spec.paramsLabel);
+        }
+        if ((spec.mode === 'code-input' || spec.mode === 'full') && spec.input) {
+          parts.push(spec.input);
+        }
+        const prefix = parts.join(' ').trim();
+        map.set(option.id, prefix ? `${prefix} - ${outputLabel}` : outputLabel);
+      });
+    });
+    return map;
+  }, [indicatorLabelSpecMap, indicatorOutputGroups]);
 
   const indicatorOutputCount = useMemo(() => {
     return indicatorOutputGroups
@@ -658,7 +763,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     if (!valueId) {
       return '未配置';
     }
-    return valueLabelMap.get(valueId) || valueId;
+    return compactValueLabelMap.get(valueId) || valueLabelMap.get(valueId) || valueId;
   };
 
   const onDragStart = (event: DragStartEvent) => {
@@ -812,12 +917,14 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const methodLabel = methodMeta?.label || condition.method;
     const methodCategory = methodMeta?.category || 'compare';
     const methodCategoryLabel = CATEGORY_LABELS[methodCategory] || methodCategory;
-    const methodLineLabel = `${methodCategoryLabel} - ${methodShortLabel(methodLabel, methodValue)}`;
+    const methodBriefLabel = methodShortLabel(methodLabel, methodValue);
     const argsCount = methodMeta?.argsCount ?? 2;
     const rightMode = resolveArgMode(methodMeta, 1);
     const canDropRight = argsCount >= 2 && rightMode !== 'number';
     const canUseRightNumber = argsCount >= 2 && rightMode !== 'field';
     const numberFocusKey = `${containerId}|${groupId}|${condition.id}`;
+    const conditionRowKey = `${containerId}|${groupId}|${condition.id}`;
+    const isConditionExpanded = expandedConditionKey === conditionRowKey;
     const leftLinkedActive = isLinkedActive(condition.leftValueId);
     const rightLinkedActive = condition.rightValueType === 'field' && isLinkedActive(condition.rightValueId);
     const rightCandidateCount = Array.from(valueLabelMap.keys()).filter(
@@ -825,155 +932,177 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     ).length;
     const rightNoTargetHint =
       canDropRight && rightCandidateCount === 0
-        ? '当前没有适配的交互对象'
+        ? '当前没有可用右值'
         : '';
 
     const rightText =
       argsCount < 2
-        ? '当前方法只需要左值'
+        ? '当前方法仅需左值'
         : condition.rightValueType === 'number'
           ? `数值 ${condition.rightNumber || '未填写'}`
           : renderValueText(condition.rightValueId);
 
-    const preview = buildConditionPreview(condition);
-
     return (
       <div className="condition-item-card condition-item-card--advanced" key={condition.id}>
         <div className="condition-item-top">
-          <div className="condition-item-index">条件 {index + 1}</div>
-          <div className="condition-item-preview">{preview}</div>
+          <div className="condition-item-top-left">
+            <div className="condition-item-index">条件 {index + 1}</div>
+            <div className="condition-item-method-brief">
+              {methodCategoryLabel} {methodBriefLabel}
+            </div>
+          </div>
         </div>
 
-        <div className="condition-item-method-line">{methodLineLabel}</div>
-
-        <div className="condition-item-dnd-row">
-          <DroppableSlot
-            id={toDropId(containerId, groupId, condition.id, 'left')}
-            className="condition-dnd-slot"
-          >
-            <span className="condition-dnd-title">左值</span>
-            {condition.leftValueId ? (
-              <DraggableToken
-                id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|left`}
-                payload={{
-                  kind: 'condition-value',
-                  valueId: condition.leftValueId,
-                  label: renderValueText(condition.leftValueId),
-                  source: {
-                    containerId,
-                    groupId,
-                    conditionId: condition.id,
-                    slot: 'left',
-                  },
-                }}
-                className={`condition-dnd-value condition-dnd-value-badge ${leftLinkedActive ? 'is-linked-active' : ''}`}
-                style={buildValueBadgeStyle(condition.leftValueId)}
-                onMouseEnter={() => setActiveHoverValueId(condition.leftValueId)}
-                onMouseLeave={() => setActiveHoverValueId('')}
+        <div className="condition-logic-zone">
+          <div className="condition-logic-row">
+            <div className="condition-item-dnd-row">
+              <DroppableSlot
+                id={toDropId(containerId, groupId, condition.id, 'left')}
+                className="condition-dnd-slot"
               >
-                {renderValueText(condition.leftValueId)}
-              </DraggableToken>
-            ) : (
-              <span className="condition-dnd-value">{renderValueText(condition.leftValueId)}</span>
-            )}
-          </DroppableSlot>
+                {condition.leftValueId ? (
+                  <DraggableToken
+                    id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|left`}
+                    payload={{
+                      kind: 'condition-value',
+                      valueId: condition.leftValueId,
+                      label: renderValueText(condition.leftValueId),
+                      source: {
+                        containerId,
+                        groupId,
+                        conditionId: condition.id,
+                        slot: 'left',
+                      },
+                    }}
+                    className={`condition-dnd-value condition-dnd-value-badge ${leftLinkedActive ? 'is-linked-active' : ''}`}
+                    style={buildValueBadgeStyle(condition.leftValueId)}
+                    onMouseEnter={() => setActiveHoverValueId(condition.leftValueId)}
+                    onMouseLeave={() => setActiveHoverValueId('')}
+                  >
+                    {renderValueText(condition.leftValueId)}
+                  </DraggableToken>
+                ) : (
+                  <span className="condition-dnd-value condition-dnd-value--placeholder">
+                    {renderValueText(condition.leftValueId)}
+                  </span>
+                )}
+              </DroppableSlot>
 
-          <DroppableSlot
-            id={toDropId(containerId, groupId, condition.id, 'method')}
-            className="condition-dnd-slot condition-dnd-slot--operator"
-          >
-            <span className="condition-dnd-title">操作符</span>
-            <span className="condition-dnd-value">{methodShortLabel(methodLabel, methodValue)}</span>
-          </DroppableSlot>
+              <DroppableSlot
+                id={toDropId(containerId, groupId, condition.id, 'method')}
+                className="condition-dnd-slot condition-dnd-slot--operator"
+              >
+                <span className="condition-dnd-value">{methodBriefLabel}</span>
+              </DroppableSlot>
 
-          <DroppableSlot
-            id={toDropId(containerId, groupId, condition.id, 'right')}
-            className="condition-dnd-slot"
-            disabled={!canDropRight}
-          >
-            <span className="condition-dnd-title">右值</span>
-            {canUseRightNumber && condition.rightValueType === 'number' ? (
-              <input
-                className="condition-dnd-input"
-                type="number"
-                value={condition.rightNumber || ''}
-                onChange={(event) =>
-                  onQuickUpdateConditionRightNumber(
-                    containerId,
-                    groupId,
-                    condition.id,
-                    event.target.value,
+              <DroppableSlot
+                id={toDropId(containerId, groupId, condition.id, 'right')}
+                className="condition-dnd-slot"
+                disabled={!canDropRight}
+              >
+                {canUseRightNumber && condition.rightValueType === 'number' ? (
+                  <input
+                    className="condition-dnd-input"
+                    type="number"
+                    value={condition.rightNumber || ''}
+                    onChange={(event) =>
+                      onQuickUpdateConditionRightNumber(
+                        containerId,
+                        groupId,
+                        condition.id,
+                        event.target.value,
+                      )
+                    }
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    autoFocus={focusRightNumberKey === numberFocusKey}
+                    onBlur={() => {
+                      if (focusRightNumberKey === numberFocusKey) {
+                        setFocusRightNumberKey('');
+                      }
+                    }}
+                    placeholder="输入数值"
+                  />
+                ) : (
+                  condition.rightValueType === 'field' && condition.rightValueId ? (
+                    <DraggableToken
+                      id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|right`}
+                      payload={{
+                        kind: 'condition-value',
+                        valueId: condition.rightValueId,
+                        label: renderValueText(condition.rightValueId),
+                        source: {
+                          containerId,
+                          groupId,
+                          conditionId: condition.id,
+                          slot: 'right',
+                        },
+                      }}
+                      className={`condition-dnd-value condition-dnd-value-badge ${rightLinkedActive ? 'is-linked-active' : ''}`}
+                      style={buildValueBadgeStyle(condition.rightValueId)}
+                      onMouseEnter={() => setActiveHoverValueId(condition.rightValueId || '')}
+                      onMouseLeave={() => setActiveHoverValueId('')}
+                    >
+                      {rightNoTargetHint || rightText}
+                    </DraggableToken>
+                  ) : (
+                    <span
+                      className={`condition-dnd-value ${condition.rightValueType === 'field' ? 'condition-dnd-value-badge' : 'condition-dnd-value--placeholder'} ${rightLinkedActive ? 'is-linked-active' : ''}`}
+                      style={condition.rightValueType === 'field' ? buildValueBadgeStyle(condition.rightValueId) : undefined}
+                    >
+                      {rightNoTargetHint || rightText}
+                    </span>
                   )
-                }
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                autoFocus={focusRightNumberKey === numberFocusKey}
-                onBlur={() => {
-                  if (focusRightNumberKey === numberFocusKey) {
-                    setFocusRightNumberKey('');
-                  }
-                }}
-                placeholder="输入数值"
-              />
-            ) : (
-              condition.rightValueType === 'field' && condition.rightValueId ? (
-                <DraggableToken
-                  id={`drag-condition-value|${containerId}|${groupId}|${condition.id}|right`}
-                  payload={{
-                    kind: 'condition-value',
-                    valueId: condition.rightValueId,
-                    label: renderValueText(condition.rightValueId),
-                    source: {
-                      containerId,
-                      groupId,
-                      conditionId: condition.id,
-                      slot: 'right',
-                    },
-                  }}
-                  className={`condition-dnd-value condition-dnd-value-badge ${rightLinkedActive ? 'is-linked-active' : ''}`}
-                  style={buildValueBadgeStyle(condition.rightValueId)}
-                  onMouseEnter={() => setActiveHoverValueId(condition.rightValueId || '')}
-                  onMouseLeave={() => setActiveHoverValueId('')}
-                >
-                  {rightNoTargetHint || rightText}
-                </DraggableToken>
-              ) : (
-                <span
-                  className={`condition-dnd-value ${condition.rightValueType === 'field' ? 'condition-dnd-value-badge' : ''} ${rightLinkedActive ? 'is-linked-active' : ''}`}
-                  style={condition.rightValueType === 'field' ? buildValueBadgeStyle(condition.rightValueId) : undefined}
-                >
-                  {rightNoTargetHint || rightText}
-                </span>
-              )
-            )}
-          </DroppableSlot>
-        </div>
+                )}
+              </DroppableSlot>
+            </div>
 
-        <div className="condition-item-actions">
-          {renderToggle(
-            condition.enabled,
-            () => onToggleConditionFlag(containerId, groupId, condition.id, 'enabled'),
-            '启用',
-          )}
-          {renderToggle(
-            condition.required,
-            () => onToggleConditionFlag(containerId, groupId, condition.id, 'required'),
-            '必选',
-          )}
-          <button
-            type="button"
-            className="condition-delete-button"
-            onClick={() => onOpenConditionModal(containerId, groupId, condition.id)}
-          >
-            编辑
-          </button>
-          <button
-            type="button"
-            className="condition-delete-button"
-            onClick={() => onRemoveCondition(containerId, groupId, condition.id)}
-          >
-            删除
-          </button>
+            <div
+              className={`condition-item-more-wrap ${isConditionExpanded ? 'is-expanded' : ''}`}
+              onMouseEnter={() => setExpandedConditionKey(conditionRowKey)}
+              onMouseLeave={() => setExpandedConditionKey(null)}
+            >
+              <div
+                className={`condition-item-actions--expandable ${isConditionExpanded ? 'is-expanded' : ''}`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {renderToggle(
+                  condition.enabled,
+                  () => onToggleConditionFlag(containerId, groupId, condition.id, 'enabled'),
+                  '启用',
+                )}
+                {renderToggle(
+                  condition.required,
+                  () => onToggleConditionFlag(containerId, groupId, condition.id, 'required'),
+                  '必选',
+                )}
+                <button
+                  type="button"
+                  className="condition-delete-button"
+                  onClick={() => onOpenConditionModal(containerId, groupId, condition.id)}
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  className="condition-delete-button"
+                  onClick={() => onRemoveCondition(containerId, groupId, condition.id)}
+                >
+                  删除
+                </button>
+              </div>
+              <button
+                type="button"
+                className="condition-more-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setExpandedConditionKey((prev) => (prev === conditionRowKey ? null : conditionRowKey));
+                }}
+              >
+                更多
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1124,7 +1253,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       onDragEnd={onDragEnd}
       autoScroll={true}
     >
-      <div className="strategy-workbench">
+      <div className="strategy-workbench strategy-workbench--refactor">
         <div className="strategy-workbench-topbar">
           <button type="button" className="strategy-workbench-topbar-button" onClick={onClose}>
             返回
@@ -1138,9 +1267,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           <button
             type="button"
             className="strategy-workbench-topbar-button is-primary"
-            onClick={onOpenSettings}
+            onClick={onOpenExport}
           >
-            设置
+            导出
           </button>
         </div>
 
@@ -1395,7 +1524,10 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                                         payload={{
                                           kind: 'output',
                                           valueId: option.id,
-                                          label: option.fullLabel || option.label,
+                                          label:
+                                            stripParenthetical(option.label) ||
+                                            stripParenthetical(option.fullLabel) ||
+                                            option.label,
                                         }}
                                         className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
                                         style={outputBadgeStyleMap.get(option.id) || {
@@ -1406,7 +1538,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                                         onMouseEnter={() => setActiveHoverValueId(option.id)}
                                         onMouseLeave={() => setActiveHoverValueId('')}
                                       >
-                                        {option.label}
+                                        {stripParenthetical(option.label) || option.label}
                                       </DraggableToken>
                                     ))
                                   )}

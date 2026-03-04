@@ -1253,15 +1253,15 @@
       "outputs": [
         {
           "key": "MACD",
-          "hint": "Line"
+          "hint": "快线"
         },
         {
           "key": "MACD Signal",
-          "hint": "DashLine"
+          "hint": "慢线"
         },
         {
           "key": "MACD Hist",
-          "hint": "Histo"
+          "hint": "柱状图"
         }
       ],
       "name_cn": "指数平滑异同移动平均线",
