@@ -16,6 +16,8 @@
   <ItemGroup>
     <!-- 工具工程独立编译，避免被主项目误收录 -->
     <Compile Remove="Tools\**\*.cs" />
+    <!-- 防止临时中间目录被当作源码参与编译（会导致 Assembly 特性重复） -->
+    <Compile Remove="obj_codex\**\*.cs" />
     <!-- WinForms 监控暂不参与主服务编译，主服务保持跨平台 -->
     <Compile Remove="Modules\Monitoring\Application\StartupMonitorForm.cs" />
     <Compile Remove="Modules\Monitoring\Application\StartupMonitorHost.cs" />

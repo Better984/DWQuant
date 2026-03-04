@@ -6,6 +6,7 @@ using ServerTest.Models;
 using ServerTest.Options;
 using ServerTest.Services;
 using ServerTest.Modules.MarketData.Application;
+using ServerTest.Modules.MarketData.Domain;
 using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Protocol;
 
@@ -45,17 +46,23 @@ namespace ServerTest.Controllers
         private readonly MarketDataEngine _marketDataEngine;
         private readonly HistoricalMarketDataCache _historicalCache;
         private readonly HistoricalMarketDataOptions _historyOptions;
+        private readonly HistoricalDataPackageService _offlinePackageService;
+        private readonly HistoricalDataPackageOptions _offlinePackageOptions;
 
         public MarketDataController(
             ILogger<MarketDataController> logger,
             MarketDataEngine marketDataEngine,
             HistoricalMarketDataCache historicalCache,
-            IOptions<HistoricalMarketDataOptions> historyOptions)
+            IOptions<HistoricalMarketDataOptions> historyOptions,
+            HistoricalDataPackageService offlinePackageService,
+            IOptions<HistoricalDataPackageOptions> offlinePackageOptions)
             : base(logger)
         {
             _marketDataEngine = marketDataEngine;
             _historicalCache = historicalCache;
             _historyOptions = historyOptions?.Value ?? new HistoricalMarketDataOptions();
+            _offlinePackageService = offlinePackageService ?? throw new ArgumentNullException(nameof(offlinePackageService));
+            _offlinePackageOptions = offlinePackageOptions?.Value ?? new HistoricalDataPackageOptions();
         }
 
         /// <summary>
@@ -208,6 +215,33 @@ namespace ServerTest.Controllers
             }
         }
 
+        /// <summary>
+        /// 获取离线K线包清单信息。
+        /// </summary>
+        [ProtocolType("marketdata.offline-package.manifest")]
+        [HttpPost("offline-package/manifest")]
+        public IActionResult GetOfflinePackageManifest([FromBody] ProtocolRequest<object> request)
+        {
+            try
+            {
+                var manifest = _offlinePackageService.GetLatestManifestSnapshot();
+                var response = new OfflinePackageManifestResponse
+                {
+                    Enabled = _offlinePackageOptions.Enabled,
+                    UpdateIntervalMinutes = _offlinePackageService.GetUpdateIntervalMinutes(),
+                    RetentionDaysByTimeframe = _offlinePackageService.GetRetentionDaysSnapshot(),
+                    LatestManifest = manifest
+                };
+
+                return Ok(ApiResponse<OfflinePackageManifestResponse>.Ok(response, "查询成功"));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "获取离线K线包清单失败");
+                return StatusCode(500, ApiResponse<object>.Error($"查询失败: {ex.Message}"));
+            }
+        }
+
         private static MarketKlineDto ToDto(OHLCV candle)
         {
             return new MarketKlineDto
@@ -219,6 +253,14 @@ namespace ServerTest.Controllers
                 Close = candle.close,
                 Volume = candle.volume
             };
+        }
+
+        private sealed class OfflinePackageManifestResponse
+        {
+            public bool Enabled { get; set; }
+            public int UpdateIntervalMinutes { get; set; }
+            public Dictionary<string, int> RetentionDaysByTimeframe { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+            public HistoricalDataPackageManifest? LatestManifest { get; set; }
         }
     }
 }

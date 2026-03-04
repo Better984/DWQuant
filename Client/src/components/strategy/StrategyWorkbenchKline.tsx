@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { dispose, init, type Chart, type KLineData } from 'klinecharts';
+import { LoadDataType, dispose, init, type Chart, type KLineData } from 'klinecharts';
 
 import { HttpClient, getToken } from '../../network/index.ts';
 import type { GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
+import {
+  loadLocalKlineBars,
+  loadLocalKlineBarsBefore,
+  loadLocalKlineBarsWithCloudFallback,
+} from '../../lib/klineOfflinePackageManager';
 import {
   getTalibIndicatorEditorSchema,
   getTalibIndicatorMetaList,
@@ -15,7 +20,6 @@ interface StrategyWorkbenchKlineProps {
   symbol: string;
   timeframeSec: number;
   selectedIndicators: GeneratedIndicatorPayload[];
-  enableRealtime: boolean;
   hoverValueId?: string;
   hoverHasReference?: boolean;
   onBarsUpdate?: (bars: KLineData[]) => void;
@@ -48,6 +52,24 @@ const TIMEFRAME_TO_KEY: Record<number, string> = {
   2592000: '1mo',
 };
 
+const TIMEFRAME_TO_LOCAL_KEY: Record<number, string> = {
+  60: '1m',
+  180: '3m',
+  300: '5m',
+  900: '15m',
+  1800: '30m',
+  3600: '1h',
+  7200: '2h',
+  14400: '4h',
+  21600: '6h',
+  28800: '8h',
+  43200: '12h',
+  86400: '1d',
+  259200: '3d',
+  604800: '1w',
+  2592000: '1mo',
+};
+
 const TIMEFRAME_TO_MS: Record<number, number> = {
   60: 60_000,
   180: 180_000,
@@ -64,6 +86,35 @@ const TIMEFRAME_TO_MS: Record<number, number> = {
   259200: 259_200_000,
   604800: 604_800_000,
   2592000: 2_592_000_000,
+};
+
+const DEFAULT_INITIAL_LOOKBACK_DAYS = 30;
+const MAX_INITIAL_LOAD_BAR_COUNT = 50_000;
+const LOAD_MORE_BAR_COUNT = 1200;
+
+// 按周期换算“最近30天”需要的K线条数，作为工作台默认样本窗口。
+const resolveInitialLoadBarCount = (intervalMs: number) => {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return 720;
+  }
+  const estimated = Math.ceil((DEFAULT_INITIAL_LOOKBACK_DAYS * 86_400_000) / intervalMs);
+  return Math.max(1, Math.min(MAX_INITIAL_LOAD_BAR_COUNT, estimated));
+};
+
+const normalizeExchangeForLocal = (value: string) => (value || '').trim().toLowerCase() || 'binance';
+
+const normalizeSymbolForLocal = (value: string) => {
+  const normalized = (value || 'BTC/USDT').replaceAll('_', '/').replaceAll('-', '/').toUpperCase();
+  if (normalized.includes('/')) {
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.length === 2) {
+      return `${parts[0]}/${parts[1]}`;
+    }
+  }
+  if (normalized.endsWith('USDT') && normalized.length > 4) {
+    return `${normalized.slice(0, -4)}/USDT`;
+  }
+  return normalized;
 };
 
 const normalizeExchange = (value: string) => {
@@ -114,6 +165,26 @@ const toKlineData = (item: OhlcvDto): KLineData | null => {
   return { timestamp, open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 };
 };
 
+const normalizeHistoryBars = (source: OhlcvDto[]): KLineData[] => {
+  const normalized = source
+    .map(toKlineData)
+    .filter((item): item is KLineData => item !== null)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  if (normalized.length <= 1) {
+    return normalized;
+  }
+  const deduped: KLineData[] = [];
+  const timestamps = new Set<number>();
+  normalized.forEach((item) => {
+    if (timestamps.has(item.timestamp)) {
+      return;
+    }
+    timestamps.add(item.timestamp);
+    deduped.push(item);
+  });
+  return deduped;
+};
+
 type IndicatorInputMap = Record<string, string>;
 type IndicatorPaneType = 'main' | 'sub';
 
@@ -161,6 +232,8 @@ type BarStyleLike = {
   borderStyle?: unknown;
   borderDashedValue?: number[];
 };
+
+type HistorySourceMode = 'none' | 'local' | 'backend';
 type CircleStyleLike = {
   upColor?: string;
   downColor?: string;
@@ -395,7 +468,6 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   symbol,
   timeframeSec,
   selectedIndicators,
-  enableRealtime,
   hoverValueId,
   hoverHasReference = false,
   onBarsUpdate,
@@ -405,14 +477,25 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   const subPaneIdMapRef = useRef<Map<string, string>>(new Map());
   const mainIndicatorSetRef = useRef<Set<string>>(new Set());
   const blinkTimerRef = useRef<number | null>(null);
+  const cloudMissMemoRef = useRef<Map<string, boolean>>(new Map());
+  const historySourceModeRef = useRef<HistorySourceMode>('none');
+  const historySeriesKeyRef = useRef('');
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
   const [bars, setBars] = useState<KLineData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [talibReady, setTalibReady] = useState(false);
+  const [chartReady, setChartReady] = useState(false);
 
   const timeframeKey = TIMEFRAME_TO_KEY[timeframeSec] || 'm5';
+  const localTimeframeKey = TIMEFRAME_TO_LOCAL_KEY[timeframeSec] || '5m';
   const intervalMs = TIMEFRAME_TO_MS[timeframeSec] || 300_000;
+  const initialLoadBarCount = useMemo(() => resolveInitialLoadBarCount(intervalMs), [intervalMs]);
+  const seriesKey = useMemo(() => {
+    const normalizedExchange = normalizeExchangeForLocal(exchange);
+    const normalizedSymbol = normalizeSymbolForLocal(symbol);
+    return `${normalizedExchange}|${normalizedSymbol}|${localTimeframeKey}`;
+  }, [exchange, localTimeframeKey, symbol]);
 
   const hoverIndicatorMap = useMemo(() => {
     const map = new Map<string, IndicatorHoverEntry>();
@@ -438,74 +521,178 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     return map;
   }, [selectedIndicators]);
 
+  const requestRemoteHistoryBars = useCallback(async (
+    count: number,
+    startTimeMs: number,
+    endTimeMs: number,
+    signal?: AbortSignal,
+  ): Promise<KLineData[]> => {
+    const payload = {
+      exchange: normalizeExchange(exchange),
+      timeframe: timeframeKey,
+      symbol: normalizeSymbol(symbol),
+      count,
+      startTime: formatDateTime(startTimeMs),
+      endTime: formatDateTime(endTimeMs),
+    };
+    const data = await client.postProtocol<OhlcvDto[]>(
+      '/api/marketdata/history',
+      'marketdata.kline.history',
+      payload,
+      { signal },
+    );
+    return normalizeHistoryBars(Array.isArray(data) ? data : []);
+  }, [client, exchange, symbol, timeframeKey]);
+
   const loadHistory = useCallback(async (signal: AbortSignal) => {
     setIsLoading(true);
     setErrorMessage('');
+    historySourceModeRef.current = 'none';
+    historySeriesKeyRef.current = seriesKey;
+
     try {
+      const normalizedExchange = normalizeExchangeForLocal(exchange);
+      const normalizedSymbol = normalizeSymbolForLocal(symbol);
+      try {
+        let localBars: KLineData[] = [];
+        if (cloudMissMemoRef.current.get(seriesKey)) {
+          localBars = await loadLocalKlineBars(
+            normalizedExchange,
+            normalizedSymbol,
+            localTimeframeKey,
+            initialLoadBarCount,
+          );
+        } else {
+          const localWithCloud = await loadLocalKlineBarsWithCloudFallback(
+            normalizedExchange,
+            normalizedSymbol,
+            localTimeframeKey,
+            initialLoadBarCount,
+            signal,
+          );
+          if (localWithCloud.source === 'none') {
+            cloudMissMemoRef.current.set(seriesKey, true);
+          } else {
+            cloudMissMemoRef.current.delete(seriesKey);
+          }
+          localBars = localWithCloud.bars;
+        }
+
+        if (localBars.length > 0) {
+          historySourceModeRef.current = 'local';
+          setBars(localBars);
+          return;
+        }
+      } catch (localError) {
+        console.warn('本地离线K线缓存读取失败，回退到接口拉取', localError);
+      }
+
       const endTime = Date.now();
-      const count = 360;
-      const startTime = endTime - intervalMs * (count - 1);
-      const payload = {
-        exchange: normalizeExchange(exchange),
-        timeframe: timeframeKey,
-        symbol: normalizeSymbol(symbol),
-        count,
-        startTime: formatDateTime(startTime),
-        endTime: formatDateTime(endTime),
-      };
-      const data = await client.postProtocol<OhlcvDto[]>(
-        '/api/marketdata/history',
-        'marketdata.kline.history',
-        payload,
-        { signal },
+      const startTime = endTime - intervalMs * (initialLoadBarCount - 1);
+      const remoteBars = await requestRemoteHistoryBars(
+        initialLoadBarCount,
+        startTime,
+        endTime,
+        signal,
       );
-      const normalized = data
-        .map(toKlineData)
-        .filter((item): item is KLineData => item !== null)
-        .sort((a, b) => a.timestamp - b.timestamp);
-      if (normalized.length === 0) {
+      if (remoteBars.length <= 0) {
         setBars([]);
         setErrorMessage('暂无可用K线数据');
         return;
       }
-      const deduped: KLineData[] = [];
-      const timestamps = new Set<number>();
-      normalized.forEach((item) => {
-        if (timestamps.has(item.timestamp)) {
-          return;
-        }
-        timestamps.add(item.timestamp);
-        deduped.push(item);
-      });
-      setBars(deduped);
+
+      historySourceModeRef.current = 'backend';
+      setBars(remoteBars);
     } catch (error) {
       if ((error as { name?: string })?.name === 'AbortError') {
         return;
       }
       setBars([]);
+      historySourceModeRef.current = 'none';
       setErrorMessage(error instanceof Error ? error.message : 'K线数据加载失败');
     } finally {
       setIsLoading(false);
     }
-  }, [client, exchange, intervalMs, symbol, timeframeKey]);
+  }, [exchange, initialLoadBarCount, intervalMs, localTimeframeKey, requestRemoteHistoryBars, seriesKey, symbol]);
 
   useEffect(() => {
+    historySeriesKeyRef.current = seriesKey;
     const controller = new AbortController();
     loadHistory(controller.signal);
     return () => controller.abort();
-  }, [loadHistory]);
+  }, [loadHistory, seriesKey]);
 
   useEffect(() => {
-    if (!enableRealtime) {
+    const chart = chartRef.current;
+    if (!chart || !chartReady) {
       return;
     }
-    const timer = window.setInterval(() => {
-      const controller = new AbortController();
-      loadHistory(controller.signal);
-      window.setTimeout(() => controller.abort(), 4500);
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [enableRealtime, loadHistory]);
+
+    chart.setLoadDataCallback((params) => {
+      if (params.type !== LoadDataType.Forward) {
+        params.callback([], false);
+        return;
+      }
+
+      const normalizedExchange = normalizeExchangeForLocal(exchange);
+      const normalizedSymbol = normalizeSymbolForLocal(symbol);
+      const referenceTimestamp = Number(params.data?.timestamp ?? Number.NaN);
+      if (!Number.isFinite(referenceTimestamp)) {
+        params.callback([], false);
+        return;
+      }
+
+      void (async () => {
+        try {
+          if (historySeriesKeyRef.current !== seriesKey) {
+            params.callback([], false);
+            return;
+          }
+
+          if (historySourceModeRef.current === 'local') {
+            const localResult = await loadLocalKlineBarsBefore(
+              normalizedExchange,
+              normalizedSymbol,
+              localTimeframeKey,
+              referenceTimestamp,
+              LOAD_MORE_BAR_COUNT,
+            );
+            if (historySeriesKeyRef.current !== seriesKey) {
+              params.callback([], false);
+              return;
+            }
+            params.callback(localResult.bars, localResult.hasMore);
+            return;
+          }
+
+          if (historySourceModeRef.current === 'backend') {
+            const endTime = referenceTimestamp - intervalMs;
+            if (!Number.isFinite(endTime) || endTime <= 0) {
+              params.callback([], false);
+              return;
+            }
+            const startTime = endTime - intervalMs * (LOAD_MORE_BAR_COUNT - 1);
+            const remoteBars = await requestRemoteHistoryBars(
+              LOAD_MORE_BAR_COUNT,
+              startTime,
+              endTime,
+            );
+            if (historySeriesKeyRef.current !== seriesKey) {
+              params.callback([], false);
+              return;
+            }
+            params.callback(remoteBars, remoteBars.length >= LOAD_MORE_BAR_COUNT);
+            return;
+          }
+
+          params.callback([], false);
+        } catch (error) {
+          console.warn('左滑加载历史K线失败', error);
+          params.callback([], false);
+        }
+      })();
+    });
+  }, [chartReady, exchange, intervalMs, localTimeframeKey, requestRemoteHistoryBars, seriesKey, symbol]);
 
   useEffect(() => {
     if (!containerRef.current || chartRef.current) {
@@ -528,6 +715,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
         },
       },
     });
+    setChartReady(true);
   }, []);
 
   useEffect(() => {
@@ -551,12 +739,14 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!chartRef.current || bars.length === 0) {
+    if (!chartRef.current || !chartReady) {
       return;
     }
     chartRef.current.clearData();
-    chartRef.current.applyNewData(bars);
-  }, [bars]);
+    if (bars.length > 0) {
+      chartRef.current.applyNewData(bars);
+    }
+  }, [bars, chartReady]);
 
   useEffect(() => {
     onBarsUpdate?.(bars);
@@ -771,6 +961,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   useEffect(() => {
     return () => {
       clearBlinkTimer();
+      cloudMissMemoRef.current.clear();
       if (chartRef.current) {
         dispose(chartRef.current);
         chartRef.current = null;

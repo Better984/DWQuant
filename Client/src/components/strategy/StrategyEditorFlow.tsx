@@ -548,7 +548,8 @@ const parseConditionContainersFromConfig = (
       return;
     }
 
-    container.enabled = enabledFlag ?? groupSet.enabled ?? false;
+    const hasAnyCondition = (groupSet.groups || []).some((group) => (group.conditions || []).length > 0);
+    container.enabled = enabledFlag ?? groupSet.enabled ?? hasAnyCondition;
     let groupCounter = 0;
     container.groups = groupSet.groups.map((groupConfig, index) => {
       groupCounter++;
@@ -653,7 +654,8 @@ const parseConditionContainersFromConfig = (
 
   const parseBranch = (branch: StrategyLogicBranchConfig, containerId: string, filterContainerId?: string) => {
     const checks = branch.containers?.[0]?.checks;
-    parseGroupSet(containerId, checks, branch.enabled || false);
+    // 兼容历史配置：当 branch.enabled 缺失时，按 checks/groups 自动推断启用状态。
+    parseGroupSet(containerId, checks, branch.enabled);
     if (filterContainerId) {
       parseGroupSet(filterContainerId, branch.filters, branch.filters?.enabled ?? false);
     }
@@ -3021,6 +3023,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         changed = true;
         return {
           ...container,
+          enabled: true,
           groups: nextGroups,
         };
       }),
@@ -3094,8 +3097,9 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       .filter((item): item is StrategyMethodConfig => Boolean(item));
     const enabledConditions = conditions.filter((condition) => condition.enabled);
     const optionalConditions = enabledConditions.filter((condition) => !condition.required);
+    // 空条件组不应阻断执行，保持与本地回测引擎一致。
     const minPassConditions =
-      enabledConditions.length === 0 ? 1 : optionalConditions.length === 0 ? 0 : 1;
+      enabledConditions.length === 0 ? 0 : optionalConditions.length === 0 ? 0 : 1;
     return {
       enabled: group.enabled,
       minPassConditions,
@@ -3343,7 +3347,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
         if (container.id !== containerId) {
           return container;
         }
-        return { ...container, groups: [...container.groups, newGroup] };
+        return { ...container, enabled: true, groups: [...container.groups, newGroup] };
       }),
     );
   };
@@ -3635,7 +3639,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
               : nextConditions;
           return { ...group, conditions };
         });
-        return { ...container, groups };
+        return { ...container, enabled: true, groups };
       }),
     );
     closeConditionModal();

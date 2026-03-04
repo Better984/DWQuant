@@ -220,6 +220,7 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.Configure<CoinGlassOptions>(configuration.GetSection("CoinGlass"));
     services.Configure<DiscoverFeedOptions>(configuration.GetSection("DiscoverFeed"));
     services.Configure<DiscoverCalendarOptions>(configuration.GetSection("DiscoverCalendar"));
+    services.Configure<HistoricalDataPackageOptions>(configuration.GetSection("HistoricalDataPackage"));
 
     services.AddSingleton<IValidateOptions<AiAssistantOptions>, AiAssistantOptionsValidator>();
     services.AddSingleton<IValidateOptions<BusinessRulesOptions>, BusinessRulesOptionsValidator>();
@@ -235,6 +236,7 @@ static void ConfigureOptions(IServiceCollection services, IConfiguration configu
     services.AddSingleton<IValidateOptions<CoinGlassOptions>, CoinGlassOptionsValidator>();
     services.AddSingleton<IValidateOptions<DiscoverFeedOptions>, DiscoverFeedOptionsValidator>();
     services.AddSingleton<IValidateOptions<DiscoverCalendarOptions>, DiscoverCalendarOptionsValidator>();
+    services.AddSingleton<IValidateOptions<HistoricalDataPackageOptions>, HistoricalDataPackageOptionsValidator>();
 }
 
 static void RegisterCommonServices(
@@ -351,6 +353,7 @@ static void RegisterCommonServices(
     services.AddSingleton<HistoricalMarketDataCache>();
     services.AddSingleton<HistoricalMarketDataSyncService>();
     services.AddSingleton<BinanceHistoricalDataDownloader>();
+    services.AddSingleton<HistoricalDataPackageService>();
     services.AddSingleton<ContractDetailsRepository>();
     services.AddSingleton<ContractDetailsCacheService>();
     services.AddHostedService<ContractDetailsCacheHostedService>();
@@ -358,6 +361,7 @@ static void RegisterCommonServices(
     if (role != ServerRole.BacktestWorker)
     {
         services.AddHostedService<HistoricalMarketDataSyncHostedService>();
+        services.AddHostedService<HistoricalDataPackageHostedService>();
     }
 
     services.AddSingleton<StrategyRuntimeTemplateRepository>();

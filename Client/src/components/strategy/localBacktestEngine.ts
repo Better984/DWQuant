@@ -72,6 +72,13 @@ type RuntimeBranch = {
   onPass: RuntimeActionSet;
 };
 
+type RuntimeBundle = {
+  entryLong: RuntimeBranch;
+  exitLong: RuntimeBranch;
+  entryShort: RuntimeBranch;
+  exitShort: RuntimeBranch;
+};
+
 type BacktestPosition = {
   side: 'Long' | 'Short';
   entryPrice: number;
@@ -80,25 +87,90 @@ type BacktestPosition = {
   entryFee: number;
   stopLossPrice: number | null;
   takeProfitPrice: number | null;
+  fundingAccrued: number;
 };
 
-type BacktestTrade = {
+export type LocalBacktestTrade = {
   side: 'Long' | 'Short';
   entryTime: number;
   exitTime: number;
   entryPrice: number;
   exitPrice: number;
+  stopLossPrice: number | null;
+  takeProfitPrice: number | null;
   qty: number;
   fee: number;
+  funding: number;
   pnl: number;
   exitReason: string;
   isOpen: boolean;
+  slippageBps: number;
 };
 
-type BacktestEvent = {
+export type LocalBacktestEvent = {
   timestamp: number;
   type: string;
   message: string;
+};
+
+export type LocalBacktestStats = {
+  totalProfit: number;
+  totalReturn: number;
+  maxDrawdown: number;
+  winRate: number;
+  tradeCount: number;
+  avgProfit: number;
+  profitFactor: number;
+  avgWin: number;
+  avgLoss: number;
+  sharpeRatio: number;
+  sortinoRatio: number;
+  annualizedReturn: number;
+  maxConsecutiveLosses: number;
+  maxConsecutiveWins: number;
+  avgHoldingMs: number;
+  maxDrawdownDurationMs: number;
+  calmarRatio: number;
+};
+
+export type LocalBacktestTradeSummary = {
+  totalCount: number;
+  winCount: number;
+  lossCount: number;
+  maxProfit: number;
+  maxLoss: number;
+  totalFee: number;
+  totalFunding: number;
+  avgPnl: number;
+  avgHoldingMs: number;
+};
+
+export type LocalBacktestEquityPoint = {
+  timestamp: number;
+  equity: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  periodPnl: number;
+  drawdown: number;
+};
+
+export type LocalBacktestEquitySummary = {
+  pointCount: number;
+  maxEquity: number;
+  maxEquityAt: number;
+  minEquity: number;
+  minEquityAt: number;
+  maxPeriodProfit: number;
+  maxPeriodProfitAt: number;
+  maxPeriodLoss: number;
+  maxPeriodLossAt: number;
+};
+
+export type LocalBacktestEventSummary = {
+  totalCount: number;
+  firstTimestamp: number;
+  lastTimestamp: number;
+  typeCounts: Record<string, number>;
 };
 
 type MethodRuntimeMeta = {
@@ -106,12 +178,90 @@ type MethodRuntimeMeta = {
   paramDefaults: string[];
 };
 
+type BacktestStageCounters = {
+  barsTotal: number;
+  barsProcessed: number;
+  barsInvalidPrice: number;
+  filterLongPass: number;
+  filterLongBlock: number;
+  filterShortPass: number;
+  filterShortBlock: number;
+  entryLongBranchPass: number;
+  entryShortBranchPass: number;
+  exitLongBranchPass: number;
+  exitShortBranchPass: number;
+  actionMakeTradeCalls: number;
+  openLongAttempt: number;
+  openShortAttempt: number;
+  closeLongAttempt: number;
+  closeShortAttempt: number;
+  openLongSuccess: number;
+  openShortSuccess: number;
+  closeLongSuccess: number;
+  closeShortSuccess: number;
+  failUnknownAction: number;
+  failPriceInvalid: number;
+  failSameSidePosition: number;
+  failNeedAutoReverse: number;
+  failOrderQtyInvalid: number;
+  failCloseWithoutPosition: number;
+  failCloseSideMismatch: number;
+  riskCloseStopLoss: number;
+  riskCloseTakeProfit: number;
+};
+
+type BranchConfigDiagnostic = {
+  label: string;
+  line: string;
+  enabledConditionCount: number;
+  unresolvedValueCount: number;
+  invalidConditionCount: number;
+};
+
+type ExecuteMakeTradeResult = {
+  success: boolean;
+  kind: 'open' | 'close' | 'none';
+  side: 'Long' | 'Short' | '';
+  reason:
+    | 'ok'
+    | 'unknown_action'
+    | 'invalid_price'
+    | 'same_side_position'
+    | 'need_auto_reverse'
+    | 'invalid_order_qty'
+    | 'close_without_position'
+    | 'close_side_mismatch';
+};
+
+type LocalBacktestTradeAggregates = {
+  closedTradeCount: number;
+  winCount: number;
+  lossCount: number;
+  sumPnl: number;
+  sumWinPnl: number;
+  sumLossAbsPnl: number;
+  grossProfit: number;
+  grossLossAbs: number;
+  maxProfit: number;
+  maxLoss: number;
+  totalHoldingMs: number;
+  maxConsecutiveWins: number;
+  maxConsecutiveLosses: number;
+  currentConsecutiveWins: number;
+  currentConsecutiveLosses: number;
+  totalFee: number;
+};
+
 type LocalBacktestState = {
   position: BacktestPosition | null;
   realizedPnl: number;
-  trades: BacktestTrade[];
-  events: BacktestEvent[];
+  trades: LocalBacktestTrade[];
+  events: LocalBacktestEvent[];
+  eventTypeCounts: Record<string, number>;
   signalCount: number;
+  accumulatedFunding: number;
+  tradeAggregates: LocalBacktestTradeAggregates;
+  stageCounters: BacktestStageCounters;
 };
 
 type LocalBacktestResolver = {
@@ -129,6 +279,7 @@ type LocalBacktestRiskConfig = {
   stopLossPct: number;
   takeProfitPct: number;
   feeRate: number;
+  fundingRate: number;
   slippageBps: number;
   autoReverse: boolean;
 };
@@ -136,6 +287,29 @@ type LocalBacktestRiskConfig = {
 type LocalBacktestMetrics = {
   maxDrawdown: number;
   peakEquity: number;
+  peakEquityAt: number;
+  drawdownStartAt: number;
+  maxDrawdownDurationMs: number;
+  maxEquity: number;
+  maxEquityAt: number;
+  minEquity: number;
+  minEquityAt: number;
+  maxPeriodProfit: number;
+  maxPeriodProfitAt: number;
+  maxPeriodLoss: number;
+  maxPeriodLossAt: number;
+  equityPointCount: number;
+  equityPreview: LocalBacktestEquityPoint[];
+  firstTimestamp: number;
+  lastTimestamp: number;
+  lastEquity: number;
+  returnCount: number;
+  returnSum: number;
+  returnSquareSum: number;
+  downsideCount: number;
+  downsideSquareSum: number;
+  timeframeMsTotal: number;
+  timeframeMsCount: number;
   lastUnrealizedPnl: number;
 };
 
@@ -144,8 +318,130 @@ const CROSS_METHODS = new Set(['CrossUp', 'CrossDown', 'CrossOver', 'CrossUnder'
 const EPS_COMPARE = 1e-10;
 const EPS_ZERO = 1e-12;
 const DEFAULT_FEE_RATE = 0.0004;
+const DEFAULT_FUNDING_RATE = 0;
 const DEFAULT_SLIPPAGE_BPS = 0;
 const DEFAULT_INITIAL_CAPITAL = 10_000;
+const FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000;
+const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const MAX_EQUITY_PREVIEW_POINTS = 360;
+
+const createStageCounters = (barsTotal: number): BacktestStageCounters => ({
+  barsTotal,
+  barsProcessed: 0,
+  barsInvalidPrice: 0,
+  filterLongPass: 0,
+  filterLongBlock: 0,
+  filterShortPass: 0,
+  filterShortBlock: 0,
+  entryLongBranchPass: 0,
+  entryShortBranchPass: 0,
+  exitLongBranchPass: 0,
+  exitShortBranchPass: 0,
+  actionMakeTradeCalls: 0,
+  openLongAttempt: 0,
+  openShortAttempt: 0,
+  closeLongAttempt: 0,
+  closeShortAttempt: 0,
+  openLongSuccess: 0,
+  openShortSuccess: 0,
+  closeLongSuccess: 0,
+  closeShortSuccess: 0,
+  failUnknownAction: 0,
+  failPriceInvalid: 0,
+  failSameSidePosition: 0,
+  failNeedAutoReverse: 0,
+  failOrderQtyInvalid: 0,
+  failCloseWithoutPosition: 0,
+  failCloseSideMismatch: 0,
+  riskCloseStopLoss: 0,
+  riskCloseTakeProfit: 0,
+});
+
+const createTradeAggregates = (): LocalBacktestTradeAggregates => ({
+  closedTradeCount: 0,
+  winCount: 0,
+  lossCount: 0,
+  sumPnl: 0,
+  sumWinPnl: 0,
+  sumLossAbsPnl: 0,
+  grossProfit: 0,
+  grossLossAbs: 0,
+  maxProfit: Number.NEGATIVE_INFINITY,
+  maxLoss: Number.POSITIVE_INFINITY,
+  totalHoldingMs: 0,
+  maxConsecutiveWins: 0,
+  maxConsecutiveLosses: 0,
+  currentConsecutiveWins: 0,
+  currentConsecutiveLosses: 0,
+  totalFee: 0,
+});
+
+const collectBranchConfigDiagnostic = (
+  label: string,
+  branch: RuntimeBranch,
+  knownValueIds: Set<string>,
+): BranchConfigDiagnostic => {
+  let checkGroupTotal = 0;
+  let checkGroupEnabled = 0;
+  let checkConditionEnabled = 0;
+  let invalidConditionCount = 0;
+  let unresolvedValueCount = 0;
+  const methodSet = new Set<string>();
+
+  branch.containers.forEach((container) => {
+    const checks = container?.checks;
+    if (!checks) {
+      return;
+    }
+    checkGroupTotal += checks.groups.length;
+    checks.groups.forEach((group) => {
+      if (!group.enabled) {
+        return;
+      }
+      checkGroupEnabled += 1;
+      group.conditions.forEach((condition) => {
+        if (!condition.enabled) {
+          return;
+        }
+        checkConditionEnabled += 1;
+        methodSet.add(condition.method);
+        if (condition.invalid) {
+          invalidConditionCount += 1;
+        }
+        condition.args.forEach((arg) => {
+          if (arg.kind === 'value' && !knownValueIds.has(arg.valueId)) {
+            unresolvedValueCount += 1;
+          }
+        });
+      });
+    });
+  });
+
+  let filterGroupEnabled = 0;
+  let filterConditionEnabled = 0;
+  if (branch.filters?.enabled) {
+    branch.filters.groups.forEach((group) => {
+      if (!group.enabled) {
+        return;
+      }
+      filterGroupEnabled += 1;
+      group.conditions.forEach((condition) => {
+        if (condition.enabled) {
+          filterConditionEnabled += 1;
+        }
+      });
+    });
+  }
+
+  const methods = Array.from(methodSet.values()).slice(0, 6).join(',') || '-';
+  return {
+    label,
+    enabledConditionCount: checkConditionEnabled,
+    unresolvedValueCount,
+    invalidConditionCount,
+    line: `配置-${label}: 分支启用=${branch.enabled ? '是' : '否'} 条件组(启用/总)=${checkGroupEnabled}/${checkGroupTotal} 条件数=${checkConditionEnabled} 无效条件=${invalidConditionCount} 未解析值=${unresolvedValueCount} 筛选组=${filterGroupEnabled} 筛选条件=${filterConditionEnabled} 方法=${methods}`,
+  };
+};
 
 const normalizeText = (value?: string) => (value || '').trim();
 const normalizeUpper = (value?: string) => normalizeText(value).toUpperCase();
@@ -300,6 +596,88 @@ type BuiltSeriesResult = {
   warnings: string[];
 };
 
+// 本地运行缓存：用于高频编辑场景下复用中间结果，减少重复 TALib 计算与运行时编译。
+const INDICATOR_SERIES_CACHE_LIMIT = 10;
+const RUNTIME_BUNDLE_CACHE_LIMIT = 12;
+const indicatorSeriesCache = new Map<string, BuiltSeriesResult>();
+const runtimeBundleCache = new Map<string, RuntimeBundle>();
+
+const setLimitedCache = <T,>(cache: Map<string, T>, key: string, value: T, limit: number) => {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, value);
+  while (cache.size > limit) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== 'string') {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
+};
+
+const buildBarsSignature = (bars: KLineData[]) => {
+  if (bars.length === 0) {
+    return 'bars:0';
+  }
+  const first = toTimestamp(bars[0]);
+  const last = toTimestamp(bars[bars.length - 1]);
+  return `bars:${bars.length}:${first}:${last}`;
+};
+
+const buildIndicatorsSignature = (selectedIndicators: GeneratedIndicatorPayload[]) => {
+  const parts = selectedIndicators.map((indicator) => {
+    const config = indicator.config || {};
+    const indicatorCodeText = normalizeText(String((config as { indicator?: unknown }).indicator || indicator.code || ''));
+    const inputText = normalizeText(String((config as { input?: unknown }).input || ''));
+    const paramsText = Array.isArray((config as { params?: unknown[] }).params)
+      ? ((config as { params?: unknown[] }).params || []).map((item) => normalizeText(String(item))).join(',')
+      : '';
+    const outputsText = Array.isArray(indicator.outputs)
+      ? indicator.outputs.map((output) => normalizeText(output.key)).join(',')
+      : '';
+    return `${indicator.id}|${indicatorCodeText}|${inputText}|${paramsText}|${outputsText}`;
+  });
+  return parts.join('||');
+};
+
+const buildRuntimeSignature = (
+  logicContainers: ConditionContainer[],
+  filterContainers: ConditionContainer[],
+  methodOptions: MethodOption[],
+) => {
+  const serializeCondition = (condition: ConditionItem) => ([
+    condition.id,
+    condition.enabled ? 1 : 0,
+    condition.required ? 1 : 0,
+    normalizeText(condition.method),
+    normalizeText(condition.leftValueId),
+    condition.rightValueType,
+    normalizeText(condition.rightValueId),
+    normalizeText(condition.rightNumber),
+    condition.extraValueType,
+    normalizeText(condition.extraValueId),
+    normalizeText(condition.extraNumber),
+    (condition.paramValues || []).map((value) => normalizeText(value)).join(','),
+  ].join(':'));
+
+  const serializeContainer = (container: ConditionContainer) => {
+    const groupText = container.groups.map((group) => {
+      const conditionText = group.conditions.map((condition) => serializeCondition(condition)).join('~');
+      return `${group.id}:${group.enabled ? 1 : 0}:${group.required ? 1 : 0}:${conditionText}`;
+    }).join('|');
+    return `${container.id}:${container.enabled ? 1 : 0}:${groupText}`;
+  };
+
+  const logicText = logicContainers.map((container) => serializeContainer(container)).join('#');
+  const filterText = filterContainers.map((container) => serializeContainer(container)).join('#');
+  const methodText = methodOptions.map((method) => {
+    const defaults = (method.params || []).map((param) => normalizeText(param.defaultValue)).join(',');
+    return `${method.value}:${method.argsCount ?? 2}:${defaults}`;
+  }).join('#');
+  return `${logicText}@@${filterText}@@${methodText}`;
+};
+
 const buildIndicatorSeries = (
   bars: KLineData[],
   selectedIndicators: GeneratedIndicatorPayload[],
@@ -372,6 +750,20 @@ const buildIndicatorSeries = (
   });
 
   return { seriesByValueId, warnings };
+};
+
+const getIndicatorSeriesWithCache = (
+  bars: KLineData[],
+  selectedIndicators: GeneratedIndicatorPayload[],
+): BuiltSeriesResult => {
+  const cacheKey = `${buildBarsSignature(bars)}|${buildIndicatorsSignature(selectedIndicators)}`;
+  const cached = indicatorSeriesCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  const built = buildIndicatorSeries(bars, selectedIndicators);
+  setLimitedCache(indicatorSeriesCache, cacheKey, built, INDICATOR_SERIES_CACHE_LIMIT);
+  return built;
 };
 
 const buildMethodMetaMap = (methodOptions: MethodOption[]) => {
@@ -473,8 +865,9 @@ const buildRuntimeGroup = (
   const conditions = group.conditions.map((item) => buildRuntimeCondition(item, methodMetaMap));
   const enabledConditions = conditions.filter((condition) => condition.enabled);
   const optionalConditions = enabledConditions.filter((condition) => !condition.required);
+  // 空条件组不应阻断分支执行，避免“启用但无条件”导致全量拦截。
   const minPassConditions =
-    enabledConditions.length === 0 ? 1 : optionalConditions.length === 0 ? 0 : 1;
+    enabledConditions.length === 0 ? 0 : optionalConditions.length === 0 ? 0 : 1;
 
   return {
     enabled: group.enabled,
@@ -542,7 +935,7 @@ const buildRuntimeBundle = (
   logicContainers: ConditionContainer[],
   filterContainers: ConditionContainer[],
   methodOptions: MethodOption[],
-) => {
+): RuntimeBundle => {
   const methodMetaMap = buildMethodMetaMap(methodOptions);
   return {
     entryLong: buildBranchRuntime(
@@ -576,6 +969,21 @@ const buildRuntimeBundle = (
       'CloseShort',
     ),
   };
+};
+
+const getRuntimeBundleWithCache = (
+  logicContainers: ConditionContainer[],
+  filterContainers: ConditionContainer[],
+  methodOptions: MethodOption[],
+) => {
+  const cacheKey = buildRuntimeSignature(logicContainers, filterContainers, methodOptions);
+  const cached = runtimeBundleCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  const built = buildRuntimeBundle(logicContainers, filterContainers, methodOptions);
+  setLimitedCache(runtimeBundleCache, cacheKey, built, RUNTIME_BUNDLE_CACHE_LIMIT);
+  return built;
 };
 
 const resolvePeriod = (
@@ -1115,12 +1523,65 @@ const tryMapAction = (action: string): { positionSide: 'Long' | 'Short'; orderSi
   return null;
 };
 
+const pushBacktestEvent = (state: LocalBacktestState, event: LocalBacktestEvent) => {
+  state.events.push(event);
+  const eventType = normalizeText(event.type) || 'Unknown';
+  state.eventTypeCounts[eventType] = (state.eventTypeCounts[eventType] || 0) + 1;
+};
+
+const updateTradeAggregatesOnClose = (
+  aggregates: LocalBacktestTradeAggregates,
+  trade: LocalBacktestTrade,
+  holdingMs: number,
+) => {
+  if (trade.isOpen) {
+    return;
+  }
+
+  const pnl = trade.pnl;
+  aggregates.closedTradeCount += 1;
+  aggregates.sumPnl += pnl;
+  aggregates.totalFee += trade.fee;
+  aggregates.totalHoldingMs += Math.max(0, holdingMs);
+  aggregates.maxProfit = Math.max(aggregates.maxProfit, pnl);
+  aggregates.maxLoss = Math.min(aggregates.maxLoss, pnl);
+
+  if (pnl > 0) {
+    aggregates.winCount += 1;
+    aggregates.sumWinPnl += pnl;
+    aggregates.grossProfit += pnl;
+    aggregates.currentConsecutiveWins += 1;
+    aggregates.currentConsecutiveLosses = 0;
+    if (aggregates.currentConsecutiveWins > aggregates.maxConsecutiveWins) {
+      aggregates.maxConsecutiveWins = aggregates.currentConsecutiveWins;
+    }
+    return;
+  }
+
+  if (pnl < 0) {
+    const absPnl = Math.abs(pnl);
+    aggregates.lossCount += 1;
+    aggregates.sumLossAbsPnl += absPnl;
+    aggregates.grossLossAbs += absPnl;
+    aggregates.currentConsecutiveLosses += 1;
+    aggregates.currentConsecutiveWins = 0;
+    if (aggregates.currentConsecutiveLosses > aggregates.maxConsecutiveLosses) {
+      aggregates.maxConsecutiveLosses = aggregates.currentConsecutiveLosses;
+    }
+    return;
+  }
+
+  aggregates.currentConsecutiveWins = 0;
+  aggregates.currentConsecutiveLosses = 0;
+};
+
 const closePosition = (
   state: LocalBacktestState,
   timing: LocalBacktestTiming,
   execPrice: number,
   feeRate: number,
   reason: string,
+  slippageBps: number,
 ) => {
   if (!state.position) {
     return false;
@@ -1129,19 +1590,29 @@ const closePosition = (
   const exitFee = calculateFee(execPrice, position.qty, feeRate);
   const pnl = calculatePositionPnl(position, execPrice) - position.entryFee - exitFee;
   state.realizedPnl += pnl;
-  state.trades.push({
+  const closedTrade: LocalBacktestTrade = {
     side: position.side,
     entryTime: position.entryTime,
     exitTime: timing.timestamp,
     entryPrice: position.entryPrice,
     exitPrice: execPrice,
+    stopLossPrice: position.stopLossPrice,
+    takeProfitPrice: position.takeProfitPrice,
     qty: position.qty,
     fee: position.entryFee + exitFee,
+    funding: position.fundingAccrued,
     pnl,
     exitReason: reason,
     isOpen: false,
-  });
-  state.events.push({
+    slippageBps,
+  };
+  state.trades.push(closedTrade);
+  updateTradeAggregatesOnClose(
+    state.tradeAggregates,
+    closedTrade,
+    Math.max(0, timing.timestamp - position.entryTime),
+  );
+  pushBacktestEvent(state, {
     timestamp: timing.timestamp,
     type: 'Close',
     message: `平仓 ${position.side} 价格=${execPrice.toFixed(4)} 原因=${reason} 盈亏=${pnl.toFixed(4)}`,
@@ -1155,37 +1626,69 @@ const executeMakeTrade = (
   timing: LocalBacktestTiming,
   action: string,
   risk: LocalBacktestRiskConfig,
-) => {
+) : ExecuteMakeTradeResult => {
+  state.stageCounters.actionMakeTradeCalls += 1;
   const mapped = tryMapAction(action);
   if (!mapped) {
-    return false;
+    state.stageCounters.failUnknownAction += 1;
+    return { success: false, kind: 'none', side: '', reason: 'unknown_action' };
   }
+  if (mapped.isClose) {
+    if (mapped.positionSide === 'Long') {
+      state.stageCounters.closeLongAttempt += 1;
+    } else {
+      state.stageCounters.closeShortAttempt += 1;
+    }
+  } else if (mapped.positionSide === 'Long') {
+    state.stageCounters.openLongAttempt += 1;
+  } else {
+    state.stageCounters.openShortAttempt += 1;
+  }
+
   const closePrice = getClosePrice(timing.bar);
   if (closePrice <= 0) {
-    return false;
+    state.stageCounters.failPriceInvalid += 1;
+    return { success: false, kind: mapped.isClose ? 'close' : 'open', side: mapped.positionSide, reason: 'invalid_price' };
   }
 
   const execPrice = applySlippage(closePrice, mapped.orderSide, risk.slippageBps);
   if (mapped.isClose) {
-    const success = closePosition(state, timing, execPrice, risk.feeRate, 'Signal');
+    if (!state.position) {
+      state.stageCounters.failCloseWithoutPosition += 1;
+      return { success: false, kind: 'close', side: mapped.positionSide, reason: 'close_without_position' };
+    }
+    if (state.position.side !== mapped.positionSide) {
+      state.stageCounters.failCloseSideMismatch += 1;
+      return { success: false, kind: 'close', side: mapped.positionSide, reason: 'close_side_mismatch' };
+    }
+    const success = closePosition(state, timing, execPrice, risk.feeRate, 'Signal', risk.slippageBps);
     if (success) {
       state.signalCount += 1;
+      if (mapped.positionSide === 'Long') {
+        state.stageCounters.closeLongSuccess += 1;
+      } else {
+        state.stageCounters.closeShortSuccess += 1;
+      }
+      return { success: true, kind: 'close', side: mapped.positionSide, reason: 'ok' };
     }
-    return success;
+    return { success: false, kind: 'close', side: mapped.positionSide, reason: 'close_without_position' };
   }
 
   if (state.position) {
     if (state.position.side === mapped.positionSide) {
-      return false;
+      state.stageCounters.failSameSidePosition += 1;
+      return { success: false, kind: 'open', side: mapped.positionSide, reason: 'same_side_position' };
     }
     if (!risk.autoReverse) {
-      return false;
+      state.stageCounters.failNeedAutoReverse += 1;
+      return { success: false, kind: 'open', side: mapped.positionSide, reason: 'need_auto_reverse' };
     }
-    closePosition(state, timing, execPrice, risk.feeRate, 'Reverse');
+    closePosition(state, timing, execPrice, risk.feeRate, 'Reverse', risk.slippageBps);
   }
 
   if (risk.orderQty <= 0) {
-    return false;
+    state.stageCounters.failOrderQtyInvalid += 1;
+    return { success: false, kind: 'open', side: mapped.positionSide, reason: 'invalid_order_qty' };
   }
 
   const entryFee = calculateFee(execPrice, risk.orderQty, risk.feeRate);
@@ -1197,14 +1700,20 @@ const executeMakeTrade = (
     entryFee,
     stopLossPrice: buildStopLossPrice(execPrice, risk.stopLossPct, risk.leverage, mapped.positionSide),
     takeProfitPrice: buildTakeProfitPrice(execPrice, risk.takeProfitPct, risk.leverage, mapped.positionSide),
+    fundingAccrued: 0,
   };
-  state.events.push({
+  pushBacktestEvent(state, {
     timestamp: timing.timestamp,
     type: 'Open',
     message: `开仓 ${mapped.positionSide} 价格=${execPrice.toFixed(4)} 数量=${risk.orderQty}`,
   });
   state.signalCount += 1;
-  return true;
+  if (mapped.positionSide === 'Long') {
+    state.stageCounters.openLongSuccess += 1;
+  } else {
+    state.stageCounters.openShortSuccess += 1;
+  }
+  return { success: true, kind: 'open', side: mapped.positionSide, reason: 'ok' };
 };
 
 const executeActions = (
@@ -1225,7 +1734,8 @@ const executeActions = (
     hasEnabled = true;
     let success = false;
     if (action.method === 'MakeTrade') {
-      success = executeMakeTrade(state, timing, action.params[0] || '', risk);
+      const result = executeMakeTrade(state, timing, action.params[0] || '', risk);
+      success = result.success;
     }
     if (action.required && !success) {
       optionalSuccessCount = -1;
@@ -1261,9 +1771,10 @@ const executeBranch = (
   state: LocalBacktestState,
   timing: LocalBacktestTiming,
   risk: LocalBacktestRiskConfig,
+  branchTag: 'entry_long' | 'entry_short' | 'exit_long' | 'exit_short',
 ) => {
   if (!branch.enabled) {
-    return;
+    return false;
   }
   let passCount = 0;
   branch.containers.forEach((container) => {
@@ -1274,9 +1785,19 @@ const executeBranch = (
     }
   });
   if (passCount < branch.minPassConditionContainer) {
-    return;
+    return false;
+  }
+  if (branchTag === 'entry_long') {
+    state.stageCounters.entryLongBranchPass += 1;
+  } else if (branchTag === 'entry_short') {
+    state.stageCounters.entryShortBranchPass += 1;
+  } else if (branchTag === 'exit_long') {
+    state.stageCounters.exitLongBranchPass += 1;
+  } else {
+    state.stageCounters.exitShortBranchPass += 1;
   }
   executeActions(branch.onPass, state, timing, risk);
+  return true;
 };
 
 const processRisk = (
@@ -1298,7 +1819,52 @@ const processRisk = (
   const reason = takeProfitHit ? 'TakeProfit' : 'StopLoss';
   const orderSide = state.position.side === 'Long' ? 'sell' : 'buy';
   const execPrice = applySlippage(close, orderSide, risk.slippageBps);
-  closePosition(state, timing, execPrice, risk.feeRate, reason);
+  const closed = closePosition(state, timing, execPrice, risk.feeRate, reason, risk.slippageBps);
+  if (!closed) {
+    return;
+  }
+  if (takeProfitHit) {
+    state.stageCounters.riskCloseTakeProfit += 1;
+  } else {
+    state.stageCounters.riskCloseStopLoss += 1;
+  }
+};
+
+const applyFundingRate = (
+  state: LocalBacktestState,
+  timing: LocalBacktestTiming,
+  risk: LocalBacktestRiskConfig,
+  timeframeMs: number,
+) => {
+  if (!state.position || risk.fundingRate === 0 || timeframeMs <= 0) {
+    return;
+  }
+
+  const close = getClosePrice(timing.bar);
+  if (close <= 0) {
+    return;
+  }
+
+  // 与后端一致：按 8 小时结算周期，按当前 K 线时长比例分摊资金费率。
+  const ratio = timeframeMs / FUNDING_INTERVAL_MS;
+  if (ratio <= 0) {
+    return;
+  }
+  const notional = close * state.position.qty;
+  const funding = notional * risk.fundingRate * ratio;
+  if (funding === 0) {
+    return;
+  }
+
+  if (state.position.side === 'Long') {
+    state.position.fundingAccrued += funding;
+    state.accumulatedFunding += funding;
+    state.realizedPnl -= funding;
+  } else {
+    state.position.fundingAccrued -= funding;
+    state.accumulatedFunding -= funding;
+    state.realizedPnl += funding;
+  }
 };
 
 const updateMetrics = (
@@ -1306,7 +1872,9 @@ const updateMetrics = (
   state: LocalBacktestState,
   bar: KLineData,
   initialCapital: number,
+  timeframeMs: number,
 ) => {
+  const timestamp = toTimestamp(bar);
   let unrealized = 0;
   if (state.position) {
     const close = getClosePrice(bar);
@@ -1314,16 +1882,94 @@ const updateMetrics = (
       unrealized = calculatePositionPnl(state.position, close);
     }
   }
+
   const equity = initialCapital + state.realizedPnl + unrealized;
-  if (metrics.peakEquity < 0 || equity > metrics.peakEquity) {
-    metrics.peakEquity = equity;
+  const hasLastEquity = Number.isFinite(metrics.lastEquity);
+  const periodPnl = hasLastEquity ? equity - metrics.lastEquity : 0;
+
+  if (metrics.firstTimestamp <= 0 && timestamp > 0) {
+    metrics.firstTimestamp = timestamp;
   }
+  if (timestamp > 0) {
+    metrics.lastTimestamp = timestamp;
+  }
+
+  if (metrics.peakEquity < 0 || equity >= metrics.peakEquity) {
+    metrics.peakEquity = equity;
+    metrics.peakEquityAt = timestamp;
+    metrics.drawdownStartAt = 0;
+  }
+
+  let drawdown = 0;
   if (metrics.peakEquity > 0) {
-    const drawdown = (metrics.peakEquity - equity) / metrics.peakEquity;
+    drawdown = (metrics.peakEquity - equity) / metrics.peakEquity;
     if (drawdown > metrics.maxDrawdown) {
       metrics.maxDrawdown = drawdown;
     }
+    if (drawdown > EPS_ZERO) {
+      if (metrics.drawdownStartAt <= 0) {
+        metrics.drawdownStartAt = metrics.peakEquityAt > 0 ? metrics.peakEquityAt : timestamp;
+      }
+      const drawdownDurationMs = timestamp > metrics.drawdownStartAt
+        ? timestamp - metrics.drawdownStartAt
+        : 0;
+      if (drawdownDurationMs > metrics.maxDrawdownDurationMs) {
+        metrics.maxDrawdownDurationMs = drawdownDurationMs;
+      }
+    } else {
+      metrics.drawdownStartAt = 0;
+    }
   }
+
+  if (metrics.maxEquity < 0 || equity > metrics.maxEquity) {
+    metrics.maxEquity = equity;
+    metrics.maxEquityAt = timestamp;
+  }
+  if (metrics.minEquity < 0 || equity < metrics.minEquity) {
+    metrics.minEquity = equity;
+    metrics.minEquityAt = timestamp;
+  }
+
+  if (hasLastEquity) {
+    if (periodPnl > metrics.maxPeriodProfit) {
+      metrics.maxPeriodProfit = periodPnl;
+      metrics.maxPeriodProfitAt = timestamp;
+    }
+    if (periodPnl < metrics.maxPeriodLoss) {
+      metrics.maxPeriodLoss = periodPnl;
+      metrics.maxPeriodLossAt = timestamp;
+    }
+
+    if (Math.abs(metrics.lastEquity) > EPS_ZERO && timeframeMs > 0) {
+      const periodReturn = periodPnl / metrics.lastEquity;
+      if (Number.isFinite(periodReturn)) {
+        metrics.returnCount += 1;
+        metrics.returnSum += periodReturn;
+        metrics.returnSquareSum += periodReturn * periodReturn;
+        if (periodReturn < 0) {
+          metrics.downsideCount += 1;
+          metrics.downsideSquareSum += periodReturn * periodReturn;
+        }
+        metrics.timeframeMsTotal += timeframeMs;
+        metrics.timeframeMsCount += 1;
+      }
+    }
+  }
+
+  metrics.equityPointCount += 1;
+  metrics.equityPreview.push({
+    timestamp,
+    equity,
+    realizedPnl: state.realizedPnl,
+    unrealizedPnl: unrealized,
+    periodPnl,
+    drawdown,
+  });
+  if (metrics.equityPreview.length > MAX_EQUITY_PREVIEW_POINTS + 48) {
+    metrics.equityPreview.splice(0, metrics.equityPreview.length - MAX_EQUITY_PREVIEW_POINTS);
+  }
+
+  metrics.lastEquity = equity;
   metrics.lastUnrealizedPnl = unrealized;
 };
 
@@ -1348,6 +1994,16 @@ export type LocalBacktestSummary = {
   openPositionEntryPrice: number;
   warningCount: number;
   warnings: string[];
+  diagnostics: string[];
+  trades: LocalBacktestTrade[];
+  events: LocalBacktestEvent[];
+  equityPreview: LocalBacktestEquityPoint[];
+  stats: LocalBacktestStats;
+  tradeSummary: LocalBacktestTradeSummary;
+  equitySummary: LocalBacktestEquitySummary;
+  eventSummary: LocalBacktestEventSummary;
+  totalFee: number;
+  totalFunding: number;
   processedAt: number;
 };
 
@@ -1363,9 +2019,12 @@ export type LocalBacktestInput = {
   leverage: number;
   orderQty: number;
   feeRate?: number;
+  fundingRate?: number;
   slippageBps?: number;
   autoReverse?: boolean;
   initialCapital?: number;
+  executionMode?: 'batch_open_close' | 'timeline';
+  useStrategyRuntime?: boolean;
 };
 
 export const buildEmptyBacktestSummary = (
@@ -1392,25 +2051,99 @@ export const buildEmptyBacktestSummary = (
   openPositionEntryPrice: 0,
   warningCount: 0,
   warnings: [],
+  diagnostics: [],
+  trades: [],
+  events: [],
+  equityPreview: [],
+  stats: {
+    totalProfit: 0,
+    totalReturn: 0,
+    maxDrawdown: 0,
+    winRate: 0,
+    tradeCount: 0,
+    avgProfit: 0,
+    profitFactor: 0,
+    avgWin: 0,
+    avgLoss: 0,
+    sharpeRatio: 0,
+    sortinoRatio: 0,
+    annualizedReturn: 0,
+    maxConsecutiveLosses: 0,
+    maxConsecutiveWins: 0,
+    avgHoldingMs: 0,
+    maxDrawdownDurationMs: 0,
+    calmarRatio: 0,
+  },
+  tradeSummary: {
+    totalCount: 0,
+    winCount: 0,
+    lossCount: 0,
+    maxProfit: 0,
+    maxLoss: 0,
+    totalFee: 0,
+    totalFunding: 0,
+    avgPnl: 0,
+    avgHoldingMs: 0,
+  },
+  equitySummary: {
+    pointCount: 0,
+    maxEquity: 0,
+    maxEquityAt: 0,
+    minEquity: 0,
+    minEquityAt: 0,
+    maxPeriodProfit: 0,
+    maxPeriodProfitAt: 0,
+    maxPeriodLoss: 0,
+    maxPeriodLossAt: 0,
+  },
+  eventSummary: {
+    totalCount: 0,
+    firstTimestamp: 0,
+    lastTimestamp: 0,
+    typeCounts: {},
+  },
+  totalFee: 0,
+  totalFunding: 0,
   processedAt: Date.now(),
 });
 
-export const runLocalBacktest = (input: LocalBacktestInput): LocalBacktestSummary => {
+type LocalBacktestRuntimeContext = {
+  bars: KLineData[];
+  warnings: string[];
+  branchConfigDiagnostics: BranchConfigDiagnostic[];
+  executionMode: 'batch_open_close' | 'timeline';
+  useStrategyRuntime: boolean;
+  resolver: LocalBacktestResolver;
+  runtime: ReturnType<typeof buildRuntimeBundle>;
+  cache: Map<string, boolean>;
+  state: LocalBacktestState;
+  risk: LocalBacktestRiskConfig;
+  initialCapital: number;
+  metrics: LocalBacktestMetrics;
+};
+
+type LocalBacktestPrepareResult =
+  | { summary: LocalBacktestSummary; context?: undefined }
+  | { summary?: undefined; context: LocalBacktestRuntimeContext };
+
+const prepareBacktestContext = (input: LocalBacktestInput): LocalBacktestPrepareResult => {
   const validRiskConfig =
     input.takeProfitPct > 0
     && input.stopLossPct > 0
     && input.leverage > 0
     && input.orderQty > 0;
   if (!validRiskConfig) {
-    return buildEmptyBacktestSummary('blocked', '参数未就绪：请填写止盈、止损、杠杆、开仓数量');
+    return {
+      summary: buildEmptyBacktestSummary('blocked', '参数未就绪：请填写止盈、止损、杠杆、开仓数量'),
+    };
   }
 
   const bars = input.bars || [];
   if (bars.length === 0) {
-    return buildEmptyBacktestSummary('waiting_data', '等待 K 线数据');
+    return { summary: buildEmptyBacktestSummary('waiting_data', '等待 K 线数据') };
   }
 
-  const { seriesByValueId, warnings } = buildIndicatorSeries(bars, input.selectedIndicators);
+  const { seriesByValueId, warnings } = getIndicatorSeriesWithCache(bars, input.selectedIndicators);
   const valueOptionMap = new Map<string, ValueOption>();
   input.indicatorOutputGroups.forEach((group) => {
     group.options.forEach((option) => {
@@ -1469,14 +2202,27 @@ export const runLocalBacktest = (input: LocalBacktestInput): LocalBacktestSummar
     },
   };
 
-  const runtime = buildRuntimeBundle(input.logicContainers, input.filterContainers, input.methodOptions);
+  const runtime = getRuntimeBundleWithCache(input.logicContainers, input.filterContainers, input.methodOptions);
+  const knownValueIds = new Set<string>(valueOptionMap.keys());
+  const branchConfigDiagnostics: BranchConfigDiagnostic[] = [
+    collectBranchConfigDiagnostic('开多', runtime.entryLong, knownValueIds),
+    collectBranchConfigDiagnostic('平多', runtime.exitLong, knownValueIds),
+    collectBranchConfigDiagnostic('开空', runtime.entryShort, knownValueIds),
+    collectBranchConfigDiagnostic('平空', runtime.exitShort, knownValueIds),
+  ];
+  const executionMode = input.executionMode === 'timeline' ? 'timeline' : 'batch_open_close';
+  const useStrategyRuntime = input.useStrategyRuntime !== undefined ? Boolean(input.useStrategyRuntime) : true;
   const cache = new Map<string, boolean>();
   const state: LocalBacktestState = {
     position: null,
     realizedPnl: 0,
     trades: [],
     events: [],
+    eventTypeCounts: {},
     signalCount: 0,
+    accumulatedFunding: 0,
+    tradeAggregates: createTradeAggregates(),
+    stageCounters: createStageCounters(bars.length),
   };
   const risk: LocalBacktestRiskConfig = {
     orderQty: input.orderQty,
@@ -1484,6 +2230,7 @@ export const runLocalBacktest = (input: LocalBacktestInput): LocalBacktestSummar
     stopLossPct: input.stopLossPct,
     takeProfitPct: input.takeProfitPct,
     feeRate: input.feeRate ?? DEFAULT_FEE_RATE,
+    fundingRate: input.fundingRate ?? DEFAULT_FUNDING_RATE,
     slippageBps: input.slippageBps !== undefined ? Math.max(0, Math.trunc(input.slippageBps)) : DEFAULT_SLIPPAGE_BPS,
     autoReverse: input.autoReverse ?? false,
   };
@@ -1491,62 +2238,427 @@ export const runLocalBacktest = (input: LocalBacktestInput): LocalBacktestSummar
   const metrics: LocalBacktestMetrics = {
     maxDrawdown: 0,
     peakEquity: -1,
+    peakEquityAt: 0,
+    drawdownStartAt: 0,
+    maxDrawdownDurationMs: 0,
+    maxEquity: -1,
+    maxEquityAt: 0,
+    minEquity: -1,
+    minEquityAt: 0,
+    maxPeriodProfit: Number.NEGATIVE_INFINITY,
+    maxPeriodProfitAt: 0,
+    maxPeriodLoss: Number.POSITIVE_INFINITY,
+    maxPeriodLossAt: 0,
+    equityPointCount: 0,
+    equityPreview: [],
+    firstTimestamp: 0,
+    lastTimestamp: 0,
+    lastEquity: Number.NaN,
+    returnCount: 0,
+    returnSum: 0,
+    returnSquareSum: 0,
+    downsideCount: 0,
+    downsideSquareSum: 0,
+    timeframeMsTotal: 0,
+    timeframeMsCount: 0,
     lastUnrealizedPnl: 0,
   };
 
-  for (let index = 0; index < bars.length; index += 1) {
-    const timing: LocalBacktestTiming = {
-      timestamp: toTimestamp(bars[index]),
-      bar: bars[index],
-    };
-    processRisk(state, timing, risk);
-    // 与后端执行顺序保持一致：先处理风控，再处理平仓分支，最后处理开仓分支。
-    executeBranch(runtime.exitLong, resolver, index, cache, state, timing, risk);
-    executeBranch(runtime.exitShort, resolver, index, cache, state, timing, risk);
+  return {
+    context: {
+      bars,
+      warnings,
+      branchConfigDiagnostics,
+      executionMode,
+      useStrategyRuntime,
+      resolver,
+      runtime,
+      cache,
+      state,
+      risk,
+      initialCapital,
+      metrics,
+    },
+  };
+};
 
-    const passLongEntry = evaluateEntryFilters(runtime.entryLong, resolver, index, cache);
-    const passShortEntry = evaluateEntryFilters(runtime.entryShort, resolver, index, cache);
-    if (passLongEntry) {
-      executeBranch(runtime.entryLong, resolver, index, cache, state, timing, risk);
-    }
-    if (passShortEntry) {
-      executeBranch(runtime.entryShort, resolver, index, cache, state, timing, risk);
-    }
-    updateMetrics(metrics, state, bars[index], initialCapital);
+const processBacktestBar = (context: LocalBacktestRuntimeContext, index: number) => {
+  const { bars, state, risk, resolver, runtime, cache, initialCapital, metrics } = context;
+  const timing: LocalBacktestTiming = {
+    timestamp: toTimestamp(bars[index]),
+    bar: bars[index],
+  };
+  state.stageCounters.barsProcessed += 1;
+  if (getClosePrice(timing.bar) <= 0) {
+    state.stageCounters.barsInvalidPrice += 1;
   }
+  const previousTimestamp = index > 0 ? toTimestamp(bars[index - 1]) : 0;
+  const timeframeMs = previousTimestamp > 0 && timing.timestamp > previousTimestamp
+    ? timing.timestamp - previousTimestamp
+    : 0;
+  applyFundingRate(state, timing, risk, timeframeMs);
+  processRisk(state, timing, risk);
+  // 与后端执行顺序保持一致：先处理风控，再处理平仓分支，最后处理开仓分支。
+  executeBranch(runtime.exitLong, resolver, index, cache, state, timing, risk, 'exit_long');
+  executeBranch(runtime.exitShort, resolver, index, cache, state, timing, risk, 'exit_short');
 
-  const closedTrades = state.trades.filter((trade) => !trade.isOpen);
-  const tradeCount = closedTrades.length;
-  const winCount = closedTrades.filter((trade) => trade.pnl > 0).length;
-  const lossCount = closedTrades.filter((trade) => trade.pnl < 0).length;
-  const totalProfit = closedTrades.reduce((sum, trade) => sum + trade.pnl, 0);
+  const passLongEntry = evaluateEntryFilters(runtime.entryLong, resolver, index, cache);
+  const passShortEntry = evaluateEntryFilters(runtime.entryShort, resolver, index, cache);
+  if (passLongEntry) {
+    state.stageCounters.filterLongPass += 1;
+  } else {
+    state.stageCounters.filterLongBlock += 1;
+  }
+  if (passShortEntry) {
+    state.stageCounters.filterShortPass += 1;
+  } else {
+    state.stageCounters.filterShortBlock += 1;
+  }
+  if (passLongEntry) {
+    executeBranch(runtime.entryLong, resolver, index, cache, state, timing, risk, 'entry_long');
+  }
+  if (passShortEntry) {
+    executeBranch(runtime.entryShort, resolver, index, cache, state, timing, risk, 'entry_short');
+  }
+  updateMetrics(metrics, state, bars[index], initialCapital, timeframeMs);
+};
+
+const buildOpenPositionSnapshot = (
+  state: LocalBacktestState,
+  bars: KLineData[],
+  processedBars: number,
+  risk: LocalBacktestRiskConfig,
+): LocalBacktestTrade | null => {
+  if (!state.position || processedBars <= 0) {
+    return null;
+  }
+  const lastBar = bars[processedBars - 1];
+  const closePrice = getClosePrice(lastBar);
+  const snapshotPrice = closePrice > 0 ? closePrice : state.position.entryPrice;
+  const snapshotPnl = calculatePositionPnl(state.position, snapshotPrice) - state.position.entryFee;
+  return {
+    side: state.position.side,
+    entryTime: state.position.entryTime,
+    exitTime: toTimestamp(lastBar),
+    entryPrice: state.position.entryPrice,
+    exitPrice: snapshotPrice,
+    stopLossPrice: state.position.stopLossPrice,
+    takeProfitPrice: state.position.takeProfitPrice,
+    qty: state.position.qty,
+    fee: state.position.entryFee,
+    funding: state.position.fundingAccrued,
+    pnl: snapshotPnl,
+    exitReason: 'Open',
+    isOpen: true,
+    slippageBps: risk.slippageBps,
+  };
+};
+
+const buildBacktestSummaryFromContext = (
+  context: LocalBacktestRuntimeContext,
+  processedBars: number,
+  done: boolean,
+): LocalBacktestSummary => {
+  const safeProcessedBars = Math.max(0, Math.min(processedBars, context.bars.length));
+  const snapshot = buildOpenPositionSnapshot(context.state, context.bars, safeProcessedBars, context.risk);
+  const trades = snapshot ? [...context.state.trades, snapshot] : [...context.state.trades];
+  const aggregated = context.state.tradeAggregates;
+  const tradeCount = aggregated.closedTradeCount;
+  const winCount = aggregated.winCount;
+  const lossCount = aggregated.lossCount;
+  const totalProfit = context.state.realizedPnl;
   const winRate = tradeCount > 0 ? winCount / tradeCount : 0;
-  const totalReturn = initialCapital > 0 ? totalProfit / initialCapital : 0;
-  const lastEvent = state.events.length > 0 ? state.events[state.events.length - 1].message : '-';
+  const totalReturn = context.initialCapital > 0 ? totalProfit / context.initialCapital : 0;
+  const lastEvent = context.state.events.length > 0
+    ? context.state.events[context.state.events.length - 1].message
+    : '-';
+  const totalFee = aggregated.totalFee;
+  const totalFunding = context.state.accumulatedFunding;
+  const avgProfit = tradeCount > 0 ? aggregated.sumPnl / tradeCount : 0;
+  const avgWin = winCount > 0 ? aggregated.sumWinPnl / winCount : 0;
+  const avgLoss = lossCount > 0 ? -(aggregated.sumLossAbsPnl / lossCount) : 0;
+  const profitFactor = aggregated.grossLossAbs > EPS_ZERO
+    ? aggregated.grossProfit / aggregated.grossLossAbs
+    : (aggregated.grossProfit > EPS_ZERO ? Number.POSITIVE_INFINITY : 0);
+  const avgHoldingMs = tradeCount > 0 ? aggregated.totalHoldingMs / tradeCount : 0;
+  const currentEquity = context.initialCapital + context.state.realizedPnl + context.metrics.lastUnrealizedPnl;
+  const elapsedMs = context.metrics.firstTimestamp > 0 && context.metrics.lastTimestamp > context.metrics.firstTimestamp
+    ? context.metrics.lastTimestamp - context.metrics.firstTimestamp
+    : 0;
+  const annualizedReturn =
+    context.initialCapital > 0
+    && currentEquity > 0
+    && elapsedMs > 0
+    ? Math.pow(currentEquity / context.initialCapital, YEAR_MS / elapsedMs) - 1
+    : 0;
+  const avgTimeframeMs = context.metrics.timeframeMsCount > 0
+    ? context.metrics.timeframeMsTotal / context.metrics.timeframeMsCount
+    : 0;
+  const periodsPerYear = avgTimeframeMs > 0 ? YEAR_MS / avgTimeframeMs : 0;
+  let sharpeRatio = 0;
+  let sortinoRatio = 0;
+  if (context.metrics.returnCount > 1 && periodsPerYear > 0) {
+    const mean = context.metrics.returnSum / context.metrics.returnCount;
+    const variance = Math.max(
+      0,
+      context.metrics.returnSquareSum / context.metrics.returnCount - mean * mean,
+    );
+    const stdDev = Math.sqrt(variance);
+    if (stdDev > EPS_ZERO) {
+      sharpeRatio = (mean / stdDev) * Math.sqrt(periodsPerYear);
+    }
+    if (context.metrics.downsideCount > 0) {
+      const downsideDev = Math.sqrt(context.metrics.downsideSquareSum / context.metrics.downsideCount);
+      if (downsideDev > EPS_ZERO) {
+        sortinoRatio = (mean / downsideDev) * Math.sqrt(periodsPerYear);
+      }
+    }
+  }
+  const calmarRatio = context.metrics.maxDrawdown > EPS_ZERO
+    ? annualizedReturn / context.metrics.maxDrawdown
+    : (annualizedReturn > EPS_ZERO ? Number.POSITIVE_INFINITY : 0);
+  const stats: LocalBacktestStats = {
+    totalProfit,
+    totalReturn,
+    maxDrawdown: context.metrics.maxDrawdown,
+    winRate,
+    tradeCount,
+    avgProfit,
+    profitFactor,
+    avgWin,
+    avgLoss,
+    sharpeRatio,
+    sortinoRatio,
+    annualizedReturn,
+    maxConsecutiveLosses: aggregated.maxConsecutiveLosses,
+    maxConsecutiveWins: aggregated.maxConsecutiveWins,
+    avgHoldingMs,
+    maxDrawdownDurationMs: context.metrics.maxDrawdownDurationMs,
+    calmarRatio,
+  };
+  const tradeSummary: LocalBacktestTradeSummary = {
+    totalCount: tradeCount,
+    winCount,
+    lossCount,
+    maxProfit: Number.isFinite(aggregated.maxProfit) ? aggregated.maxProfit : 0,
+    maxLoss: Number.isFinite(aggregated.maxLoss) ? aggregated.maxLoss : 0,
+    totalFee,
+    totalFunding,
+    avgPnl: avgProfit,
+    avgHoldingMs,
+  };
+  const equitySummary: LocalBacktestEquitySummary = {
+    pointCount: context.metrics.equityPointCount,
+    maxEquity: context.metrics.maxEquity >= 0 ? context.metrics.maxEquity : currentEquity,
+    maxEquityAt: context.metrics.maxEquityAt,
+    minEquity: context.metrics.minEquity >= 0 ? context.metrics.minEquity : currentEquity,
+    minEquityAt: context.metrics.minEquityAt,
+    maxPeriodProfit: Number.isFinite(context.metrics.maxPeriodProfit) ? context.metrics.maxPeriodProfit : 0,
+    maxPeriodProfitAt: context.metrics.maxPeriodProfitAt,
+    maxPeriodLoss: Number.isFinite(context.metrics.maxPeriodLoss) ? context.metrics.maxPeriodLoss : 0,
+    maxPeriodLossAt: context.metrics.maxPeriodLossAt,
+  };
+  const events = [...context.state.events];
+  const eventSummary: LocalBacktestEventSummary = {
+    totalCount: events.length,
+    firstTimestamp: events.length > 0 ? events[0].timestamp : 0,
+    lastTimestamp: events.length > 0 ? events[events.length - 1].timestamp : 0,
+    typeCounts: { ...context.state.eventTypeCounts },
+  };
+  const stage = context.state.stageCounters;
+  const diagnostics = [
+    ...context.branchConfigDiagnostics.map((item) => item.line),
+    `配置-执行: mode=${context.executionMode} runtimeGate=${context.useStrategyRuntime ? 'on' : 'off'}（本地单标的预览）`,
+    `阶段1-数据: 总样本=${stage.barsTotal} 已处理=${stage.barsProcessed} 无效收盘价=${stage.barsInvalidPrice}`,
+    `阶段2-筛选: 开多放行=${stage.filterLongPass} 拦截=${stage.filterLongBlock} | 开空放行=${stage.filterShortPass} 拦截=${stage.filterShortBlock}`,
+    `阶段3-条件命中: 开多分支通过=${stage.entryLongBranchPass} 开空分支通过=${stage.entryShortBranchPass} | 平多分支通过=${stage.exitLongBranchPass} 平空分支通过=${stage.exitShortBranchPass}`,
+    `阶段4-动作执行: MakeTrade调用=${stage.actionMakeTradeCalls} 开多尝试/成功=${stage.openLongAttempt}/${stage.openLongSuccess} 开空尝试/成功=${stage.openShortAttempt}/${stage.openShortSuccess}`,
+    `阶段4-平仓信号: 平多尝试/成功=${stage.closeLongAttempt}/${stage.closeLongSuccess} 平空尝试/成功=${stage.closeShortAttempt}/${stage.closeShortSuccess}`,
+    `阶段4-失败原因: 同向持仓=${stage.failSameSidePosition} 未开自动反向=${stage.failNeedAutoReverse} 无持仓可平=${stage.failCloseWithoutPosition} 平仓方向不匹配=${stage.failCloseSideMismatch} 无效价格=${stage.failPriceInvalid} 无效下单量=${stage.failOrderQtyInvalid}`,
+    `阶段5-风控平仓: 止损触发=${stage.riskCloseStopLoss} 止盈触发=${stage.riskCloseTakeProfit}`,
+    `阶段6-统计: 胜率=${(winRate * 100).toFixed(2)}% 平均盈亏=${avgProfit.toFixed(4)} 盈亏比=${Number.isFinite(profitFactor) ? profitFactor.toFixed(4) : '∞'}`,
+    `阶段7-结果: 信号数=${context.state.signalCount} 平仓笔数=${tradeCount} 持仓中=${snapshot ? 1 : 0} 净收益=${totalProfit.toFixed(4)} 事件数=${events.length}`,
+  ];
+  if (stage.filterLongPass > 0 && stage.entryLongBranchPass === 0) {
+    const longBranch = context.branchConfigDiagnostics.find((item) => item.label === '开多');
+    if (longBranch) {
+      if (longBranch.enabledConditionCount <= 0) {
+        diagnostics.push('结论提示: 开多筛选已放行，但开多条件数为0。请把交叉条件放在“开多条件”容器，而不是仅放在“开多筛选器”。');
+      } else if (longBranch.unresolvedValueCount > 0) {
+        diagnostics.push('结论提示: 开多条件存在未解析值ID。请重新拖拽左右值（EMA/SMA）后再回测。');
+      } else if (longBranch.invalidConditionCount > 0) {
+        diagnostics.push('结论提示: 开多条件存在无效参数。请检查右值类型、参数数值、必填项。');
+      } else {
+        diagnostics.push('结论提示: 开多条件已配置但在当前样本区间未命中。可切换更长时间范围或降低条件约束。');
+      }
+    }
+  }
+  const progressMessage = done
+    ? (context.warnings.length > 0
+      ? `本地回测已执行（${context.warnings.length} 条指标警告）`
+      : '本地回测已执行（与后端一致：执行多空分支）')
+    : `本地回测进行中：已处理 ${safeProcessedBars}/${context.bars.length} 根K线，累计仓位 ${trades.length}。`;
 
   return {
     status: 'running',
-    message: warnings.length > 0
-      ? `本地回测已执行（${warnings.length} 条指标警告）`
-      : '本地回测已执行（与后端一致：执行多空分支）',
+    message: progressMessage,
     branchMode: 'long_short',
-    bars: bars.length,
-    signalCount: state.signalCount,
+    bars: safeProcessedBars,
+    signalCount: context.state.signalCount,
     tradeCount,
     winCount,
     lossCount,
     winRate,
     totalProfit,
     totalReturn,
-    maxDrawdown: metrics.maxDrawdown,
-    realizedPnl: state.realizedPnl,
-    unrealizedPnl: metrics.lastUnrealizedPnl,
+    maxDrawdown: context.metrics.maxDrawdown,
+    realizedPnl: context.state.realizedPnl,
+    unrealizedPnl: context.metrics.lastUnrealizedPnl,
     lastEvent,
-    hasOpenPosition: Boolean(state.position),
-    openPositionSide: state.position?.side || '',
-    openPositionEntryPrice: state.position?.entryPrice || 0,
-    warningCount: warnings.length,
-    warnings,
+    hasOpenPosition: Boolean(context.state.position),
+    openPositionSide: context.state.position?.side || '',
+    openPositionEntryPrice: context.state.position?.entryPrice || 0,
+    warningCount: context.warnings.length,
+    warnings: context.warnings,
+    diagnostics,
+    trades,
+    events,
+    equityPreview: [...context.metrics.equityPreview],
+    stats,
+    tradeSummary,
+    equitySummary,
+    eventSummary,
+    totalFee,
+    totalFunding,
     processedAt: Date.now(),
+  };
+};
+
+export type LocalBacktestRealtimeProgress = {
+  summary: LocalBacktestSummary;
+  processedBars: number;
+  totalBars: number;
+  progress: number;
+  done: boolean;
+  elapsedMs: number;
+};
+
+export type LocalBacktestRealtimeOptions = {
+  chunkSize?: number;
+  tickMs?: number;
+  onProgress?: (progress: LocalBacktestRealtimeProgress) => void;
+};
+
+const logBacktestDiagnostics = (summary: LocalBacktestSummary, scene: string) => {
+  if (typeof console === 'undefined') {
+    return;
+  }
+  const diagnostics = Array.isArray(summary.diagnostics) ? summary.diagnostics : [];
+  if (diagnostics.length <= 0) {
+    return;
+  }
+  console.groupCollapsed(`[本地回测诊断][${scene}] bars=${summary.bars} trades=${summary.tradeCount}`);
+  diagnostics.forEach((line) => console.log(line));
+  if (summary.warningCount > 0) {
+    console.log(`[指标警告] ${summary.warningCount} 条`);
+  }
+  console.groupEnd();
+};
+
+export const runLocalBacktest = (input: LocalBacktestInput): LocalBacktestSummary => {
+  const prepared = prepareBacktestContext(input);
+  if (prepared.summary) {
+    logBacktestDiagnostics(prepared.summary, 'sync');
+    return prepared.summary;
+  }
+  const { context } = prepared;
+  for (let index = 0; index < context.bars.length; index += 1) {
+    processBacktestBar(context, index);
+  }
+  const finalSummary = buildBacktestSummaryFromContext(context, context.bars.length, true);
+  logBacktestDiagnostics(finalSummary, 'sync');
+  return finalSummary;
+};
+
+export const runLocalBacktestRealtime = (
+  input: LocalBacktestInput,
+  options: LocalBacktestRealtimeOptions = {},
+) => {
+  const prepared = prepareBacktestContext(input);
+  const onProgress = options.onProgress;
+  const startedAt = Date.now();
+  const emitFinal = (summary: LocalBacktestSummary) => {
+    logBacktestDiagnostics(summary, 'realtime');
+    onProgress?.({
+      summary,
+      processedBars: summary.bars,
+      totalBars: summary.bars,
+      progress: 1,
+      done: true,
+      elapsedMs: Date.now() - startedAt,
+    });
+  };
+
+  if (prepared.summary) {
+    emitFinal(prepared.summary);
+    return { cancel: () => {} };
+  }
+
+  const { context } = prepared;
+  const totalBars = context.bars.length;
+  const chunkSize = Math.max(50, Math.trunc(options.chunkSize ?? 320));
+  const tickMs = Math.max(0, Math.trunc(options.tickMs ?? 16));
+  let cursor = 0;
+  let disposed = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticsLogged = false;
+
+  const emit = (done: boolean) => {
+    const summary = buildBacktestSummaryFromContext(context, cursor, done);
+    if (done && !diagnosticsLogged) {
+      diagnosticsLogged = true;
+      logBacktestDiagnostics(summary, 'realtime');
+    }
+    onProgress?.({
+      summary,
+      processedBars: cursor,
+      totalBars,
+      progress: totalBars > 0 ? cursor / totalBars : 1,
+      done,
+      elapsedMs: Date.now() - startedAt,
+    });
+  };
+
+  const clearTimer = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const step = () => {
+    if (disposed) {
+      return;
+    }
+    const end = Math.min(totalBars, cursor + chunkSize);
+    while (cursor < end) {
+      processBacktestBar(context, cursor);
+      cursor += 1;
+    }
+    const done = cursor >= totalBars;
+    emit(done);
+    if (!done) {
+      timer = setTimeout(step, tickMs);
+    }
+  };
+
+  emit(false);
+  timer = setTimeout(step, 0);
+
+  return {
+    cancel: () => {
+      disposed = true;
+      clearTimer();
+    },
   };
 };

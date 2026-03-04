@@ -2,6 +2,7 @@ using Aliyun.OSS;
 using Aliyun.OSS.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace ServerTest.Services
 {
@@ -133,6 +134,120 @@ namespace ServerTest.Services
         }
 
         /// <summary>
+        /// 检查对象是否存在。
+        /// </summary>
+        public async Task<bool> ExistsAsync(string objectKey, CancellationToken ct = default)
+        {
+            if (!IsConfigured || string.IsNullOrWhiteSpace(objectKey))
+            {
+                return false;
+            }
+
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                return await Task.Run(() => _client.DoesObjectExist(_bucketName, objectKey), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "检查 OSS 对象存在性失败: {ObjectKey}", objectKey);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 读取文本对象内容。
+        /// </summary>
+        public async Task<OSSReadTextResult> ReadTextAsync(string objectKey, CancellationToken ct = default)
+        {
+            if (!IsConfigured)
+            {
+                return OSSReadTextResult.Fail("OSS 配置不完整");
+            }
+
+            if (string.IsNullOrWhiteSpace(objectKey))
+            {
+                return OSSReadTextResult.Fail("文件路径不能为空");
+            }
+
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!await ExistsAsync(objectKey, ct).ConfigureAwait(false))
+                {
+                    return OSSReadTextResult.NotFound(objectKey);
+                }
+
+                using var result = await Task.Run(() => _client.GetObject(_bucketName, objectKey), ct).ConfigureAwait(false);
+                using var reader = new StreamReader(result.Content, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+                return OSSReadTextResult.Success(objectKey, content);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "读取 OSS 文本对象失败: {ObjectKey}", objectKey);
+                return OSSReadTextResult.Fail($"读取失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 按前缀分页列举对象键。
+        /// </summary>
+        public async Task<OSSListObjectsResult> ListObjectKeysAsync(
+            string prefix,
+            string? marker = null,
+            int maxKeys = 1000,
+            CancellationToken ct = default)
+        {
+            if (!IsConfigured)
+            {
+                return OSSListObjectsResult.Fail("OSS 配置不完整");
+            }
+
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                return OSSListObjectsResult.Fail("前缀不能为空");
+            }
+
+            var normalizedMaxKeys = Math.Clamp(maxKeys, 1, 1000);
+
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                var request = new ListObjectsRequest(_bucketName)
+                {
+                    Prefix = prefix,
+                    Marker = marker,
+                    MaxKeys = normalizedMaxKeys
+                };
+
+                var listing = await Task.Run(() => _client.ListObjects(request), ct).ConfigureAwait(false);
+                var keys = listing.ObjectSummaries
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Key))
+                    .Select(item => item.Key)
+                    .ToList();
+                return OSSListObjectsResult.Success(keys, listing.NextMarker, listing.IsTruncated);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "列举 OSS 对象失败: prefix={Prefix}", prefix);
+                return OSSListObjectsResult.Fail($"列举失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// 生成头像存储路径
         /// </summary>
         /// <param name="uid">用户 ID</param>
@@ -191,6 +306,84 @@ namespace ServerTest.Services
         public static OSSUploadResult Fail(string errorMessage)
         {
             return new OSSUploadResult
+            {
+                IsSuccess = false,
+                ErrorMessage = errorMessage
+            };
+        }
+    }
+
+    /// <summary>
+    /// OSS 文本读取结果。
+    /// </summary>
+    public sealed class OSSReadTextResult
+    {
+        public bool IsSuccess { get; private set; }
+        public bool IsNotFound { get; private set; }
+        public string? ObjectKey { get; private set; }
+        public string? Content { get; private set; }
+        public string? ErrorMessage { get; private set; }
+
+        private OSSReadTextResult() { }
+
+        public static OSSReadTextResult Success(string objectKey, string content)
+        {
+            return new OSSReadTextResult
+            {
+                IsSuccess = true,
+                ObjectKey = objectKey,
+                Content = content ?? string.Empty
+            };
+        }
+
+        public static OSSReadTextResult NotFound(string objectKey)
+        {
+            return new OSSReadTextResult
+            {
+                IsSuccess = false,
+                IsNotFound = true,
+                ObjectKey = objectKey,
+                ErrorMessage = "对象不存在"
+            };
+        }
+
+        public static OSSReadTextResult Fail(string errorMessage)
+        {
+            return new OSSReadTextResult
+            {
+                IsSuccess = false,
+                ErrorMessage = errorMessage
+            };
+        }
+    }
+
+    /// <summary>
+    /// OSS 对象分页查询结果。
+    /// </summary>
+    public sealed class OSSListObjectsResult
+    {
+        public bool IsSuccess { get; private set; }
+        public List<string> ObjectKeys { get; private set; } = new();
+        public string? NextMarker { get; private set; }
+        public bool IsTruncated { get; private set; }
+        public string? ErrorMessage { get; private set; }
+
+        private OSSListObjectsResult() { }
+
+        public static OSSListObjectsResult Success(List<string> objectKeys, string? nextMarker, bool isTruncated)
+        {
+            return new OSSListObjectsResult
+            {
+                IsSuccess = true,
+                ObjectKeys = objectKeys ?? new List<string>(),
+                NextMarker = nextMarker,
+                IsTruncated = isTruncated
+            };
+        }
+
+        public static OSSListObjectsResult Fail(string errorMessage)
+        {
+            return new OSSListObjectsResult
             {
                 IsSuccess = false,
                 ErrorMessage = errorMessage

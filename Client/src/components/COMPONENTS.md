@@ -26,6 +26,7 @@
 - **DiscoverModule**：发现模块入口页，展示市场资讯与快讯列表；支持通过 `focusNewsId` 从首页“新闻精选”跳转到对应新闻项。
 - **HomeModule**：首页模块入口，含近期总结、快捷入口、指标精选、新闻精选等；仓位事件使用 `assets/icons/crypto` 币种图标。近期总结时间窗口切换支持“立即高亮 + 切换中提示 + 失败回退”，避免交互无反馈。
 - **IndicatorGeneratorSelector**：指标生成/选择弹窗，输出指标配置。
+- **KlineOfflineCacheDialog**：本地离线K线缓存弹窗，支持查看服务端离线包、按交易所/币对/周期自定义下载并写入 IndexedDB、按分片删除与清空缓存。
 - **IndicatorModule**：指标模块入口页容器。
 - **MarketChart**：行情图表视图封装；绘图工具栏图标使用 `assets/KLineCharts` 本地 SVG。
 - **MarketModule**：行情模块入口容器。
@@ -39,6 +40,7 @@
 - **StrategyIndicatorPanel**：已选指标列表与新增指标入口。
 - **StrategyModule**：策略创建流程的状态与逻辑编排；支持通过 `initialMenuId` 从其他模块直达指定子页。
 - **StrategyModule.types**：策略相关共享类型定义。
+- **StrategyWorkbench / StrategyWorkbenchKline**：策略工作台与图表组件，新增“本地缓存”入口；K线加载链路为“本地 IndexedDB → 云端离线分片（自动落库）→ 后端历史行情接口”三级回退，仪表盘回测统一消费同一份本地 K 线数据。工作台K线已关闭定时自动刷新，支持左滑触发历史懒加载（优先本地缓存，缺失时回退后端）。仪表盘改为“参数设置/回测预览”双态切换：参数页支持止盈止损、杠杆、开仓量、初始资金、手续费率、资金费率、滑点、自动反向、运行时间门禁、执行模式；预览页改为“左侧实时统计（仓位/胜率/平均盈亏+进度）+右侧实时仓位列表”。回测采用分片执行并持续刷新反馈，参数变更/条件变更/指标变更均会触发重算；列表默认展示最近若干条仓位以保证单屏可视化。
 - **StrategyRecommend / OfficialStrategyList / StrategyMarketList**：统一透传并展示 `pnlSeries30d`、`curveSource`、`isBacktestCurve`，确保官方/市场/推荐三处表现一致。
 - **StrategyTemplateOptions**：策略创建入口选项（自定义/模板/导入）。
 - **TestPage**：测试页容器。
@@ -56,4 +58,4 @@
 ## 全局滚动条样式
 - 可滚动容器统一添加 `ui-scrollable` 类，使用 `index.css` 中定义的全局滚动条样式（4px 宽度、透明轨道、统一拇指颜色与 hover 效果）。
 - 所有带 `overflow-y: auto` 或 `overflow: auto` 的列表、面板、弹窗内容区等，均应添加 `ui-scrollable`，保证全站滚动条视觉一致。
-- 已适配：Dashboard（主内容、左右侧栏）、PlanetModule、StrategyModule/StrategyConfigDialog/StrategyDetailDialog/StrategyHistoryDialog、MarketChart、UserSettings、WhatsOnRoadPanel、HomeModule、ChatModule、CryptoMarketPanel、IndicatorGeneratorSelector、HistoricalDataCacheDialog、Select、Dialog 等。
+- 已适配：Dashboard（主内容、左右侧栏）、PlanetModule、StrategyModule/StrategyConfigDialog/StrategyDetailDialog/StrategyHistoryDialog、MarketChart、UserSettings、WhatsOnRoadPanel、HomeModule、ChatModule、CryptoMarketPanel、IndicatorGeneratorSelector、HistoricalDataCacheDialog、KlineOfflineCacheDialog、Select、Dialog 等。

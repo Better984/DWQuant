@@ -25,8 +25,13 @@ import type {
   TimeframeOption,
   TradeOption,
 } from './StrategyModule.types';
-import { buildEmptyBacktestSummary, runLocalBacktest } from './localBacktestEngine';
+import {
+  buildEmptyBacktestSummary,
+  runLocalBacktestRealtime,
+  type LocalBacktestSummary,
+} from './localBacktestEngine';
 import StrategyWorkbenchKline from './StrategyWorkbenchKline';
+import KlineOfflineCacheDialog from '../dialogs/KlineOfflineCacheDialog';
 import './StrategyWorkbench.css';
 
 type DropSlot = 'left' | 'method' | 'right' | 'extra';
@@ -142,6 +147,44 @@ interface StrategyWorkbenchProps {
   onQuickCreateCondition: (containerId: string, groupId: string | null, method: string) => void;
 }
 
+type DashboardMode = 'settings' | 'preview';
+type BacktestRangeMode = 'latest_30d' | 'custom';
+
+type WorkbenchBacktestParams = {
+  takeProfitPct: number;
+  stopLossPct: number;
+  leverage: number;
+  orderQty: number;
+  initialCapital: number;
+  feeRate: number;
+  fundingRate: number;
+  slippageBps: number;
+  autoReverse: boolean;
+  useStrategyRuntime: boolean;
+  executionMode: 'batch_open_close' | 'timeline';
+  timeRangeMode: BacktestRangeMode;
+  rangeStartMs: number | null;
+  rangeEndMs: number | null;
+};
+
+type WorkbenchBacktestNumberField =
+  | 'takeProfitPct'
+  | 'stopLossPct'
+  | 'leverage'
+  | 'orderQty'
+  | 'initialCapital'
+  | 'feeRate'
+  | 'fundingRate'
+  | 'slippageBps';
+
+type WorkbenchBacktestProgress = {
+  processedBars: number;
+  totalBars: number;
+  progress: number;
+  elapsedMs: number;
+  done: boolean;
+};
+
 const CATEGORY_LABELS: Record<string, string> = {
   compare: '比较类',
   cross: '交叉类',
@@ -204,6 +247,7 @@ const INDICATOR_COLOR_POOL = [
 
 const normalizeText = (value?: string) => (value || '').trim();
 const upperText = (value?: string) => normalizeText(value).toUpperCase();
+const DAY_MS = 86_400_000;
 
 const hashText = (value: string) => {
   let hash = 0;
@@ -230,12 +274,149 @@ const parseNumberOrNull = (raw: string) => {
   return Number.isFinite(value) ? value : null;
 };
 
+const toDateTimeLocalValue = (timestamp: number | null | undefined): string => {
+  if (!Number.isFinite(timestamp) || Number(timestamp) <= 0) {
+    return '';
+  }
+  const date = new Date(Number(timestamp));
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
+};
+
+const parseDateTimeLocalValue = (raw: string): number | null => {
+  const text = normalizeText(raw);
+  if (!text) {
+    return null;
+  }
+  const timestamp = Date.parse(text);
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+const createDefaultBacktestParams = (
+  takeProfitPct: number,
+  stopLossPct: number,
+  leverage: number,
+  orderQty: number,
+): WorkbenchBacktestParams => ({
+  takeProfitPct,
+  stopLossPct,
+  leverage,
+  orderQty,
+  initialCapital: 10000,
+  feeRate: 0.0004,
+  fundingRate: 0,
+  slippageBps: 0,
+  autoReverse: false,
+  useStrategyRuntime: true,
+  executionMode: 'batch_open_close',
+  timeRangeMode: 'latest_30d',
+  rangeStartMs: null,
+  rangeEndMs: null,
+});
+
+const normalizeBacktestParams = (params: WorkbenchBacktestParams): WorkbenchBacktestParams => {
+  const normalizeFinite = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback);
+  return {
+    takeProfitPct: normalizeFinite(params.takeProfitPct, 0),
+    stopLossPct: normalizeFinite(params.stopLossPct, 0),
+    leverage: Math.max(1, Math.trunc(normalizeFinite(params.leverage, 1))),
+    orderQty: Math.max(0, normalizeFinite(params.orderQty, 0)),
+    initialCapital: Math.max(0, normalizeFinite(params.initialCapital, 0)),
+    feeRate: Math.max(0, normalizeFinite(params.feeRate, 0)),
+    fundingRate: normalizeFinite(params.fundingRate, 0),
+    slippageBps: Math.max(0, Math.trunc(normalizeFinite(params.slippageBps, 0))),
+    autoReverse: Boolean(params.autoReverse),
+    useStrategyRuntime: Boolean(params.useStrategyRuntime),
+    executionMode: params.executionMode === 'timeline' ? 'timeline' : 'batch_open_close',
+    timeRangeMode: params.timeRangeMode === 'custom' ? 'custom' : 'latest_30d',
+    rangeStartMs: Number.isFinite(params.rangeStartMs) ? Number(params.rangeStartMs) : null,
+    rangeEndMs: Number.isFinite(params.rangeEndMs) ? Number(params.rangeEndMs) : null,
+  };
+};
+
+const isSameBacktestParams = (a: WorkbenchBacktestParams, b: WorkbenchBacktestParams) => {
+  return a.takeProfitPct === b.takeProfitPct
+    && a.stopLossPct === b.stopLossPct
+    && a.leverage === b.leverage
+    && a.orderQty === b.orderQty
+    && a.initialCapital === b.initialCapital
+    && a.feeRate === b.feeRate
+    && a.fundingRate === b.fundingRate
+    && a.slippageBps === b.slippageBps
+    && a.autoReverse === b.autoReverse
+    && a.useStrategyRuntime === b.useStrategyRuntime
+    && a.executionMode === b.executionMode
+    && a.timeRangeMode === b.timeRangeMode
+    && a.rangeStartMs === b.rangeStartMs
+    && a.rangeEndMs === b.rangeEndMs;
+};
+
+const validateBacktestParams = (params: WorkbenchBacktestParams): string | null => {
+  if (!Number.isFinite(params.takeProfitPct) || params.takeProfitPct <= 0) {
+    return '止盈比例必须大于 0';
+  }
+  if (!Number.isFinite(params.stopLossPct) || params.stopLossPct <= 0) {
+    return '止损比例必须大于 0';
+  }
+  if (!Number.isFinite(params.leverage) || params.leverage < 1) {
+    return '杠杆必须大于等于 1';
+  }
+  if (!Number.isFinite(params.orderQty) || params.orderQty <= 0) {
+    return '单次开仓数量必须大于 0';
+  }
+  if (!Number.isFinite(params.initialCapital) || params.initialCapital < 0) {
+    return '初始资金不能小于 0';
+  }
+  if (!Number.isFinite(params.feeRate) || params.feeRate < 0) {
+    return '手续费率不能小于 0';
+  }
+  if (!Number.isFinite(params.fundingRate)) {
+    return '资金费率必须是有效数字';
+  }
+  if (!Number.isFinite(params.slippageBps) || params.slippageBps < 0) {
+    return '滑点 Bps 不能小于 0';
+  }
+  if (params.executionMode !== 'batch_open_close' && params.executionMode !== 'timeline') {
+    return '执行模式不合法';
+  }
+  if (params.timeRangeMode === 'custom') {
+    if (!Number.isFinite(params.rangeStartMs) || !Number.isFinite(params.rangeEndMs)) {
+      return '自定义时间范围必须填写开始和结束时间';
+    }
+    if (Number(params.rangeEndMs) <= Number(params.rangeStartMs)) {
+      return '结束时间必须晚于开始时间';
+    }
+  }
+  return null;
+};
+
 const formatSignedNumber = (value: number, digits = 4) => {
   if (!Number.isFinite(value)) {
+    if (value === Number.POSITIVE_INFINITY) {
+      return '+∞';
+    }
+    if (value === Number.NEGATIVE_INFINITY) {
+      return '-∞';
+    }
     return '-';
   }
   if (value > 0) {
     return `+${value.toFixed(digits)}`;
+  }
+  return value.toFixed(digits);
+};
+
+const formatNumberValue = (value: number, digits = 4) => {
+  if (!Number.isFinite(value)) {
+    if (value === Number.POSITIVE_INFINITY) {
+      return '∞';
+    }
+    if (value === Number.NEGATIVE_INFINITY) {
+      return '-∞';
+    }
+    return '-';
   }
   return value.toFixed(digits);
 };
@@ -330,10 +511,21 @@ const parseConditionCreateDropId = (rawId: string) => {
   return null;
 };
 
-const formatClock = (timestamp: number) => {
-  const date = new Date(timestamp);
-  const pad2 = (value: number) => value.toString().padStart(2, '0');
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+const formatDateTime = (timestamp: number) => {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return '-';
+  }
+  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+};
+
+const formatDuration = (durationMs: number) => {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    return '0s';
+  }
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 };
 
 const extractClientPoint = (event: Event | null | undefined) => {
@@ -490,8 +682,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [conditionSide, setConditionSide] = useState<'long' | 'short'>('long');
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
   const [expandedConditionKey, setExpandedConditionKey] = useState<string | null>(null);
-  const [dashboardClock, setDashboardClock] = useState(Date.now());
-  const [realtimeTicks, setRealtimeTicks] = useState(0);
   const [klineBars, setKlineBars] = useState<KLineData[]>([]);
   const [talibReady, setTalibReady] = useState(false);
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
@@ -499,7 +689,38 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [focusRightNumberKey, setFocusRightNumberKey] = useState('');
   const [focusExtraNumberKey, setFocusExtraNumberKey] = useState('');
   const [activeHoverValueId, setActiveHoverValueId] = useState('');
+  const [showOfflineCacheDialog, setShowOfflineCacheDialog] = useState(false);
+  const [dashboardMode, setDashboardMode] = useState<DashboardMode>('preview');
+  const [backtestFormParams, setBacktestFormParams] = useState<WorkbenchBacktestParams>(() =>
+    createDefaultBacktestParams(takeProfitPct, stopLossPct, leverage, orderQty),
+  );
+  const [appliedBacktestParams, setAppliedBacktestParams] = useState<WorkbenchBacktestParams>(() =>
+    normalizeBacktestParams(createDefaultBacktestParams(takeProfitPct, stopLossPct, leverage, orderQty)),
+  );
+  const [backtestParamError, setBacktestParamError] = useState('');
+  const [localBacktestSummary, setLocalBacktestSummary] = useState<LocalBacktestSummary>(() =>
+    buildEmptyBacktestSummary('waiting_data', '等待开始创建'),
+  );
+  const [backtestProgress, setBacktestProgress] = useState<WorkbenchBacktestProgress>({
+    processedBars: 0,
+    totalBars: 0,
+    progress: 0,
+    elapsedMs: 0,
+    done: false,
+  });
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const availableDataRange = useMemo(() => {
+    if (klineBars.length <= 0) {
+      return { start: 0, end: 0 };
+    }
+    const start = Number(klineBars[0]?.timestamp ?? 0);
+    const end = Number(klineBars[klineBars.length - 1]?.timestamp ?? 0);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= 0) {
+      return { start: 0, end: 0 };
+    }
+    return { start, end };
+  }, [klineBars]);
 
   const exchangeLabel = useMemo(() => {
     return exchangeOptions.find((item) => item.value === selectedExchange)?.label || selectedExchange;
@@ -667,12 +888,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return map;
   }, [indicatorLabelSpecMap, indicatorOutputGroups]);
 
-  const indicatorOutputCount = useMemo(() => {
-    return indicatorOutputGroups
-      .filter((group) => group.id !== 'kline-fields')
-      .reduce((sum, group) => sum + group.options.length, 0);
-  }, [indicatorOutputGroups]);
-
   const outputBadgeStyleMap = useMemo(() => {
     const map = new Map<string, React.CSSProperties>();
     indicatorOutputGroups.forEach((group) => {
@@ -733,47 +948,216 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return normalized === activeHoverValueId;
   };
 
-  const conditionCount = useMemo(() => {
-    return [...logicContainers, ...filterContainers].reduce((sum, container) => {
-      return sum + container.groups.reduce((groupSum, group) => groupSum + group.conditions.length, 0);
-    }, 0);
-  }, [logicContainers, filterContainers]);
-
-  const validRiskConfig =
-    takeProfitPct > 0 && stopLossPct > 0 && leverage > 0 && orderQty > 0;
-
-  const localBacktestSummary = useMemo(() => {
-    if (!ready) {
-      return buildEmptyBacktestSummary('waiting_data', '等待开始创建');
-    }
-    if (!talibReady && selectedIndicators.length > 0) {
-      return buildEmptyBacktestSummary('waiting_data', '指标计算内核初始化中');
-    }
-    return runLocalBacktest({
-      bars: klineBars,
-      selectedIndicators,
-      indicatorOutputGroups,
-      logicContainers,
-      filterContainers,
-      methodOptions,
+  useEffect(() => {
+    setBacktestFormParams((prev) => ({
+      ...prev,
       takeProfitPct,
       stopLossPct,
       leverage,
       orderQty,
+    }));
+    setAppliedBacktestParams((prev) => {
+      const next = normalizeBacktestParams({
+        ...prev,
+        takeProfitPct,
+        stopLossPct,
+        leverage,
+        orderQty,
+      });
+      return isSameBacktestParams(prev, next) ? prev : next;
     });
+  }, [takeProfitPct, stopLossPct, leverage, orderQty]);
+
+  const updateBacktestNumberField = (field: WorkbenchBacktestNumberField, raw: string) => {
+    const next = parseNumberOrNull(raw);
+    if (next === null) {
+      return;
+    }
+    setBacktestFormParams((prev) => ({
+      ...prev,
+      [field]: next,
+    }));
+  };
+
+  const updateBacktestTimeRangeMode = (nextMode: BacktestRangeMode) => {
+    setBacktestFormParams((prev) => {
+      if (nextMode === 'custom') {
+        const fallbackEnd = availableDataRange.end > 0 ? availableDataRange.end : Date.now();
+        const fallbackStart = availableDataRange.start > 0
+          ? availableDataRange.start
+          : fallbackEnd - 30 * DAY_MS;
+        return {
+          ...prev,
+          timeRangeMode: 'custom',
+          rangeStartMs: Number.isFinite(prev.rangeStartMs) ? prev.rangeStartMs : fallbackStart,
+          rangeEndMs: Number.isFinite(prev.rangeEndMs) ? prev.rangeEndMs : fallbackEnd,
+        };
+      }
+      return {
+        ...prev,
+        timeRangeMode: 'latest_30d',
+      };
+    });
+  };
+
+  const updateBacktestRangeField = (field: 'rangeStartMs' | 'rangeEndMs', raw: string) => {
+    const parsed = parseDateTimeLocalValue(raw);
+    setBacktestFormParams((prev) => ({
+      ...prev,
+      [field]: parsed,
+    }));
+  };
+
+  const applyBacktestParams = () => {
+    const normalized = normalizeBacktestParams(backtestFormParams);
+    const error = validateBacktestParams(normalized);
+    if (error) {
+      setBacktestParamError(error);
+      return;
+    }
+    setBacktestParamError('');
+    setDashboardMode('preview');
+  };
+
+  useEffect(() => {
+    const normalized = normalizeBacktestParams(backtestFormParams);
+    const error = validateBacktestParams(normalized);
+    if (error) {
+      setBacktestParamError(error);
+      return;
+    }
+    setBacktestParamError('');
+    setAppliedBacktestParams((prev) => (isSameBacktestParams(prev, normalized) ? prev : normalized));
+    // 参数变更后实时同步到上层交易配置，确保“改参数即触发回测”。
+    if (Math.abs(takeProfitPct - normalized.takeProfitPct) > 1e-10) {
+      onTakeProfitPctChange(normalized.takeProfitPct);
+    }
+    if (Math.abs(stopLossPct - normalized.stopLossPct) > 1e-10) {
+      onStopLossPctChange(normalized.stopLossPct);
+    }
+    if (leverage !== normalized.leverage) {
+      onLeverageChange(normalized.leverage);
+    }
+    if (Math.abs(orderQty - normalized.orderQty) > 1e-10) {
+      onOrderQtyChange(normalized.orderQty);
+    }
+  }, [
+    backtestFormParams,
+    takeProfitPct,
+    stopLossPct,
+    leverage,
+    orderQty,
+    onTakeProfitPctChange,
+    onStopLossPctChange,
+    onLeverageChange,
+    onOrderQtyChange,
+  ]);
+
+  const backtestBars = useMemo(() => {
+    if (klineBars.length <= 0) {
+      return [];
+    }
+
+    const latestTimestamp = Number(klineBars[klineBars.length - 1]?.timestamp ?? 0);
+    if (!Number.isFinite(latestTimestamp) || latestTimestamp <= 0) {
+      return klineBars;
+    }
+
+    let startTimestamp = latestTimestamp - 30 * DAY_MS;
+    let endTimestamp = latestTimestamp;
+    if (appliedBacktestParams.timeRangeMode === 'custom') {
+      startTimestamp = Number(appliedBacktestParams.rangeStartMs ?? startTimestamp);
+      endTimestamp = Number(appliedBacktestParams.rangeEndMs ?? endTimestamp);
+    }
+
+    if (!Number.isFinite(startTimestamp) || !Number.isFinite(endTimestamp) || endTimestamp <= startTimestamp) {
+      return [];
+    }
+
+    return klineBars.filter((bar) => {
+      const timestamp = Number(bar.timestamp);
+      return Number.isFinite(timestamp) && timestamp >= startTimestamp && timestamp <= endTimestamp;
+    });
+  }, [
+    klineBars,
+    appliedBacktestParams.timeRangeMode,
+    appliedBacktestParams.rangeStartMs,
+    appliedBacktestParams.rangeEndMs,
+  ]);
+
+  useEffect(() => {
+    if (!ready) {
+      setLocalBacktestSummary(buildEmptyBacktestSummary('waiting_data', '等待开始创建'));
+      setBacktestProgress({
+        processedBars: 0,
+        totalBars: 0,
+        progress: 0,
+        elapsedMs: 0,
+        done: false,
+      });
+      return;
+    }
+    if (!talibReady && selectedIndicators.length > 0) {
+      setLocalBacktestSummary(buildEmptyBacktestSummary('waiting_data', '指标计算内核初始化中'));
+      setBacktestProgress({
+        processedBars: 0,
+        totalBars: 0,
+        progress: 0,
+        elapsedMs: 0,
+        done: false,
+      });
+      return;
+    }
+    let controller: ReturnType<typeof runLocalBacktestRealtime> | null = null;
+    // 高频编辑场景下做轻量防抖，避免每次按键都触发完整重算。
+    const debounceTimer = window.setTimeout(() => {
+      controller = runLocalBacktestRealtime({
+        bars: backtestBars,
+        selectedIndicators,
+        indicatorOutputGroups,
+        logicContainers,
+        filterContainers,
+        methodOptions,
+        takeProfitPct: appliedBacktestParams.takeProfitPct,
+        stopLossPct: appliedBacktestParams.stopLossPct,
+        leverage: appliedBacktestParams.leverage,
+        orderQty: appliedBacktestParams.orderQty,
+        initialCapital: appliedBacktestParams.initialCapital,
+        feeRate: appliedBacktestParams.feeRate,
+        fundingRate: appliedBacktestParams.fundingRate,
+        slippageBps: appliedBacktestParams.slippageBps,
+        autoReverse: appliedBacktestParams.autoReverse,
+        executionMode: appliedBacktestParams.executionMode,
+        useStrategyRuntime: appliedBacktestParams.useStrategyRuntime,
+      }, {
+        chunkSize: 320,
+        tickMs: 16,
+        onProgress: (progressInfo) => {
+          setLocalBacktestSummary(progressInfo.summary);
+          setBacktestProgress({
+            processedBars: progressInfo.processedBars,
+            totalBars: progressInfo.totalBars,
+            progress: progressInfo.progress,
+            elapsedMs: progressInfo.elapsedMs,
+            done: progressInfo.done,
+          });
+        },
+      });
+    }, 80);
+    return () => {
+      window.clearTimeout(debounceTimer);
+      controller?.cancel();
+    };
   }, [
     ready,
     talibReady,
-    klineBars,
+    backtestBars,
     selectedIndicators,
     indicatorOutputGroups,
     logicContainers,
     filterContainers,
     methodOptions,
-    takeProfitPct,
-    stopLossPct,
-    leverage,
-    orderQty,
+    appliedBacktestParams,
   ]);
 
   useEffect(() => {
@@ -793,25 +1177,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       disposed = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!ready) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setDashboardClock(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [ready]);
-
-  useEffect(() => {
-    if (!ready || !validRiskConfig || klineBars.length === 0) {
-      return;
-    }
-    setRealtimeTicks((prev) => prev + 1);
-  }, [klineBars, ready, validRiskConfig]);
 
   useEffect(() => {
     if (!activeDrag) {
@@ -1582,31 +1947,103 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return ids.map((id) => allContainers.get(id)).filter(Boolean) as ConditionContainer[];
   }, [conditionSide, allContainers]);
 
-  const metricRows = [
-    { label: '本地时钟', value: formatClock(dashboardClock) },
-    { label: '回测状态', value: localBacktestSummary.message },
-    { label: 'K线数量', value: localBacktestSummary.bars.toString() },
-    { label: '已选指标', value: selectedIndicators.length.toString() },
-    { label: '指标输出', value: indicatorOutputCount.toString() },
-    { label: '条件总数', value: conditionCount.toString() },
-    { label: '信号次数', value: localBacktestSummary.signalCount.toString() },
-    { label: '成交笔数', value: localBacktestSummary.tradeCount.toString() },
-    { label: '胜率', value: formatPercentValue(localBacktestSummary.winRate) },
-    { label: '累计收益', value: formatSignedNumber(localBacktestSummary.totalProfit) },
-    { label: '收益率', value: formatPercentValue(localBacktestSummary.totalReturn) },
-    { label: '最大回撤', value: formatPercentValue(localBacktestSummary.maxDrawdown) },
-    { label: '浮动盈亏', value: formatSignedNumber(localBacktestSummary.unrealizedPnl) },
-    { label: '当前仓位', value: localBacktestSummary.hasOpenPosition ? localBacktestSummary.openPositionSide : '无仓位' },
-    { label: '最新事件', value: localBacktestSummary.lastEvent },
-    { label: '止盈%', value: takeProfitPct.toFixed(2) },
-    { label: '止损%', value: stopLossPct.toFixed(2) },
-    { label: '杠杆', value: leverage.toString() },
-    { label: '开仓量', value: orderQty.toString() },
-    { label: '实时检测Tick', value: realtimeTicks.toString() },
-    { label: '模式', value: localBacktestSummary.branchMode === 'long_short' ? '多空分支对齐后端' : '-' },
-    { label: '交易所', value: exchangeLabel },
-    { label: '周期', value: timeframeLabel },
-  ];
+  const previewTrades = useMemo(() => {
+    return [...localBacktestSummary.trades].sort((a, b) => {
+      if (a.entryTime !== b.entryTime) {
+        return b.entryTime - a.entryTime;
+      }
+      return b.exitTime - a.exitTime;
+    });
+  }, [localBacktestSummary.trades]);
+
+  const closedPreviewTrades = useMemo(() => {
+    return previewTrades.filter((trade) => !trade.isOpen);
+  }, [previewTrades]);
+
+  const averageClosedPnl = useMemo(() => {
+    if (closedPreviewTrades.length === 0) {
+      return 0;
+    }
+    return closedPreviewTrades.reduce((sum, trade) => sum + trade.pnl, 0) / closedPreviewTrades.length;
+  }, [closedPreviewTrades]);
+
+  const progressPercent = Math.max(0, Math.min(100, Math.round(backtestProgress.progress * 100)));
+  const isBacktestRunning =
+    localBacktestSummary.status === 'running'
+    && backtestProgress.totalBars > 0
+    && !backtestProgress.done;
+  const detectedTimestamp = useMemo(() => {
+    if (backtestProgress.processedBars <= 0 || backtestBars.length === 0) {
+      return 0;
+    }
+    const index = Math.min(backtestProgress.processedBars - 1, backtestBars.length - 1);
+    return Number(backtestBars[index]?.timestamp ?? 0);
+  }, [backtestBars, backtestProgress.processedBars]);
+  const detectedTimeText = detectedTimestamp > 0 ? formatDateTime(detectedTimestamp) : '-';
+  const loadedDataDays = useMemo(() => {
+    if (backtestBars.length < 2) {
+      return 0;
+    }
+    const first = Number(backtestBars[0]?.timestamp ?? 0);
+    const last = Number(backtestBars[backtestBars.length - 1]?.timestamp ?? 0);
+    if (!Number.isFinite(first) || !Number.isFinite(last) || last <= first) {
+      return 0;
+    }
+    return (last - first) / DAY_MS;
+  }, [backtestBars]);
+  const activeRangeText = useMemo(() => {
+    if (backtestBars.length <= 0) {
+      return '暂无样本';
+    }
+    const first = Number(backtestBars[0]?.timestamp ?? 0);
+    const last = Number(backtestBars[backtestBars.length - 1]?.timestamp ?? 0);
+    if (!Number.isFinite(first) || !Number.isFinite(last) || first <= 0 || last <= 0) {
+      return '暂无样本';
+    }
+    return `${formatDateTime(first)} ~ ${formatDateTime(last)}`;
+  }, [backtestBars]);
+  const availableRangeText = useMemo(() => {
+    if (availableDataRange.start <= 0 || availableDataRange.end <= 0) {
+      return '暂无本地K线样本';
+    }
+    return `${formatDateTime(availableDataRange.start)} ~ ${formatDateTime(availableDataRange.end)}`;
+  }, [availableDataRange.end, availableDataRange.start]);
+  const headerRunText = isBacktestRunning
+    ? `运行中 ${progressPercent}%`
+    : localBacktestSummary.status === 'running'
+      ? '已完成'
+      : localBacktestSummary.status === 'waiting_data'
+        ? '等待数据'
+        : '未开始';
+  const MAX_VISIBLE_TRADES = 6;
+  const visiblePreviewTrades = previewTrades.slice(0, MAX_VISIBLE_TRADES);
+  const foldedTradeCount = Math.max(0, previewTrades.length - visiblePreviewTrades.length);
+  const livePositionCount = previewTrades.length;
+  const liveWinRate = localBacktestSummary.winRate;
+  const liveAveragePnl = averageClosedPnl;
+  const backtestStats = localBacktestSummary.stats;
+  const tradeSummary = localBacktestSummary.tradeSummary;
+  const equitySummary = localBacktestSummary.equitySummary;
+  const eventSummary = localBacktestSummary.eventSummary;
+  const recentEvents = useMemo(
+    () => [...(localBacktestSummary.events || [])].slice(-8).reverse(),
+    [localBacktestSummary.events],
+  );
+  const topEventTypesText = useMemo(() => {
+    const entries = Object.entries(eventSummary.typeCounts || {});
+    if (entries.length <= 0) {
+      return '-';
+    }
+    return entries
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([key, count]) => `${key}:${count}`)
+      .join(' / ');
+  }, [eventSummary.typeCounts]);
+  const visibleDiagnostics = useMemo(
+    () => (Array.isArray(localBacktestSummary.diagnostics) ? localBacktestSummary.diagnostics : []).slice(0, 14),
+    [localBacktestSummary.diagnostics],
+  );
 
   if (typeof document === 'undefined') {
     return null;
@@ -1627,18 +2064,36 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             返回
           </button>
           <div className="strategy-workbench-title-wrap">
-            <div className="strategy-workbench-title">策略指标工作台</div>
+            <div className="strategy-workbench-title">
+              策略指标工作台
+              <span className={`strategy-workbench-run-state ${isBacktestRunning ? 'is-running' : ''}`}>
+                {headerRunText}
+              </span>
+            </div>
             <div className="strategy-workbench-subtitle">
               {exchangeLabel} · {symbolLabel} · {timeframeLabel}
+              {' · '}
+              检测至 {detectedTimeText}
+              {' · '}
+              样本约 {loadedDataDays.toFixed(1)} 天（{backtestBars.length} 根）
             </div>
           </div>
-          <button
-            type="button"
-            className="strategy-workbench-topbar-button is-primary"
-            onClick={onOpenExport}
-          >
-            导出
-          </button>
+          <div className="strategy-workbench-topbar-actions">
+            <button
+              type="button"
+              className="strategy-workbench-topbar-button"
+              onClick={() => setShowOfflineCacheDialog(true)}
+            >
+              本地缓存
+            </button>
+            <button
+              type="button"
+              className="strategy-workbench-topbar-button is-primary"
+              onClick={onOpenExport}
+            >
+              导出
+            </button>
+          </div>
         </div>
 
         {!ready ? (
@@ -1722,7 +2177,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                     symbol={selectedSymbol}
                     timeframeSec={selectedTimeframeSec}
                     selectedIndicators={selectedIndicators}
-                    enableRealtime={validRiskConfig}
                     hoverValueId={activeHoverValueId}
                     hoverHasReference={activeHoverHasReference}
                     onBarsUpdate={setKlineBars}
@@ -1733,90 +2187,383 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               <div className="strategy-workbench-card">
                 <div className="strategy-workbench-card-header">
                   <span className="strategy-workbench-card-title">仪表盘</span>
-                  <span className="strategy-workbench-card-meta">
-                    {localBacktestSummary.message}
-                  </span>
+                  <div className="strategy-workbench-dashboard-header-actions">
+                    <span className="strategy-workbench-card-meta">
+                      {isBacktestRunning
+                        ? `运行中 · ${progressPercent}% · 检测至 ${detectedTimeText}`
+                        : `${headerRunText} · 检测至 ${detectedTimeText}`}
+                    </span>
+                    <button
+                      type="button"
+                      className="strategy-workbench-dashboard-mode-button"
+                      onClick={() =>
+                        setDashboardMode((prev) => (prev === 'preview' ? 'settings' : 'preview'))
+                      }
+                    >
+                      {dashboardMode === 'preview' ? '参数设置' : '返回预览'}
+                    </button>
+                  </div>
                 </div>
 
-                <div className="strategy-workbench-risk-form">
-                  <label className="strategy-workbench-risk-field">
-                    <span>止盈比例(%)</span>
-                    <input
-                      type="number"
-                      step={0.1}
-                      min={0}
-                      value={takeProfitPct}
-                      onChange={(event) => {
-                        const next = parseNumberOrNull(event.target.value);
-                        if (next !== null) {
-                          onTakeProfitPctChange(next);
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="strategy-workbench-risk-field">
-                    <span>止损比例(%)</span>
-                    <input
-                      type="number"
-                      step={0.1}
-                      min={0}
-                      value={stopLossPct}
-                      onChange={(event) => {
-                        const next = parseNumberOrNull(event.target.value);
-                        if (next !== null) {
-                          onStopLossPctChange(next);
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="strategy-workbench-risk-field">
-                    <span>杠杆倍数</span>
-                    <input
-                      type="number"
-                      step={1}
-                      min={1}
-                      value={leverage}
-                      onChange={(event) => {
-                        const next = parseNumberOrNull(event.target.value);
-                        if (next !== null) {
-                          onLeverageChange(next);
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="strategy-workbench-risk-field">
-                    <span>单次开仓数量</span>
-                    <input
-                      type="number"
-                      step={0.001}
-                      min={0}
-                      value={orderQty}
-                      onChange={(event) => {
-                        const next = parseNumberOrNull(event.target.value);
-                        if (next !== null) {
-                          onOrderQtyChange(next);
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-
-                <div
-                  className={`strategy-workbench-detect-status ${localBacktestSummary.status === 'running' ? 'is-ready' : 'is-blocked'}`}
-                >
-                  {localBacktestSummary.status === 'running'
-                    ? `本地回测已执行：${localBacktestSummary.tradeCount} 笔成交，胜率 ${formatPercentValue(localBacktestSummary.winRate)}。`
-                    : localBacktestSummary.message}
-                </div>
-
-                <div className="strategy-workbench-dashboard-grid">
-                  {metricRows.map((metric) => (
-                    <div className="strategy-workbench-metric" key={metric.label}>
-                      <div className="strategy-workbench-metric-label">{metric.label}</div>
-                      <div className="strategy-workbench-metric-value">{metric.value}</div>
+                {dashboardMode === 'settings' ? (
+                  <>
+                    <div className="strategy-workbench-risk-form">
+                      <label className="strategy-workbench-risk-field">
+                        <span>止盈比例(%)</span>
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={0}
+                          value={backtestFormParams.takeProfitPct}
+                          onChange={(event) => updateBacktestNumberField('takeProfitPct', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>止损比例(%)</span>
+                        <input
+                          type="number"
+                          step={0.1}
+                          min={0}
+                          value={backtestFormParams.stopLossPct}
+                          onChange={(event) => updateBacktestNumberField('stopLossPct', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>杠杆倍数</span>
+                        <input
+                          type="number"
+                          step={1}
+                          min={1}
+                          value={backtestFormParams.leverage}
+                          onChange={(event) => updateBacktestNumberField('leverage', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>单次开仓数量</span>
+                        <input
+                          type="number"
+                          step={0.001}
+                          min={0}
+                          value={backtestFormParams.orderQty}
+                          onChange={(event) => updateBacktestNumberField('orderQty', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>初始资金</span>
+                        <input
+                          type="number"
+                          step={100}
+                          min={0}
+                          value={backtestFormParams.initialCapital}
+                          onChange={(event) => updateBacktestNumberField('initialCapital', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>手续费率</span>
+                        <input
+                          type="number"
+                          step={0.0001}
+                          min={0}
+                          value={backtestFormParams.feeRate}
+                          onChange={(event) => updateBacktestNumberField('feeRate', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>资金费率</span>
+                        <input
+                          type="number"
+                          step={0.0001}
+                          value={backtestFormParams.fundingRate}
+                          onChange={(event) => updateBacktestNumberField('fundingRate', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>滑点(Bps)</span>
+                        <input
+                          type="number"
+                          step={1}
+                          min={0}
+                          value={backtestFormParams.slippageBps}
+                          onChange={(event) => updateBacktestNumberField('slippageBps', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>执行模式</span>
+                        <select
+                          value={backtestFormParams.executionMode}
+                          onChange={(event) =>
+                            setBacktestFormParams((prev) => ({
+                              ...prev,
+                              executionMode:
+                                event.target.value === 'timeline' ? 'timeline' : 'batch_open_close',
+                            }))
+                          }
+                        >
+                          <option value="batch_open_close">batch_open_close</option>
+                          <option value="timeline">timeline</option>
+                        </select>
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>回测范围</span>
+                        <select
+                          value={backtestFormParams.timeRangeMode}
+                          onChange={(event) =>
+                            updateBacktestTimeRangeMode(
+                              event.target.value === 'custom' ? 'custom' : 'latest_30d',
+                            )
+                          }
+                        >
+                          <option value="latest_30d">最近30天（默认）</option>
+                          <option value="custom">自定义起止时间</option>
+                        </select>
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>开始时间</span>
+                        <input
+                          type="datetime-local"
+                          disabled={backtestFormParams.timeRangeMode !== 'custom'}
+                          value={toDateTimeLocalValue(backtestFormParams.rangeStartMs)}
+                          onChange={(event) => updateBacktestRangeField('rangeStartMs', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field">
+                        <span>结束时间</span>
+                        <input
+                          type="datetime-local"
+                          disabled={backtestFormParams.timeRangeMode !== 'custom'}
+                          value={toDateTimeLocalValue(backtestFormParams.rangeEndMs)}
+                          onChange={(event) => updateBacktestRangeField('rangeEndMs', event.target.value)}
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field strategy-workbench-risk-field--checkbox">
+                        <span>自动反向</span>
+                        <input
+                          type="checkbox"
+                          checked={backtestFormParams.autoReverse}
+                          onChange={(event) =>
+                            setBacktestFormParams((prev) => ({ ...prev, autoReverse: event.target.checked }))
+                          }
+                        />
+                      </label>
+                      <label className="strategy-workbench-risk-field strategy-workbench-risk-field--checkbox">
+                        <span>运行时间门禁</span>
+                        <input
+                          type="checkbox"
+                          checked={backtestFormParams.useStrategyRuntime}
+                          onChange={(event) =>
+                            setBacktestFormParams((prev) => ({
+                              ...prev,
+                              useStrategyRuntime: event.target.checked,
+                            }))
+                          }
+                        />
+                      </label>
                     </div>
-                  ))}
-                </div>
+
+                    <div className="strategy-workbench-risk-field-hint">
+                      参数口径已对齐后端回测：初始资金、手续费率、资金费率、滑点、自动反向、运行时间门禁、执行模式。当前可用样本范围：{availableRangeText}。
+                    </div>
+                    <div className="strategy-workbench-risk-field-hint">
+                      当前生效范围：{activeRangeText}（约 {loadedDataDays.toFixed(1)} 天，{backtestBars.length} 根）。
+                    </div>
+
+                    <div className="strategy-workbench-dashboard-actions">
+                      <button
+                        type="button"
+                        className="strategy-workbench-dashboard-confirm"
+                        onClick={applyBacktestParams}
+                      >
+                        确认并预览
+                      </button>
+                    </div>
+
+                    <div
+                      className={`strategy-workbench-detect-status ${backtestParamError ? 'is-blocked' : 'is-ready'}`}
+                    >
+                      {backtestParamError || '参数已就绪，点击“确认并预览”后进入回测结果与仓位列表。'}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className={`strategy-workbench-detect-status ${localBacktestSummary.status === 'running' ? 'is-ready' : 'is-blocked'}`}
+                    >
+                      {localBacktestSummary.message}
+                      {' · '}
+                      已检查 {backtestProgress.processedBars}/{backtestProgress.totalBars || localBacktestSummary.bars} 根 K 线
+                      {' · '}
+                      当前检测时间 {detectedTimeText}
+                    </div>
+
+                    <div className="strategy-workbench-live-preview">
+                      <div className="strategy-workbench-live-summary">
+                        <div className="strategy-workbench-live-stat-grid">
+                          <div className="strategy-workbench-live-stat">
+                            <span>仓位</span>
+                            <strong>{livePositionCount}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-stat">
+                            <span>平仓笔数</span>
+                            <strong>{tradeSummary.totalCount}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-stat">
+                            <span>胜率</span>
+                            <strong>{formatPercentValue(liveWinRate)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-stat">
+                            <span>平均盈亏</span>
+                            <strong>{formatSignedNumber(liveAveragePnl)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-stat">
+                            <span>累计收益</span>
+                            <strong>{formatSignedNumber(localBacktestSummary.totalProfit)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-stat">
+                            <span>最大回撤</span>
+                            <strong>{formatPercentValue(backtestStats.maxDrawdown)}</strong>
+                          </div>
+                        </div>
+                        <div className="strategy-workbench-live-progress">
+                          <div className="strategy-workbench-live-progress-label">
+                            回测进度 {backtestProgress.processedBars}/{backtestProgress.totalBars || localBacktestSummary.bars}
+                          </div>
+                          <div className="strategy-workbench-live-progress-track">
+                            <div
+                              className="strategy-workbench-live-progress-fill"
+                              style={{ width: `${progressPercent}%` }}
+                            />
+                          </div>
+                          <div className="strategy-workbench-live-progress-meta">
+                            <span>{progressPercent}%</span>
+                            <span>耗时 {formatDuration(backtestProgress.elapsedMs)}</span>
+                            <span>{backtestProgress.done ? '已完成' : '进行中'}</span>
+                          </div>
+                        </div>
+                        <div className="strategy-workbench-live-advanced-grid">
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>盈亏比</span>
+                            <strong>{formatNumberValue(backtestStats.profitFactor)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>平均盈利/亏损</span>
+                            <strong>{formatSignedNumber(backtestStats.avgWin)} / {formatSignedNumber(backtestStats.avgLoss)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>夏普/Sortino</span>
+                            <strong>{formatNumberValue(backtestStats.sharpeRatio)} / {formatNumberValue(backtestStats.sortinoRatio)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>年化/Calmar</span>
+                            <strong>{formatPercentValue(backtestStats.annualizedReturn)} / {formatNumberValue(backtestStats.calmarRatio)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>最大连胜/连败</span>
+                            <strong>{backtestStats.maxConsecutiveWins} / {backtestStats.maxConsecutiveLosses}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>平均持仓</span>
+                            <strong>{formatDuration(backtestStats.avgHoldingMs)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>回撤持续</span>
+                            <strong>{formatDuration(backtestStats.maxDrawdownDurationMs)}</strong>
+                          </div>
+                          <div className="strategy-workbench-live-advanced-item">
+                            <span>浮动盈亏</span>
+                            <strong>{formatSignedNumber(localBacktestSummary.unrealizedPnl)}</strong>
+                          </div>
+                        </div>
+                        <div className="strategy-workbench-live-summary-extra">
+                          <span>样本覆盖 {loadedDataDays.toFixed(1)} 天</span>
+                          <span>交易汇总: 胜/负 {tradeSummary.winCount}/{tradeSummary.lossCount}，手续费 {formatNumberValue(tradeSummary.totalFee)}</span>
+                          <span>资金曲线: 点数 {equitySummary.pointCount}，最高权益 {formatNumberValue(equitySummary.maxEquity)}</span>
+                          <span>资金波动: 最大区间盈利 {formatSignedNumber(equitySummary.maxPeriodProfit)}，最大区间亏损 {formatSignedNumber(equitySummary.maxPeriodLoss)}</span>
+                          <span>事件: 总数 {eventSummary.totalCount}，类型 {topEventTypesText}</span>
+                          <span>资金费累计 {formatSignedNumber(tradeSummary.totalFunding)}</span>
+                        </div>
+                        <div className="strategy-workbench-live-events">
+                          <div className="strategy-workbench-live-events-title">最近事件</div>
+                          {recentEvents.length <= 0 ? (
+                            <div className="strategy-workbench-live-events-empty">暂无事件记录</div>
+                          ) : (
+                            recentEvents.map((event, index) => (
+                              <div className="strategy-workbench-live-events-line" key={`${event.timestamp}-${index}-${event.type}`}>
+                                <span className="strategy-workbench-live-events-time">{formatDateTime(event.timestamp)}</span>
+                                <span className="strategy-workbench-live-events-type">{event.type}</span>
+                                <span className="strategy-workbench-live-events-message">{event.message}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                        <div className="strategy-workbench-live-diagnostics">
+                          <div className="strategy-workbench-live-diagnostics-title">回测阶段诊断</div>
+                          {visibleDiagnostics.length <= 0 ? (
+                            <div className="strategy-workbench-live-diagnostics-empty">暂无诊断日志</div>
+                          ) : (
+                            visibleDiagnostics.map((line, index) => (
+                              <div className="strategy-workbench-live-diagnostics-line" key={`${index}-${line}`}>
+                                {line}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="strategy-workbench-live-list">
+                        <div className="strategy-workbench-live-list-header">
+                          <span>仓位列表</span>
+                          <span>{previewTrades.length} 条</span>
+                        </div>
+
+                        {previewTrades.length === 0 ? (
+                          <div className="strategy-workbench-live-empty">
+                            暂无仓位记录，回测执行后会实时出现在右侧列表。
+                          </div>
+                        ) : (
+                          visiblePreviewTrades.map((trade, index) => (
+                            <div
+                              key={`${trade.entryTime}-${trade.exitTime}-${trade.side}-${index}`}
+                              className={`strategy-workbench-live-item ${trade.isOpen ? 'is-open' : ''}`}
+                            >
+                              <div className="strategy-workbench-live-item-head">
+                                <span className={`strategy-workbench-live-item-side ${trade.side === 'Long' ? 'is-long' : 'is-short'}`}>
+                                  {trade.side}
+                                </span>
+                                <span className="strategy-workbench-live-item-status">
+                                  {trade.isOpen ? '持仓中' : '已平仓'}
+                                </span>
+                                <span className={`strategy-workbench-live-item-pnl ${trade.pnl >= 0 ? 'is-positive' : 'is-negative'}`}>
+                                  {formatSignedNumber(trade.pnl)}
+                                </span>
+                              </div>
+                              <div className="strategy-workbench-live-item-row">
+                                <span>开仓: {formatDateTime(trade.entryTime)}</span>
+                                <span>平仓: {trade.isOpen ? '持仓中' : formatDateTime(trade.exitTime)}</span>
+                              </div>
+                              <div className="strategy-workbench-live-item-row">
+                                <span>开/平价: {trade.entryPrice.toFixed(4)} / {trade.exitPrice.toFixed(4)}</span>
+                                <span>数量: {trade.qty}</span>
+                              </div>
+                              <div className="strategy-workbench-live-item-row">
+                                <span>手续费: {trade.fee.toFixed(4)}</span>
+                                <span>资金费: {formatSignedNumber(trade.funding)}</span>
+                              </div>
+                              <div className="strategy-workbench-live-item-row">
+                                <span>离场: {trade.exitReason || '-'}</span>
+                                <span>滑点: {trade.slippageBps} Bps</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                        {foldedTradeCount > 0 ? (
+                          <div className="strategy-workbench-live-folded-hint">
+                            为保持单屏展示，已折叠较早仓位 {foldedTradeCount} 条（保留最近 {visiblePreviewTrades.length} 条）。
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -2030,6 +2777,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             </div>
           </div>
         )}
+
+        <KlineOfflineCacheDialog
+          open={showOfflineCacheDialog}
+          onClose={() => setShowOfflineCacheDialog(false)}
+        />
       </div>
 
       {activeDrag && dragCursor ? (
