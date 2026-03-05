@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   DndContext,
@@ -28,9 +28,13 @@ import type {
 import {
   buildEmptyBacktestSummary,
   runLocalBacktestRealtime,
+  type LocalBacktestTrade,
   type LocalBacktestSummary,
 } from './localBacktestEngine';
-import StrategyWorkbenchKline from './StrategyWorkbenchKline';
+import StrategyWorkbenchKline, {
+  type StrategyWorkbenchTradeFocusRange,
+  type StrategyWorkbenchVisibleRange,
+} from './StrategyWorkbenchKline';
 import KlineOfflineCacheDialog from '../dialogs/KlineOfflineCacheDialog';
 import './StrategyWorkbench.css';
 
@@ -149,6 +153,7 @@ interface StrategyWorkbenchProps {
 
 type DashboardMode = 'settings' | 'preview';
 type BacktestRangeMode = 'latest_30d' | 'custom';
+type PreviewTradeMode = 'normal' | 'full';
 
 type WorkbenchBacktestParams = {
   takeProfitPct: number;
@@ -183,6 +188,13 @@ type WorkbenchBacktestProgress = {
   progress: number;
   elapsedMs: number;
   done: boolean;
+};
+
+type PreviewTradeSyncItem = {
+  key: string;
+  startTime: number;
+  endTime: number;
+  midpoint: number;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -528,6 +540,53 @@ const formatDuration = (durationMs: number) => {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 };
 
+const buildPreviewTradeKey = (trade: LocalBacktestTrade, index: number) => {
+  return [
+    trade.side,
+    trade.entryTime,
+    trade.exitTime,
+    trade.entryPrice,
+    trade.exitPrice,
+    trade.qty,
+    trade.slippageBps,
+    index,
+  ].join('|');
+};
+
+const buildPreviewTradeFocusRange = (
+  trade: LocalBacktestTrade,
+  index: number,
+  timeframeSec: number,
+  latestBacktestTimestamp: number,
+): StrategyWorkbenchTradeFocusRange | null => {
+  const entryTime = Number(trade.entryTime);
+  if (!Number.isFinite(entryTime) || entryTime <= 0) {
+    return null;
+  }
+  const intervalMs = Math.max(1_000, Math.trunc(timeframeSec) * 1_000);
+  const hasClosed = !trade.isOpen && Number.isFinite(trade.exitTime) && trade.exitTime > 0;
+  let visualExitTime = hasClosed ? trade.exitTime : latestBacktestTimestamp + intervalMs * 10;
+  if (!Number.isFinite(visualExitTime) || visualExitTime <= 0) {
+    visualExitTime = entryTime + intervalMs * 10;
+  }
+  if (visualExitTime <= entryTime) {
+    visualExitTime = entryTime + intervalMs * 10;
+  }
+  const startTime = Math.min(entryTime, visualExitTime);
+  const endTime = Math.max(entryTime, visualExitTime);
+  const tradeKey = buildPreviewTradeKey(trade, index);
+  return {
+    id: tradeKey,
+    startTime,
+    endTime,
+    side: trade.side,
+    entryPrice: trade.entryPrice,
+    exitPrice: trade.exitPrice,
+    stopLossPrice: trade.stopLossPrice,
+    takeProfitPrice: trade.takeProfitPrice,
+  };
+};
+
 const extractClientPoint = (event: Event | null | undefined) => {
   if (!event) {
     return null;
@@ -627,6 +686,70 @@ const DroppableSlot: React.FC<{
   );
 };
 
+/** 可拖拽调整宽度的分隔条，用于左右面板之间 */
+const ResizeHandle: React.FC<{
+  onResize: (deltaX: number) => void;
+  className?: string;
+}> = ({ onResize, className }) => {
+  const startX = useRef(0);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startX.current = e.clientX;
+      const onMove = (e2: PointerEvent) => {
+        const dx = e2.clientX - startX.current;
+        onResize(dx);
+        startX.current = e2.clientX;
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        (document.body as HTMLElement).style.cursor = '';
+        (document.body as HTMLElement).style.userSelect = '';
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      (document.body as HTMLElement).style.cursor = 'col-resize';
+      (document.body as HTMLElement).style.userSelect = 'none';
+    },
+    [onResize],
+  );
+  return <div className={className} onPointerDown={handlePointerDown} role="separator" aria-orientation="vertical" />;
+};
+
+/** 可拖拽调整高度的分隔条，用于上下区块之间 */
+const ResizeHandleVertical: React.FC<{
+  onResize: (deltaY: number) => void;
+  className?: string;
+}> = ({ onResize, className }) => {
+  const startY = useRef(0);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      startY.current = e.clientY;
+      const onMove = (e2: PointerEvent) => {
+        const dy = e2.clientY - startY.current;
+        onResize(dy);
+        startY.current = e2.clientY;
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        (document.body as HTMLElement).style.cursor = '';
+        (document.body as HTMLElement).style.userSelect = '';
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      (document.body as HTMLElement).style.cursor = 'row-resize';
+      (document.body as HTMLElement).style.userSelect = 'none';
+    },
+    [onResize],
+  );
+  return <div className={className} onPointerDown={handlePointerDown} role="separator" aria-orientation="horizontal" />;
+};
+
 const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const {
     selectedIndicators,
@@ -708,7 +831,68 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     elapsedMs: 0,
     done: false,
   });
+  const [selectedPreviewTradeKey, setSelectedPreviewTradeKey] = useState<string | null>(null);
+  const [focusedPreviewTradeRange, setFocusedPreviewTradeRange] = useState<StrategyWorkbenchTradeFocusRange | null>(null);
+  const [previewTradeMode, setPreviewTradeMode] = useState<PreviewTradeMode>('normal');
+  const [previewScrollSyncEnabled, setPreviewScrollSyncEnabled] = useState(true);
+  const [fullPreviewAnchorTradeKey, setFullPreviewAnchorTradeKey] = useState<string | null>(null);
+  /** 左侧面板宽度占比 (20–80%)，用于 refactor 布局 */
+  const [leftPanelWidth, setLeftPanelWidth] = useState(52.8);
+  /** 右侧内部：右左面板宽度占比 (25–75%)，用于 refactor 布局 */
+  const [rightLeftPanelWidth, setRightLeftPanelWidth] = useState(46.3);
+  /** 左侧：K线图高度占比 (30–85%)，用于 refactor 布局 */
+  const [leftKlineHeight, setLeftKlineHeight] = useState(63.6);
+  /** 右侧左栏：已选指标高度占比 (25–75%)，用于 refactor 布局 */
+  const [rightPanelHeight, setRightPanelHeight] = useState(50);
+  const mainLayoutRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const leftPanelRef = useRef<HTMLDivElement>(null);
+  const rightLeftRef = useRef<HTMLDivElement>(null);
+  const previewListBodyRef = useRef<HTMLDivElement | null>(null);
+  const previewTradeItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const previewListScrollRafRef = useRef<number | null>(null);
+  const previewViewportSyncRafRef = useRef<number | null>(null);
+  const previewListSuppressTimerRef = useRef<number | null>(null);
+  const previewListSyncLockedRef = useRef(false);
+  const pendingViewportRef = useRef<StrategyWorkbenchVisibleRange | null>(null);
+  const fullPreviewAnchorTradeKeyRef = useRef<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const handleMainResize = useCallback((deltaX: number) => {
+    setLeftPanelWidth((prev) => {
+      const el = mainLayoutRef.current;
+      const w = el?.offsetWidth ?? 800;
+      const newPct = prev + (deltaX / w) * 100;
+      return Math.min(80, Math.max(20, newPct));
+    });
+  }, []);
+
+  const handleRightResize = useCallback((deltaX: number) => {
+    setRightLeftPanelWidth((prev) => {
+      const el = rightPanelRef.current;
+      const w = el?.offsetWidth ?? 400;
+      const newPct = prev + (deltaX / w) * 100;
+      return Math.min(75, Math.max(25, newPct));
+    });
+  }, []);
+
+  const handleLeftVerticalResize = useCallback((deltaY: number) => {
+    setLeftKlineHeight((prev) => {
+      const el = leftPanelRef.current;
+      const h = el?.offsetHeight ?? 600;
+      const newPct = prev + (deltaY / h) * 100;
+      return Math.min(85, Math.max(30, newPct));
+    });
+  }, []);
+
+  const handleRightLeftVerticalResize = useCallback((deltaY: number) => {
+    setRightPanelHeight((prev) => {
+      const el = rightLeftRef.current;
+      const h = el?.offsetHeight ?? 400;
+      const newPct = prev + (deltaY / h) * 100;
+      return Math.min(75, Math.max(25, newPct));
+    });
+  }, []);
 
   const availableDataRange = useMemo(() => {
     if (klineBars.length <= 0) {
@@ -1956,6 +2140,194 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     });
   }, [localBacktestSummary.trades]);
 
+  const latestBacktestTimestamp = useMemo(() => {
+    const last = backtestBars[backtestBars.length - 1];
+    const timestamp = Number(last?.timestamp ?? 0);
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+  }, [backtestBars]);
+
+  const previewTradeRanges = useMemo(() => {
+    return previewTrades
+      .map((trade, index) => buildPreviewTradeFocusRange(trade, index, selectedTimeframeSec, latestBacktestTimestamp))
+      .filter((range): range is StrategyWorkbenchTradeFocusRange => range !== null);
+  }, [latestBacktestTimestamp, previewTrades, selectedTimeframeSec]);
+
+  const previewTradeRangeMap = useMemo(() => {
+    const map = new Map<string, StrategyWorkbenchTradeFocusRange>();
+    previewTradeRanges.forEach((range) => {
+      map.set(range.id, range);
+    });
+    return map;
+  }, [previewTradeRanges]);
+
+  const previewTradeSyncItems = useMemo<PreviewTradeSyncItem[]>(() => {
+    return previewTradeRanges.map((range) => ({
+      key: range.id,
+      startTime: Math.min(range.startTime, range.endTime),
+      endTime: Math.max(range.startTime, range.endTime),
+      midpoint: Math.floor((range.startTime + range.endTime) / 2),
+    }));
+  }, [previewTradeRanges]);
+
+  const fullPreviewAnchorRange = useMemo(() => {
+    if (!fullPreviewAnchorTradeKey) {
+      return null;
+    }
+    return previewTradeRangeMap.get(fullPreviewAnchorTradeKey) || null;
+  }, [fullPreviewAnchorTradeKey, previewTradeRangeMap]);
+
+  const activePreviewTradeKey = previewTradeMode === 'full' ? fullPreviewAnchorTradeKey : selectedPreviewTradeKey;
+
+  const focusPreviewTrade = useCallback((trade: LocalBacktestTrade, index: number) => {
+    const range = buildPreviewTradeFocusRange(trade, index, selectedTimeframeSec, latestBacktestTimestamp);
+    if (!range) {
+      return;
+    }
+    const tradeKey = range.id;
+    setSelectedPreviewTradeKey(tradeKey);
+    setFocusedPreviewTradeRange({
+      id: `${tradeKey}-${Date.now()}`,
+      startTime: range.startTime,
+      endTime: range.endTime,
+      side: range.side,
+      entryPrice: range.entryPrice,
+      exitPrice: range.exitPrice,
+      stopLossPrice: range.stopLossPrice,
+      takeProfitPrice: range.takeProfitPrice,
+    });
+  }, [latestBacktestTimestamp, selectedTimeframeSec]);
+
+  const lockPreviewListSync = useCallback((durationMs = 90) => {
+    previewListSyncLockedRef.current = true;
+    if (previewListSuppressTimerRef.current !== null) {
+      window.clearTimeout(previewListSuppressTimerRef.current);
+      previewListSuppressTimerRef.current = null;
+    }
+    previewListSuppressTimerRef.current = window.setTimeout(() => {
+      previewListSyncLockedRef.current = false;
+      previewListSuppressTimerRef.current = null;
+    }, durationMs);
+  }, []);
+
+  const resolveTopVisiblePreviewTradeKey = useCallback(() => {
+    const listBody = previewListBodyRef.current;
+    if (!listBody) {
+      return null;
+    }
+    const rect = listBody.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    const sampleX = rect.left + rect.width * 0.5;
+    const sampleOffsets = [0.18, 0.34, 0.52];
+    for (const offsetRatio of sampleOffsets) {
+      const sampleY = rect.top + rect.height * offsetRatio;
+      const element = document.elementFromPoint(sampleX, sampleY) as HTMLElement | null;
+      const item = element?.closest<HTMLElement>('[data-preview-trade-key]');
+      const key = item?.dataset.previewTradeKey?.trim();
+      if (key) {
+        return key;
+      }
+    }
+    return null;
+  }, []);
+
+  const scrollPreviewListToTrade = useCallback((tradeKey: string) => {
+    const listBody = previewListBodyRef.current;
+    const row = previewTradeItemRefs.current.get(tradeKey);
+    if (!listBody || !row) {
+      return;
+    }
+    const maxTop = Math.max(0, listBody.scrollHeight - listBody.clientHeight);
+    const targetTop = Math.max(0, Math.min(maxTop, row.offsetTop - listBody.clientHeight * 0.3));
+    if (Math.abs(listBody.scrollTop - targetTop) < 2) {
+      return;
+    }
+    lockPreviewListSync();
+    listBody.scrollTo({ top: targetTop, behavior: 'auto' });
+  }, [lockPreviewListSync]);
+
+  const resolvePreviewTradeKeyFromViewport = useCallback((viewport: StrategyWorkbenchVisibleRange) => {
+    if (previewTradeSyncItems.length <= 0) {
+      return null;
+    }
+    const viewportFrom = Math.min(viewport.fromTime, viewport.toTime);
+    const viewportTo = Math.max(viewport.fromTime, viewport.toTime);
+    const centerTime = Number.isFinite(viewport.centerTime)
+      ? viewport.centerTime
+      : Math.floor((viewportFrom + viewportTo) / 2);
+
+    let bestKey: string | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const item of previewTradeSyncItems) {
+      const intersects = item.endTime >= viewportFrom && item.startTime <= viewportTo;
+      const distance = Math.abs(item.midpoint - centerTime);
+      const score = distance + (intersects ? 0 : 10_000_000_000_000);
+      if (score < bestScore) {
+        bestScore = score;
+        bestKey = item.key;
+      }
+    }
+    return bestKey;
+  }, [previewTradeSyncItems]);
+
+  const handlePreviewListScroll = useCallback(() => {
+    if (previewTradeMode !== 'full' || !previewScrollSyncEnabled || previewListSyncLockedRef.current) {
+      return;
+    }
+    if (previewListScrollRafRef.current !== null) {
+      window.cancelAnimationFrame(previewListScrollRafRef.current);
+      previewListScrollRafRef.current = null;
+    }
+    previewListScrollRafRef.current = window.requestAnimationFrame(() => {
+      previewListScrollRafRef.current = null;
+      const targetKey = resolveTopVisiblePreviewTradeKey();
+      if (!targetKey || targetKey === fullPreviewAnchorTradeKeyRef.current) {
+        return;
+      }
+      setFullPreviewAnchorTradeKey(targetKey);
+      setSelectedPreviewTradeKey(targetKey);
+    });
+  }, [previewScrollSyncEnabled, previewTradeMode, resolveTopVisiblePreviewTradeKey]);
+
+  const handlePreviewKlineVisibleRangeChange = useCallback((viewport: StrategyWorkbenchVisibleRange) => {
+    if (previewTradeMode !== 'full' || !previewScrollSyncEnabled) {
+      return;
+    }
+    pendingViewportRef.current = viewport;
+    if (previewViewportSyncRafRef.current !== null) {
+      return;
+    }
+    previewViewportSyncRafRef.current = window.requestAnimationFrame(() => {
+      previewViewportSyncRafRef.current = null;
+      const snapshot = pendingViewportRef.current;
+      pendingViewportRef.current = null;
+      if (!snapshot) {
+        return;
+      }
+      const targetKey = resolvePreviewTradeKeyFromViewport(snapshot);
+      if (!targetKey || targetKey === fullPreviewAnchorTradeKeyRef.current) {
+        return;
+      }
+      setFullPreviewAnchorTradeKey(targetKey);
+      setSelectedPreviewTradeKey(targetKey);
+      scrollPreviewListToTrade(targetKey);
+    });
+  }, [previewScrollSyncEnabled, previewTradeMode, resolvePreviewTradeKeyFromViewport, scrollPreviewListToTrade]);
+
+  const handlePreviewTradeActivate = useCallback((trade: LocalBacktestTrade, index: number) => {
+    if (previewTradeMode !== 'full') {
+      focusPreviewTrade(trade, index);
+      return;
+    }
+    const range = buildPreviewTradeFocusRange(trade, index, selectedTimeframeSec, latestBacktestTimestamp);
+    if (!range) {
+      return;
+    }
+    setFullPreviewAnchorTradeKey(range.id);
+    setSelectedPreviewTradeKey(range.id);
+  }, [focusPreviewTrade, latestBacktestTimestamp, previewTradeMode, selectedTimeframeSec]);
+
   const closedPreviewTrades = useMemo(() => {
     return previewTrades.filter((trade) => !trade.isOpen);
   }, [previewTrades]);
@@ -2015,9 +2387,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       : localBacktestSummary.status === 'waiting_data'
         ? '等待数据'
         : '未开始';
-  const MAX_VISIBLE_TRADES = 6;
-  const visiblePreviewTrades = previewTrades.slice(0, MAX_VISIBLE_TRADES);
-  const foldedTradeCount = Math.max(0, previewTrades.length - visiblePreviewTrades.length);
   const livePositionCount = previewTrades.length;
   const liveWinRate = localBacktestSummary.winRate;
   const liveAveragePnl = averageClosedPnl;
@@ -2044,6 +2413,102 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     () => (Array.isArray(localBacktestSummary.diagnostics) ? localBacktestSummary.diagnostics : []).slice(0, 14),
     [localBacktestSummary.diagnostics],
   );
+
+  useEffect(() => {
+    fullPreviewAnchorTradeKeyRef.current = fullPreviewAnchorTradeKey;
+  }, [fullPreviewAnchorTradeKey]);
+
+  useEffect(() => {
+    if (previewTrades.length <= 0 || previewTradeRanges.length <= 0) {
+      setSelectedPreviewTradeKey(null);
+      setFocusedPreviewTradeRange(null);
+      setFullPreviewAnchorTradeKey(null);
+      return;
+    }
+    if (selectedPreviewTradeKey && !previewTradeRangeMap.has(selectedPreviewTradeKey)) {
+      setSelectedPreviewTradeKey(null);
+      setFocusedPreviewTradeRange(null);
+    }
+    if (fullPreviewAnchorTradeKey && !previewTradeRangeMap.has(fullPreviewAnchorTradeKey)) {
+      setFullPreviewAnchorTradeKey(null);
+    }
+  }, [fullPreviewAnchorTradeKey, previewTradeRangeMap, previewTradeRanges.length, previewTrades.length, selectedPreviewTradeKey]);
+
+  useEffect(() => {
+    if (previewTradeMode !== 'full') {
+      setFullPreviewAnchorTradeKey(null);
+      return;
+    }
+    setFocusedPreviewTradeRange(null);
+    if (previewTradeRanges.length <= 0) {
+      return;
+    }
+    const fallbackKey = previewTradeRanges[0]?.id ?? null;
+    const nextKey =
+      (fullPreviewAnchorTradeKey && previewTradeRangeMap.has(fullPreviewAnchorTradeKey) ? fullPreviewAnchorTradeKey : null)
+      || (selectedPreviewTradeKey && previewTradeRangeMap.has(selectedPreviewTradeKey) ? selectedPreviewTradeKey : null)
+      || fallbackKey;
+    if (!nextKey) {
+      return;
+    }
+    if (nextKey !== fullPreviewAnchorTradeKey) {
+      setFullPreviewAnchorTradeKey(nextKey);
+    }
+    if (nextKey !== selectedPreviewTradeKey) {
+      setSelectedPreviewTradeKey(nextKey);
+    }
+    window.requestAnimationFrame(() => {
+      scrollPreviewListToTrade(nextKey);
+    });
+  }, [
+    fullPreviewAnchorTradeKey,
+    previewTradeMode,
+    previewTradeRangeMap,
+    previewTradeRanges,
+    scrollPreviewListToTrade,
+    selectedPreviewTradeKey,
+  ]);
+
+  useEffect(() => {
+    setSelectedPreviewTradeKey(null);
+    setFocusedPreviewTradeRange(null);
+    setFullPreviewAnchorTradeKey(null);
+  }, [selectedExchange, selectedSymbol, selectedTimeframeSec]);
+
+  useEffect(() => {
+    if (previewScrollSyncEnabled) {
+      return;
+    }
+    pendingViewportRef.current = null;
+    if (previewListScrollRafRef.current !== null) {
+      window.cancelAnimationFrame(previewListScrollRafRef.current);
+      previewListScrollRafRef.current = null;
+    }
+    if (previewViewportSyncRafRef.current !== null) {
+      window.cancelAnimationFrame(previewViewportSyncRafRef.current);
+      previewViewportSyncRafRef.current = null;
+    }
+  }, [previewScrollSyncEnabled]);
+
+  useEffect(() => {
+    return () => {
+      if (previewListScrollRafRef.current !== null) {
+        window.cancelAnimationFrame(previewListScrollRafRef.current);
+        previewListScrollRafRef.current = null;
+      }
+      if (previewViewportSyncRafRef.current !== null) {
+        window.cancelAnimationFrame(previewViewportSyncRafRef.current);
+        previewViewportSyncRafRef.current = null;
+      }
+      if (previewListSuppressTimerRef.current !== null) {
+        window.clearTimeout(previewListSuppressTimerRef.current);
+        previewListSuppressTimerRef.current = null;
+      }
+      previewListSyncLockedRef.current = false;
+      pendingViewportRef.current = null;
+      previewTradeItemRefs.current.clear();
+    };
+  }, []);
 
   if (typeof document === 'undefined') {
     return null;
@@ -2164,9 +2629,20 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             </div>
           </div>
         ) : (
-          <div className="strategy-workbench-main">
-            <div className="strategy-workbench-left">
-              <div className="strategy-workbench-card">
+          <div
+            className="strategy-workbench-main strategy-workbench-main--resizable"
+            ref={mainLayoutRef}
+            style={
+              {
+                '--wb-left-width': `${leftPanelWidth}%`,
+                '--wb-right-left-width': `${rightLeftPanelWidth}%`,
+                '--wb-left-kline-height': `${leftKlineHeight}%`,
+                '--wb-right-panel-height': `${rightPanelHeight}%`,
+              } as React.CSSProperties
+            }
+          >
+            <div className="strategy-workbench-left strategy-workbench-left--resizable" ref={leftPanelRef}>
+              <div className="strategy-workbench-card strategy-workbench-card--kline">
                 <div className="strategy-workbench-card-header">
                   <span className="strategy-workbench-card-title">K线图</span>
                   <span className="strategy-workbench-card-meta">已联动指标：{selectedIndicators.length}</span>
@@ -2177,6 +2653,15 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                     symbol={selectedSymbol}
                     timeframeSec={selectedTimeframeSec}
                     selectedIndicators={selectedIndicators}
+                    previewMode={previewTradeMode}
+                    focusRange={previewTradeMode === 'normal' ? focusedPreviewTradeRange : null}
+                    fullPreviewRanges={previewTradeMode === 'full' ? previewTradeRanges : []}
+                    syncTargetRange={previewTradeMode === 'full' ? fullPreviewAnchorRange : null}
+                    onVisibleRangeChange={
+                      previewTradeMode === 'full' && previewScrollSyncEnabled
+                        ? handlePreviewKlineVisibleRangeChange
+                        : undefined
+                    }
                     hoverValueId={activeHoverValueId}
                     hoverHasReference={activeHoverHasReference}
                     onBarsUpdate={setKlineBars}
@@ -2184,7 +2669,12 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 </div>
               </div>
 
-              <div className="strategy-workbench-card">
+              <ResizeHandleVertical
+                className="strategy-workbench-resize-handle strategy-workbench-resize-handle--vertical strategy-workbench-resize-handle--left"
+                onResize={handleLeftVerticalResize}
+              />
+
+              <div className="strategy-workbench-card strategy-workbench-card--dashboard">
                 <div className="strategy-workbench-card-header">
                   <span className="strategy-workbench-card-title">仪表盘</span>
                   <div className="strategy-workbench-dashboard-header-actions">
@@ -2512,54 +3002,102 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                       <div className="strategy-workbench-live-list">
                         <div className="strategy-workbench-live-list-header">
                           <span>仓位列表</span>
-                          <span>{previewTrades.length} 条</span>
+                          <div className="strategy-workbench-live-list-header-right">
+                            <label
+                              className={`strategy-workbench-live-sync-toggle ${previewScrollSyncEnabled ? 'is-enabled' : ''}`}
+                              title="控制滚动联动：仓位列表滚动跟随K线，K线拖动回推仓位列表"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={previewScrollSyncEnabled}
+                                onChange={(event) => {
+                                  setPreviewScrollSyncEnabled(event.target.checked);
+                                }}
+                              />
+                              <span className="strategy-workbench-live-sync-toggle-icon" aria-hidden="true" />
+                              <span>{previewScrollSyncEnabled ? '联动开' : '联动关'}</span>
+                            </label>
+                            <span>{previewTrades.length} 条</span>
+                            <label className="strategy-workbench-live-mode-toggle">
+                              <input
+                                type="checkbox"
+                                checked={previewTradeMode === 'full'}
+                                onChange={(event) => {
+                                  setPreviewTradeMode(event.target.checked ? 'full' : 'normal');
+                                }}
+                              />
+                              <span>全量预览</span>
+                            </label>
+                          </div>
                         </div>
-
+                        <div
+                          className="strategy-workbench-live-list-body"
+                          ref={previewListBodyRef}
+                          onScroll={handlePreviewListScroll}
+                        >
                         {previewTrades.length === 0 ? (
                           <div className="strategy-workbench-live-empty">
                             暂无仓位记录，回测执行后会实时出现在右侧列表。
                           </div>
                         ) : (
-                          visiblePreviewTrades.map((trade, index) => (
-                            <div
-                              key={`${trade.entryTime}-${trade.exitTime}-${trade.side}-${index}`}
-                              className={`strategy-workbench-live-item ${trade.isOpen ? 'is-open' : ''}`}
-                            >
-                              <div className="strategy-workbench-live-item-head">
-                                <span className={`strategy-workbench-live-item-side ${trade.side === 'Long' ? 'is-long' : 'is-short'}`}>
-                                  {trade.side}
-                                </span>
-                                <span className="strategy-workbench-live-item-status">
-                                  {trade.isOpen ? '持仓中' : '已平仓'}
-                                </span>
-                                <span className={`strategy-workbench-live-item-pnl ${trade.pnl >= 0 ? 'is-positive' : 'is-negative'}`}>
-                                  {formatSignedNumber(trade.pnl)}
-                                </span>
+                          previewTrades.map((trade, index) => {
+                            const tradeKey = buildPreviewTradeKey(trade, index);
+                            const isSelected = activePreviewTradeKey === tradeKey;
+                            return (
+                              <div
+                                key={tradeKey}
+                                className={`strategy-workbench-live-item ${trade.isOpen ? 'is-open' : ''} ${isSelected ? 'is-selected' : ''}`}
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={isSelected}
+                                data-preview-trade-key={tradeKey}
+                                ref={(node) => {
+                                  if (node) {
+                                    previewTradeItemRefs.current.set(tradeKey, node);
+                                  } else {
+                                    previewTradeItemRefs.current.delete(tradeKey);
+                                  }
+                                }}
+                                onClick={() => handlePreviewTradeActivate(trade, index)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    handlePreviewTradeActivate(trade, index);
+                                  }
+                                }}
+                              >
+                                <div className="strategy-workbench-live-item-head">
+                                  <span className={`strategy-workbench-live-item-side ${trade.side === 'Long' ? 'is-long' : 'is-short'}`}>
+                                    {trade.side}
+                                  </span>
+                                  <span className="strategy-workbench-live-item-status">
+                                    {trade.isOpen ? '持仓中' : '已平仓'}
+                                  </span>
+                                  <span className={`strategy-workbench-live-item-pnl ${trade.pnl >= 0 ? 'is-positive' : 'is-negative'}`}>
+                                    {formatSignedNumber(trade.pnl)}
+                                  </span>
+                                </div>
+                                <div className="strategy-workbench-live-item-row">
+                                  <span>开仓: {formatDateTime(trade.entryTime)}</span>
+                                  <span>平仓: {trade.isOpen ? '持仓中' : formatDateTime(trade.exitTime)}</span>
+                                </div>
+                                <div className="strategy-workbench-live-item-row">
+                                  <span>开/平价: {trade.entryPrice.toFixed(4)} / {trade.exitPrice.toFixed(4)}</span>
+                                  <span>数量: {trade.qty}</span>
+                                </div>
+                                <div className="strategy-workbench-live-item-row">
+                                  <span>手续费: {trade.fee.toFixed(4)}</span>
+                                  <span>资金费: {formatSignedNumber(trade.funding)}</span>
+                                </div>
+                                <div className="strategy-workbench-live-item-row">
+                                  <span>离场: {trade.exitReason || '-'}</span>
+                                  <span>滑点: {trade.slippageBps} Bps</span>
+                                </div>
                               </div>
-                              <div className="strategy-workbench-live-item-row">
-                                <span>开仓: {formatDateTime(trade.entryTime)}</span>
-                                <span>平仓: {trade.isOpen ? '持仓中' : formatDateTime(trade.exitTime)}</span>
-                              </div>
-                              <div className="strategy-workbench-live-item-row">
-                                <span>开/平价: {trade.entryPrice.toFixed(4)} / {trade.exitPrice.toFixed(4)}</span>
-                                <span>数量: {trade.qty}</span>
-                              </div>
-                              <div className="strategy-workbench-live-item-row">
-                                <span>手续费: {trade.fee.toFixed(4)}</span>
-                                <span>资金费: {formatSignedNumber(trade.funding)}</span>
-                              </div>
-                              <div className="strategy-workbench-live-item-row">
-                                <span>离场: {trade.exitReason || '-'}</span>
-                                <span>滑点: {trade.slippageBps} Bps</span>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
-                        {foldedTradeCount > 0 ? (
-                          <div className="strategy-workbench-live-folded-hint">
-                            为保持单屏展示，已折叠较早仓位 {foldedTradeCount} 条（保留最近 {visiblePreviewTrades.length} 条）。
-                          </div>
-                        ) : null}
+                        </div>
                       </div>
                     </div>
                   </>
@@ -2567,8 +3105,13 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               </div>
             </div>
 
-            <div className="strategy-workbench-right">
-              <div className="strategy-workbench-right-left">
+            <ResizeHandle
+              className="strategy-workbench-resize-handle strategy-workbench-resize-handle--main"
+              onResize={handleMainResize}
+            />
+
+            <div className="strategy-workbench-right" ref={rightPanelRef}>
+              <div className="strategy-workbench-right-left strategy-workbench-right-left--resizable" ref={rightLeftRef}>
                 <div className="strategy-workbench-card strategy-workbench-card--panel">
                   <div className="strategy-workbench-card-header">
                     <span className="strategy-workbench-card-title">已选指标</span>
@@ -2702,6 +3245,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                   ) : null}
                 </div>
 
+                <ResizeHandleVertical
+                  className="strategy-workbench-resize-handle strategy-workbench-resize-handle--vertical strategy-workbench-resize-handle--right-left"
+                  onResize={handleRightLeftVerticalResize}
+                />
+
                 <div className="strategy-workbench-card strategy-workbench-card--operator">
                   <div className="strategy-workbench-card-header">
                     <span className="strategy-workbench-card-title">快捷操作符</span>
@@ -2745,6 +3293,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                   </div>
                 </div>
               </div>
+
+              <ResizeHandle
+                className="strategy-workbench-resize-handle strategy-workbench-resize-handle--right"
+                onResize={handleRightResize}
+              />
 
               <div className="strategy-workbench-right-right">
                 <div className="strategy-workbench-card">

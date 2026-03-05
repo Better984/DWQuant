@@ -232,6 +232,42 @@ const normalizeConditionMethod = (raw?: string) => {
 };
 
 const FILTER_CONTAINER_IDS = new Set(['open-long-filter', 'open-short-filter']);
+const DEFAULT_SAMPLE_EMA_ID = 'sample-ema-15';
+const DEFAULT_SAMPLE_SMA_ID = 'sample-sma-50';
+const DEFAULT_SAMPLE_OUTPUT_KEY = 'Real';
+
+const createDefaultSampleIndicators = (defaultTimeframe: string): GeneratedIndicatorPayload[] => {
+  const timeframe = resolveReferenceTimeframe(defaultTimeframe, '5m') || '5m';
+  const buildSampleIndicator = (
+    id: string,
+    code: string,
+    period: number,
+  ): GeneratedIndicatorPayload => {
+    const config = {
+      indicator: code,
+      timeframe,
+      input: 'Close',
+      params: [period],
+      output: DEFAULT_SAMPLE_OUTPUT_KEY,
+      offsetRange: [0, 0],
+      calcMode: 'OnBarClose',
+    };
+    return {
+      id,
+      code,
+      name: code,
+      category: 'Sample',
+      outputs: [{ key: DEFAULT_SAMPLE_OUTPUT_KEY, hint: DEFAULT_SAMPLE_OUTPUT_KEY }],
+      config,
+      configText: JSON.stringify(config),
+    };
+  };
+
+  return [
+    buildSampleIndicator(DEFAULT_SAMPLE_EMA_ID, 'EMA', 15),
+    buildSampleIndicator(DEFAULT_SAMPLE_SMA_ID, 'SMA', 50),
+  ];
+};
 
 const createDefaultConditionContainers = (): ConditionContainer[] => ([
   { id: 'open-long-filter', title: '开多筛选器', enabled: false, required: false, groups: [] },
@@ -241,6 +277,41 @@ const createDefaultConditionContainers = (): ConditionContainer[] => ([
   { id: 'close-long', title: '平多条件', enabled: true, required: false, groups: [] },
   { id: 'close-short', title: '平空条件', enabled: true, required: false, groups: [] },
 ]);
+
+const createDefaultSampleConditionContainers = (): ConditionContainer[] => {
+  const sampleGroup: ConditionGroup = {
+    id: 'open-long-group-sample',
+    name: '条件组 1',
+    enabled: true,
+    required: false,
+    conditions: [
+      {
+        id: 'open-long-condition-sample-crossup',
+        enabled: true,
+        required: false,
+        method: 'CrossUp',
+        leftValueId: `${DEFAULT_SAMPLE_EMA_ID}:${DEFAULT_SAMPLE_OUTPUT_KEY}`,
+        rightValueType: 'field',
+        rightValueId: `${DEFAULT_SAMPLE_SMA_ID}:${DEFAULT_SAMPLE_OUTPUT_KEY}`,
+        rightNumber: '',
+        extraValueType: 'number',
+        extraValueId: '',
+        extraNumber: '',
+        paramValues: [],
+      },
+    ],
+  };
+
+  return createDefaultConditionContainers().map((container) => {
+    if (container.id !== 'open-long') {
+      return container;
+    }
+    return {
+      ...container,
+      groups: [sampleGroup],
+    };
+  });
+};
 
 const createDefaultTradeConfig = (): StrategyTradeConfig => ({
   exchange: 'binance',
@@ -727,14 +798,14 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   // 从配置中加载初始数据
   const loadedIndicators = useMemo(() => {
     if (!initialConfig) {
-      return [];
+      return createDefaultSampleIndicators(initialStrategyTimeframe);
     }
     return extractIndicatorsFromConfig(initialConfig, initialStrategyTimeframe);
   }, [initialConfig, initialStrategyTimeframe]);
 
   const loadedContainers = useMemo(() => {
     if (!initialConfig) {
-      return createDefaultConditionContainers();
+      return createDefaultSampleConditionContainers();
     }
     return parseConditionContainersFromConfig(initialConfig, initialStrategyTimeframe);
   }, [initialConfig, initialStrategyTimeframe]);

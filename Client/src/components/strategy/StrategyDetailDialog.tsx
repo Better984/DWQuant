@@ -2381,10 +2381,16 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                   </thead>
                   <tbody>
                     {backtestStreamingTrades.map((trade, tradeIndex) => {
+                      const tradeKey = buildBacktestTradeKey(trade, trade.symbol, tradeIndex);
+                      const isSelected = selectedBacktestTradeKey === tradeKey;
                       const sideClass = trade.side?.toLowerCase() === 'long' ? 'side-long' : trade.side?.toLowerCase() === 'short' ? 'side-short' : '';
                       const pnlClass = trade.pnL > 0 ? 'pnl-profit' : trade.pnL < 0 ? 'pnl-loss' : '';
                       return (
-                        <tr key={`${trade.entryTime}-${trade.exitTime}-${tradeIndex}`} className={sideClass}>
+                        <tr
+                          key={`${trade.entryTime}-${trade.exitTime}-${tradeIndex}`}
+                          className={`backtest-trade-row ${sideClass} ${isSelected ? 'is-selected' : ''}`}
+                          onClick={() => handleFocusBacktestTrade(trade, trade.symbol, tradeIndex)}
+                        >
                           <td>{trade.symbol || '-'}</td>
                           <td className={sideClass}>{trade.side}</td>
                           <td>{formatTimeRange(trade.entryTime, trade.exitTime, isBacktestTradeOpen(trade))}</td>
@@ -3362,10 +3368,16 @@ const StrategyDetailDialog: React.FC<StrategyDetailDialogProps> = ({
                             </thead>
                             <tbody>
                               {backtestStreamingTrades.map((trade, tradeIndex) => {
+                                const tradeKey = buildBacktestTradeKey(trade, trade.symbol, tradeIndex);
+                                const isSelected = selectedBacktestTradeKey === tradeKey;
                                 const sideClass = trade.side?.toLowerCase() === 'long' ? 'side-long' : trade.side?.toLowerCase() === 'short' ? 'side-short' : '';
                                 const pnlClass = trade.pnL > 0 ? 'pnl-profit' : trade.pnL < 0 ? 'pnl-loss' : '';
                                 return (
-                                  <tr key={`${trade.entryTime}-${trade.exitTime}-${tradeIndex}`} className={sideClass}>
+                                  <tr
+                                    key={`${trade.entryTime}-${trade.exitTime}-${tradeIndex}`}
+                                    className={`backtest-trade-row ${sideClass} ${isSelected ? 'is-selected' : ''}`}
+                                    onClick={() => handleFocusBacktestTrade(trade, trade.symbol, tradeIndex)}
+                                  >
                                     <td>{trade.symbol || '-'}</td>
                                     <td className={sideClass}>{trade.side}</td>
                                     <td>{formatTimeRange(trade.entryTime, trade.exitTime, isBacktestTradeOpen(trade))}</td>

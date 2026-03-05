@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LoadDataType, dispose, init, type Chart, type KLineData } from 'klinecharts';
+import { ActionType, LoadDataType, dispose, init, type Chart, type KLineData } from 'klinecharts';
 
 import { HttpClient, getToken } from '../../network/index.ts';
 import type { GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
@@ -14,12 +14,39 @@ import {
   normalizeTalibInputSource,
   registerTalibIndicators,
 } from '../../lib/registerTalibIndicators';
+import { registerCustomOverlays } from '../market/customOverlays';
+
+export type StrategyWorkbenchTradeFocusRange = {
+  id: string;
+  startTime: number;
+  endTime: number;
+  side: string;
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  stopLossPrice?: number | null;
+  takeProfitPrice?: number | null;
+};
+
+export type StrategyWorkbenchVisibleRange = {
+  fromIndex: number;
+  toIndex: number;
+  fromTime: number;
+  toTime: number;
+  centerTime: number;
+};
+
+type StrategyWorkbenchPreviewMode = 'normal' | 'full';
 
 interface StrategyWorkbenchKlineProps {
   exchange: string;
   symbol: string;
   timeframeSec: number;
   selectedIndicators: GeneratedIndicatorPayload[];
+  previewMode?: StrategyWorkbenchPreviewMode;
+  focusRange?: StrategyWorkbenchTradeFocusRange | null;
+  fullPreviewRanges?: StrategyWorkbenchTradeFocusRange[];
+  syncTargetRange?: StrategyWorkbenchTradeFocusRange | null;
+  onVisibleRangeChange?: (range: StrategyWorkbenchVisibleRange) => void;
   hoverValueId?: string;
   hoverHasReference?: boolean;
   onBarsUpdate?: (bars: KLineData[]) => void;
@@ -91,6 +118,8 @@ const TIMEFRAME_TO_MS: Record<number, number> = {
 const DEFAULT_INITIAL_LOOKBACK_DAYS = 30;
 const MAX_INITIAL_LOAD_BAR_COUNT = 50_000;
 const LOAD_MORE_BAR_COUNT = 1200;
+const FULL_PREVIEW_OVERLAY_MIN_COUNT = 48;
+const FULL_PREVIEW_OVERLAY_MAX_COUNT = 220;
 
 // 按周期换算“最近30天”需要的K线条数，作为工作台默认样本窗口。
 const resolveInitialLoadBarCount = (intervalMs: number) => {
@@ -144,6 +173,92 @@ const formatDateTime = (ms: number) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
     date.getMinutes(),
   )}:${pad(date.getSeconds())}`;
+};
+
+const toFinitePrice = (value?: number | null) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const getDefaultRiskTakeProfitPrice = (entryPrice: number, side: 'long' | 'short') => (
+  side === 'short' ? entryPrice * 0.99 : entryPrice * 1.01
+);
+
+const getDefaultRiskStopLossPrice = (entryPrice: number, side: 'long' | 'short') => (
+  side === 'short' ? entryPrice * 1.01 : entryPrice * 0.99
+);
+
+const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const findNearestDataIndexByTimestamp = (dataList: KLineData[], timestamp: number): number | null => {
+  if (!Array.isArray(dataList) || dataList.length === 0 || !Number.isFinite(timestamp)) {
+    return null;
+  }
+  let left = 0;
+  let right = dataList.length - 1;
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const midTs = Number(dataList[mid]?.timestamp ?? 0);
+    if (!Number.isFinite(midTs)) {
+      return null;
+    }
+    if (midTs === timestamp) {
+      return mid;
+    }
+    if (midTs < timestamp) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+  const leftIndex = clampNumber(left, 0, dataList.length - 1);
+  const rightIndex = clampNumber(right, 0, dataList.length - 1);
+  const leftDiff = Math.abs(Number(dataList[leftIndex]?.timestamp ?? 0) - timestamp);
+  const rightDiff = Math.abs(Number(dataList[rightIndex]?.timestamp ?? 0) - timestamp);
+  return leftDiff <= rightDiff ? leftIndex : rightIndex;
+};
+
+type VisibleRangeLike = {
+  from?: number;
+  to?: number;
+};
+
+const normalizeTradeSide = (value?: string): 'long' | 'short' => {
+  return value?.trim().toLowerCase() === 'short' ? 'short' : 'long';
+};
+
+const buildVisibleRangeSnapshotFromChart = (
+  chart: Chart,
+  rangeLike?: VisibleRangeLike | null,
+): StrategyWorkbenchVisibleRange | null => {
+  const dataList = chart.getDataList();
+  if (!Array.isArray(dataList) || dataList.length <= 0) {
+    return null;
+  }
+  const fallbackRange = chart.getVisibleRange();
+  const fromRaw = Number(rangeLike?.from ?? fallbackRange.from ?? 0);
+  const toRaw = Number(rangeLike?.to ?? fallbackRange.to ?? 0);
+  if (!Number.isFinite(fromRaw) || !Number.isFinite(toRaw)) {
+    return null;
+  }
+  const rawFromIndex = clampNumber(Math.floor(Math.min(fromRaw, toRaw)), 0, dataList.length - 1);
+  const rawToIndex = clampNumber(Math.ceil(Math.max(fromRaw, toRaw)), 0, dataList.length - 1);
+  const fromIndex = Math.min(rawFromIndex, rawToIndex);
+  const toIndex = Math.max(rawFromIndex, rawToIndex);
+  const centerIndex = clampNumber(Math.round((fromIndex + toIndex) / 2), 0, dataList.length - 1);
+  const fromTime = Number(dataList[fromIndex]?.timestamp ?? 0);
+  const toTime = Number(dataList[toIndex]?.timestamp ?? 0);
+  const centerTime = Number(dataList[centerIndex]?.timestamp ?? 0);
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime) || !Number.isFinite(centerTime)) {
+    return null;
+  }
+  return {
+    fromIndex,
+    toIndex,
+    fromTime,
+    toTime,
+    centerTime,
+  };
 };
 
 const toKlineData = (item: OhlcvDto): KLineData | null => {
@@ -468,6 +583,11 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   symbol,
   timeframeSec,
   selectedIndicators,
+  previewMode = 'normal',
+  focusRange,
+  fullPreviewRanges = [],
+  syncTargetRange,
+  onVisibleRangeChange,
   hoverValueId,
   hoverHasReference = false,
   onBarsUpdate,
@@ -476,6 +596,13 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   const chartRef = useRef<Chart | null>(null);
   const subPaneIdMapRef = useRef<Map<string, string>>(new Map());
   const mainIndicatorSetRef = useRef<Set<string>>(new Set());
+  const focusOverlayGroupIdRef = useRef<string | null>(null);
+  const fullPreviewOverlayGroupIdRef = useRef<string | null>(null);
+  const fullPreviewOverlaySignatureRef = useRef('');
+  const focusSyncTargetSignatureRef = useRef('');
+  const latestVisibleRangeRef = useRef<StrategyWorkbenchVisibleRange | null>(null);
+  const visibleRangeActionRafRef = useRef<number | null>(null);
+  const fullPreviewOverlayRafRef = useRef<number | null>(null);
   const blinkTimerRef = useRef<number | null>(null);
   const cloudMissMemoRef = useRef<Map<string, boolean>>(new Map());
   const historySourceModeRef = useRef<HistorySourceMode>('none');
@@ -487,6 +614,29 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   const [talibReady, setTalibReady] = useState(false);
   const [chartReady, setChartReady] = useState(false);
 
+  const clearFocusOverlay = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    if (focusOverlayGroupIdRef.current) {
+      chart.removeOverlay({ groupId: focusOverlayGroupIdRef.current });
+      focusOverlayGroupIdRef.current = null;
+    }
+  }, []);
+
+  const clearFullPreviewOverlay = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    if (fullPreviewOverlayGroupIdRef.current) {
+      chart.removeOverlay({ groupId: fullPreviewOverlayGroupIdRef.current });
+      fullPreviewOverlayGroupIdRef.current = null;
+    }
+    fullPreviewOverlaySignatureRef.current = '';
+  }, []);
+
   const timeframeKey = TIMEFRAME_TO_KEY[timeframeSec] || 'm5';
   const localTimeframeKey = TIMEFRAME_TO_LOCAL_KEY[timeframeSec] || '5m';
   const intervalMs = TIMEFRAME_TO_MS[timeframeSec] || 300_000;
@@ -496,6 +646,12 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     const normalizedSymbol = normalizeSymbolForLocal(symbol);
     return `${normalizedExchange}|${normalizedSymbol}|${localTimeframeKey}`;
   }, [exchange, localTimeframeKey, symbol]);
+
+  useEffect(() => {
+    focusSyncTargetSignatureRef.current = '';
+    fullPreviewOverlaySignatureRef.current = '';
+    latestVisibleRangeRef.current = null;
+  }, [seriesKey]);
 
   const hoverIndicatorMap = useMemo(() => {
     const map = new Map<string, IndicatorHoverEntry>();
@@ -698,6 +854,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     if (!containerRef.current || chartRef.current) {
       return;
     }
+    registerCustomOverlays();
     chartRef.current = init(containerRef.current);
     if (!chartRef.current) {
       return;
@@ -751,6 +908,278 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   useEffect(() => {
     onBarsUpdate?.(bars);
   }, [bars, onBarsUpdate]);
+
+  const refreshFullPreviewOverlays = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart || !chartReady) {
+      return;
+    }
+    if (previewMode !== 'full') {
+      clearFullPreviewOverlay();
+      return;
+    }
+    if (!Array.isArray(fullPreviewRanges) || fullPreviewRanges.length <= 0) {
+      clearFullPreviewOverlay();
+      return;
+    }
+
+    const snapshot =
+      latestVisibleRangeRef.current
+      ?? buildVisibleRangeSnapshotFromChart(chart, chart.getVisibleRange());
+    if (!snapshot) {
+      clearFullPreviewOverlay();
+      return;
+    }
+
+    const viewportFrom = Math.min(snapshot.fromTime, snapshot.toTime);
+    const viewportTo = Math.max(snapshot.fromTime, snapshot.toTime);
+    const centerTime = snapshot.centerTime;
+    const paddingMs = Math.max(intervalMs * 2, Math.round((viewportTo - viewportFrom) * 0.06));
+    const maxOverlayCount = clampNumber(
+      Math.round((snapshot.toIndex - snapshot.fromIndex + 1) * 1.6),
+      FULL_PREVIEW_OVERLAY_MIN_COUNT,
+      FULL_PREVIEW_OVERLAY_MAX_COUNT,
+    );
+
+    let visibleRanges = fullPreviewRanges
+      .map((range) => {
+        const startTime = Math.min(range.startTime, range.endTime);
+        const endTime = Math.max(range.startTime, range.endTime);
+        if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime <= 0 || endTime <= 0) {
+          return null;
+        }
+        if (endTime < viewportFrom - paddingMs || startTime > viewportTo + paddingMs) {
+          return null;
+        }
+        return {
+          ...range,
+          startTime,
+          endTime,
+          midpoint: Math.floor((startTime + endTime) / 2),
+        };
+      })
+      .filter((item): item is StrategyWorkbenchTradeFocusRange & { midpoint: number } => item !== null);
+
+    if (visibleRanges.length <= 0) {
+      clearFullPreviewOverlay();
+      return;
+    }
+
+    if (visibleRanges.length > maxOverlayCount) {
+      visibleRanges = [...visibleRanges]
+        .sort((a, b) => Math.abs(a.midpoint - centerTime) - Math.abs(b.midpoint - centerTime))
+        .slice(0, maxOverlayCount);
+    }
+
+    const signature = `${snapshot.fromIndex}:${snapshot.toIndex}|${visibleRanges.map((item) => item.id).join(',')}`;
+    if (signature === fullPreviewOverlaySignatureRef.current) {
+      return;
+    }
+    clearFullPreviewOverlay();
+    fullPreviewOverlaySignatureRef.current = signature;
+
+    const groupId = `workbench-full-preview-${Date.now()}`;
+    fullPreviewOverlayGroupIdRef.current = groupId;
+    const getBars = () => chart.getDataList();
+    const currentBars = getBars();
+    const payloads = visibleRanges
+      .map((range) => {
+        const side = normalizeTradeSide(range.side);
+        const overlayName = side === 'short' ? 'riskRewardShort' : 'riskRewardLong';
+        const entryPrice = toFinitePrice(range.entryPrice) ?? toFinitePrice(range.exitPrice);
+        if (entryPrice === null) {
+          return null;
+        }
+        const exitPrice = toFinitePrice(range.exitPrice);
+        const takeProfitPrice =
+          toFinitePrice(range.takeProfitPrice) ?? getDefaultRiskTakeProfitPrice(entryPrice, side);
+        const stopLossPrice =
+          toFinitePrice(range.stopLossPrice) ?? getDefaultRiskStopLossPrice(entryPrice, side);
+        return {
+          name: overlayName,
+          groupId,
+          points: [
+            { timestamp: range.startTime, value: entryPrice },
+            { timestamp: range.endTime, value: entryPrice },
+            { timestamp: range.endTime, value: takeProfitPrice },
+            { timestamp: range.endTime, value: stopLossPrice },
+          ],
+          extendData: {
+            direction: side,
+            getBars,
+            bars: currentBars,
+            positionEntryTime: range.startTime,
+            positionExitTime: range.endTime,
+            positionExitPrice: exitPrice,
+            positionTakeProfitPrice: takeProfitPrice,
+            positionStopLossPrice: stopLossPrice,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    if (payloads.length <= 0) {
+      clearFullPreviewOverlay();
+      return;
+    }
+
+    chart.createOverlay(payloads as never);
+  }, [chartReady, clearFullPreviewOverlay, fullPreviewRanges, intervalMs, previewMode]);
+
+  const scheduleFullPreviewOverlayRefresh = useCallback(() => {
+    if (fullPreviewOverlayRafRef.current !== null) {
+      return;
+    }
+    fullPreviewOverlayRafRef.current = window.requestAnimationFrame(() => {
+      fullPreviewOverlayRafRef.current = null;
+      refreshFullPreviewOverlays();
+    });
+  }, [refreshFullPreviewOverlays]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !chartReady) {
+      return;
+    }
+
+    const handleVisibleRangeChange = (payload?: unknown) => {
+      if (visibleRangeActionRafRef.current !== null) {
+        window.cancelAnimationFrame(visibleRangeActionRafRef.current);
+      }
+      visibleRangeActionRafRef.current = window.requestAnimationFrame(() => {
+        visibleRangeActionRafRef.current = null;
+        const snapshot = buildVisibleRangeSnapshotFromChart(chart, payload as VisibleRangeLike);
+        if (!snapshot) {
+          return;
+        }
+        latestVisibleRangeRef.current = snapshot;
+        onVisibleRangeChange?.(snapshot);
+        if (previewMode === 'full') {
+          scheduleFullPreviewOverlayRefresh();
+        }
+      });
+    };
+
+    chart.subscribeAction(ActionType.OnVisibleRangeChange, handleVisibleRangeChange);
+    handleVisibleRangeChange(chart.getVisibleRange());
+    return () => {
+      chart.unsubscribeAction(ActionType.OnVisibleRangeChange, handleVisibleRangeChange);
+      if (visibleRangeActionRafRef.current !== null) {
+        window.cancelAnimationFrame(visibleRangeActionRafRef.current);
+        visibleRangeActionRafRef.current = null;
+      }
+    };
+  }, [chartReady, onVisibleRangeChange, previewMode, scheduleFullPreviewOverlayRefresh]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !chartReady) {
+      return;
+    }
+    if (previewMode !== 'normal' || !focusRange) {
+      clearFocusOverlay();
+      return;
+    }
+    if (bars.length <= 0) {
+      return;
+    }
+
+    const startTime = Math.min(focusRange.startTime, focusRange.endTime);
+    const endTime = Math.max(focusRange.startTime, focusRange.endTime);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime <= 0 || endTime <= 0) {
+      return;
+    }
+
+    const side = focusRange.side?.trim().toLowerCase() === 'short' ? 'short' : 'long';
+    const overlayName = side === 'short' ? 'riskRewardShort' : 'riskRewardLong';
+    const entryPrice = toFinitePrice(focusRange.entryPrice) ?? toFinitePrice(focusRange.exitPrice);
+    if (entryPrice === null) {
+      return;
+    }
+
+    const exitPrice = toFinitePrice(focusRange.exitPrice);
+    const takeProfitPrice = toFinitePrice(focusRange.takeProfitPrice) ?? getDefaultRiskTakeProfitPrice(entryPrice, side);
+    const stopLossPrice = toFinitePrice(focusRange.stopLossPrice) ?? getDefaultRiskStopLossPrice(entryPrice, side);
+
+    clearFocusOverlay();
+    const groupId = `workbench-focus-${focusRange.id}-${Date.now()}`;
+    focusOverlayGroupIdRef.current = groupId;
+
+    chart.createOverlay({
+      name: overlayName,
+      groupId,
+      points: [
+        { timestamp: startTime, value: entryPrice },
+        { timestamp: endTime, value: entryPrice },
+        { timestamp: endTime, value: takeProfitPrice },
+        { timestamp: endTime, value: stopLossPrice },
+      ],
+      extendData: {
+        direction: side,
+        getBars: () => chart.getDataList(),
+        bars: chart.getDataList(),
+        positionEntryTime: startTime,
+        positionExitTime: endTime,
+        positionExitPrice: exitPrice,
+        positionTakeProfitPrice: takeProfitPrice,
+        positionStopLossPrice: stopLossPrice,
+      },
+    } as never);
+
+    const dataList = chart.getDataList();
+    const leftIndex = findNearestDataIndexByTimestamp(dataList, startTime);
+    const rightIndex = findNearestDataIndexByTimestamp(dataList, endTime);
+    const midpoint = Math.floor((startTime + endTime) / 2);
+
+    if (leftIndex !== null && rightIndex !== null) {
+      const fromIndex = Math.min(leftIndex, rightIndex);
+      const toIndex = Math.max(leftIndex, rightIndex);
+      const width = toIndex - fromIndex + 1;
+      if (width > 0) {
+        const visibleRange = chart.getVisibleRange();
+        const currentVisibleBars = Math.max(2, Math.round((visibleRange.to ?? 0) - (visibleRange.from ?? 0) + 1));
+        const desiredVisibleBars = clampNumber(Math.round(width * 1.8), 16, 420);
+        const scale = currentVisibleBars / desiredVisibleBars;
+        if (Number.isFinite(scale) && scale > 0 && Math.abs(scale - 1) > 0.08) {
+          chart.zoomAtTimestamp(scale, midpoint, 0);
+        }
+      }
+    }
+
+    chart.scrollToTimestamp(midpoint, 0);
+  }, [bars, chartReady, clearFocusOverlay, focusRange, previewMode]);
+
+  useEffect(() => {
+    if (previewMode !== 'full') {
+      focusSyncTargetSignatureRef.current = '';
+      clearFullPreviewOverlay();
+      return;
+    }
+    scheduleFullPreviewOverlayRefresh();
+  }, [clearFullPreviewOverlay, previewMode, scheduleFullPreviewOverlayRefresh]);
+
+  useEffect(() => {
+    scheduleFullPreviewOverlayRefresh();
+  }, [bars, fullPreviewRanges, scheduleFullPreviewOverlayRefresh]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !chartReady || previewMode !== 'full' || !syncTargetRange) {
+      return;
+    }
+    const startTime = Math.min(syncTargetRange.startTime, syncTargetRange.endTime);
+    const endTime = Math.max(syncTargetRange.startTime, syncTargetRange.endTime);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime <= 0 || endTime <= 0) {
+      return;
+    }
+    const signature = `${syncTargetRange.id}|${startTime}|${endTime}`;
+    if (signature === focusSyncTargetSignatureRef.current) {
+      return;
+    }
+    focusSyncTargetSignatureRef.current = signature;
+    chart.scrollToTimestamp(Math.floor((startTime + endTime) / 2), 0);
+    scheduleFullPreviewOverlayRefresh();
+  }, [chartReady, previewMode, scheduleFullPreviewOverlayRefresh, syncTargetRange]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -961,15 +1390,28 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   useEffect(() => {
     return () => {
       clearBlinkTimer();
+      clearFocusOverlay();
+      clearFullPreviewOverlay();
+      if (visibleRangeActionRafRef.current !== null) {
+        window.cancelAnimationFrame(visibleRangeActionRafRef.current);
+        visibleRangeActionRafRef.current = null;
+      }
+      if (fullPreviewOverlayRafRef.current !== null) {
+        window.cancelAnimationFrame(fullPreviewOverlayRafRef.current);
+        fullPreviewOverlayRafRef.current = null;
+      }
       cloudMissMemoRef.current.clear();
       if (chartRef.current) {
         dispose(chartRef.current);
         chartRef.current = null;
       }
+      latestVisibleRangeRef.current = null;
+      focusSyncTargetSignatureRef.current = '';
+      fullPreviewOverlaySignatureRef.current = '';
       mainIndicatorSetRef.current.clear();
       subPaneIdMapRef.current.clear();
     };
-  }, [clearBlinkTimer]);
+  }, [clearBlinkTimer, clearFocusOverlay, clearFullPreviewOverlay]);
 
   return (
     <div className="strategy-workbench-kline-shell">
