@@ -599,8 +599,46 @@
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   min-width: 0;
+}
+
+.strategy-workbench-live-summary-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.strategy-workbench-live-summary-tab {
+  height: 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategy-workbench-live-summary-tab:hover {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.strategy-workbench-live-summary-tab.is-active {
+  border-color: #93c5fd;
+  background: #eaf2ff;
+  color: #1d4ed8;
+}
+
+.strategy-workbench-live-summary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .strategy-workbench-live-progress {
@@ -1019,9 +1057,33 @@
   gap: 8px;
 }
 
+.strategy-workbench-live-time-analysis-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-workbench-live-time-analysis-snapshot-card {
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.strategy-workbench-live-time-analysis-snapshot-card strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .strategy-workbench-live-time-analysis-table-scroll {
-  overflow: auto;
-  max-height: 258px;
+  overflow: visible;
+  max-height: none;
 }
 
 .strategy-workbench-live-time-analysis-table {
@@ -1045,9 +1107,7 @@
 }
 
 .strategy-workbench-live-time-analysis-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  position: static;
   background: #f8fafc;
   color: #64748b;
   font-weight: 700;
@@ -1163,6 +1223,12 @@
   font-size: 11px;
   line-height: 1.35;
   color: #475569;
+}
+
+.strategy-workbench-live-log-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .strategy-workbench-live-list {
@@ -2373,7 +2439,12 @@
 
   .strategy-workbench-live-time-analysis-insights,
   .strategy-workbench-live-time-analysis-chart-grid,
-  .strategy-workbench-live-time-analysis-table-grid {
+  .strategy-workbench-live-time-analysis-table-grid,
+  .strategy-workbench-live-time-analysis-snapshot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-workbench-live-log-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2434,6 +2505,11 @@
   }
 
   .strategy-workbench-live-time-analysis-toggle-button {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .strategy-workbench-live-summary-tab {
     flex: 1;
     min-width: 0;
   }
@@ -3109,6 +3185,17 @@
   border-radius: 12px;
 }
 
+.strategy-workbench--refactor .strategy-workbench-live-summary-tab {
+  border-color: #c9dbf4;
+  color: #4c6587;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-summary-tab.is-active {
+  border-color: #9fc0ee;
+  background: #eaf3ff;
+  color: #1247a6;
+}
+
 .strategy-workbench--refactor .strategy-workbench-dashboard-progress-chip {
   border-color: #c5d8f3;
   background: #f5f9ff;
@@ -3154,6 +3241,10 @@
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis,
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis-card {
   border-color: #dde9f8;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis-snapshot-card {
+  border-color: #c9dbf4;
 }
 
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis-toggle {

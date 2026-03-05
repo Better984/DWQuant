@@ -159,6 +159,7 @@ type BacktestRangeMode = 'latest_30d' | 'custom';
 type PreviewTradeMode = 'normal' | 'full';
 type WorkbenchLayoutMode = 'edit' | 'backtest';
 type CalendarViewMode = 'month' | 'week' | 'day';
+type LiveSummaryTab = 'overview' | 'stats' | 'calendar' | 'log';
 
 type WorkbenchBacktestParams = {
   takeProfitPct: number;
@@ -1100,6 +1101,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   /** 仪表盘预览区：仓位列表宽度占比 (20–55%)，默认约 1/3 */
   const [liveListPanelWidth, setLiveListPanelWidth] = useState(33.333);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('month');
+  const [liveSummaryTab, setLiveSummaryTab] = useState<LiveSummaryTab>('overview');
   const [calendarAnchorTimestamp, setCalendarAnchorTimestamp] = useState(0);
   const [timeAnalysisReferenceMode, setTimeAnalysisReferenceMode] = useState<TimeAnalysisReferenceMode>('entry');
   const [timeAnalysisGranularity, setTimeAnalysisGranularity] = useState<TimeAnalysisGranularity>('hour');
@@ -2687,7 +2689,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const equitySummary = localBacktestSummary.equitySummary;
   const eventSummary = localBacktestSummary.eventSummary;
   const recentEvents = useMemo(
-    () => [...(localBacktestSummary.events || [])].slice(-8).reverse(),
+    () => [...(localBacktestSummary.events || [])].slice(-6).reverse(),
     [localBacktestSummary.events],
   );
   const topEventTypesText = useMemo(() => {
@@ -3545,7 +3547,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return `rgba(220, 38, 38, ${alpha.toFixed(3)})`;
   }, []);
   const visibleDiagnostics = useMemo(
-    () => (Array.isArray(localBacktestSummary.diagnostics) ? localBacktestSummary.diagnostics : []).slice(0, 14),
+    () => (Array.isArray(localBacktestSummary.diagnostics) ? localBacktestSummary.diagnostics : []).slice(0, 8),
     [localBacktestSummary.diagnostics],
   );
 
@@ -4149,6 +4151,38 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                       }
                     >
                       <div className="strategy-workbench-live-summary">
+                        <div className="strategy-workbench-live-summary-tabs" role="tablist" aria-label="回测摘要分组">
+                          <button
+                            type="button"
+                            className={`strategy-workbench-live-summary-tab ${liveSummaryTab === 'overview' ? 'is-active' : ''}`}
+                            onClick={() => setLiveSummaryTab('overview')}
+                          >
+                            概论
+                          </button>
+                          <button
+                            type="button"
+                            className={`strategy-workbench-live-summary-tab ${liveSummaryTab === 'stats' ? 'is-active' : ''}`}
+                            onClick={() => setLiveSummaryTab('stats')}
+                          >
+                            统计
+                          </button>
+                          <button
+                            type="button"
+                            className={`strategy-workbench-live-summary-tab ${liveSummaryTab === 'calendar' ? 'is-active' : ''}`}
+                            onClick={() => setLiveSummaryTab('calendar')}
+                          >
+                            日历
+                          </button>
+                          <button
+                            type="button"
+                            className={`strategy-workbench-live-summary-tab ${liveSummaryTab === 'log' ? 'is-active' : ''}`}
+                            onClick={() => setLiveSummaryTab('log')}
+                          >
+                            Log
+                          </button>
+                        </div>
+                        <div className="strategy-workbench-live-summary-panel">
+                          {liveSummaryTab === 'overview' ? (
                         <div className="strategy-workbench-live-visual-grid">
                           <div className="strategy-workbench-live-chart-card strategy-workbench-live-chart-card--equity">
                             <div className="strategy-workbench-live-chart-title strategy-workbench-live-chart-title--with-metrics">
@@ -4190,6 +4224,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                             </div>
                           </div>
                         </div>
+                          ) : null}
+                          {liveSummaryTab === 'calendar' ? (
                         <div className="strategy-workbench-live-calendar">
                           <div className="strategy-workbench-live-calendar-header">
                             <div className="strategy-workbench-live-calendar-title">盈亏日历分析</div>
@@ -4296,6 +4332,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                             })}
                           </div>
                         </div>
+                          ) : null}
+                          {liveSummaryTab === 'stats' ? (
+                            <>
                         <div className="strategy-workbench-live-time-analysis">
                           <div className="strategy-workbench-live-time-analysis-header">
                             <div className="strategy-workbench-live-time-analysis-title">时段盈利分析</div>
@@ -4366,72 +4405,16 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               />
                             </div>
                           </div>
-                          <div className="strategy-workbench-live-time-analysis-table-grid">
-                            <div className="strategy-workbench-live-time-analysis-card">
-                              <div className="strategy-workbench-live-time-analysis-card-title">日级分布（样本笔数/胜亏占比）</div>
-                              <div className="strategy-workbench-live-time-analysis-table-scroll">
-                                <table className="strategy-workbench-live-time-analysis-table">
-                                  <thead>
-                                    <tr>
-                                      <th>时段</th>
-                                      <th>笔数</th>
-                                      <th>胜率</th>
-                                      <th>亏损占比</th>
-                                      <th>均值(%)</th>
-                                      <th>总盈亏</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {dayPeriodBuckets.map((bucket) => (
-                                      <tr key={bucket.key}>
-                                        <td>{bucket.label}</td>
-                                        <td>{bucket.count}</td>
-                                        <td>{formatPercentValue(bucket.winRate, 1)}</td>
-                                        <td>{formatPercentValue(bucket.lossRate, 1)}</td>
-                                        <td className={bucket.avgReturnPct >= 0 ? 'is-positive' : 'is-negative'}>
-                                          {formatSignedNumber(bucket.avgReturnPct, 2)}%
-                                        </td>
-                                        <td className={bucket.pnl >= 0 ? 'is-positive' : 'is-negative'}>
-                                          {formatSignedNumber(bucket.pnl)}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                          <div className="strategy-workbench-live-time-analysis-snapshot-grid">
+                            <div className="strategy-workbench-live-time-analysis-snapshot-card">
+                              <span>日级样本</span>
+                              <strong>{dayPeriodBuckets.reduce((sum, bucket) => sum + bucket.count, 0)} 笔</strong>
+                              <span>有效时段 {dayPeriodBuckets.filter((bucket) => bucket.count > 0).length}/{dayPeriodBuckets.length}</span>
                             </div>
-                            <div className="strategy-workbench-live-time-analysis-card">
-                              <div className="strategy-workbench-live-time-analysis-card-title">小时级分布（样本笔数/胜亏占比）</div>
-                              <div className="strategy-workbench-live-time-analysis-table-scroll">
-                                <table className="strategy-workbench-live-time-analysis-table">
-                                  <thead>
-                                    <tr>
-                                      <th>时段</th>
-                                      <th>笔数</th>
-                                      <th>胜率</th>
-                                      <th>亏损占比</th>
-                                      <th>均值(%)</th>
-                                      <th>总盈亏</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {hourPeriodBuckets.map((bucket) => (
-                                      <tr key={bucket.key}>
-                                        <td>{bucket.label}</td>
-                                        <td>{bucket.count}</td>
-                                        <td>{formatPercentValue(bucket.winRate, 1)}</td>
-                                        <td>{formatPercentValue(bucket.lossRate, 1)}</td>
-                                        <td className={bucket.avgReturnPct >= 0 ? 'is-positive' : 'is-negative'}>
-                                          {formatSignedNumber(bucket.avgReturnPct, 2)}%
-                                        </td>
-                                        <td className={bucket.pnl >= 0 ? 'is-positive' : 'is-negative'}>
-                                          {formatSignedNumber(bucket.pnl)}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                            <div className="strategy-workbench-live-time-analysis-snapshot-card">
+                              <span>小时级样本</span>
+                              <strong>{hourPeriodBuckets.reduce((sum, bucket) => sum + bucket.count, 0)} 笔</strong>
+                              <span>有效时段 {hourPeriodBuckets.filter((bucket) => bucket.count > 0).length}/{hourPeriodBuckets.length}</span>
                             </div>
                           </div>
                         </div>
@@ -4469,6 +4452,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                             <strong>{formatSignedNumber(localBacktestSummary.unrealizedPnl)}</strong>
                           </div>
                         </div>
+                            </>
+                          ) : null}
+                          {liveSummaryTab === 'overview' ? (
                         <div className="strategy-workbench-live-summary-extra">
                           <span>样本覆盖 {loadedDataDays.toFixed(1)} 天</span>
                           <span>交易汇总: 胜/负 {tradeSummary.winCount}/{tradeSummary.lossCount}，手续费 {formatNumberValue(tradeSummary.totalFee)}</span>
@@ -4477,8 +4463,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                           <span>事件: 总数 {eventSummary.totalCount}，类型 {topEventTypesText}</span>
                           <span>资金费累计 {formatSignedNumber(tradeSummary.totalFunding)}</span>
                         </div>
+                          ) : null}
+                          {liveSummaryTab === 'log' ? (
+                            <div className="strategy-workbench-live-log-grid">
                         <div className="strategy-workbench-live-events">
-                          <div className="strategy-workbench-live-events-title">最近事件</div>
+                          <div className="strategy-workbench-live-events-title">最近事件（6条）</div>
                           {recentEvents.length <= 0 ? (
                             <div className="strategy-workbench-live-events-empty">暂无事件记录</div>
                           ) : (
@@ -4492,7 +4481,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                           )}
                         </div>
                         <div className="strategy-workbench-live-diagnostics">
-                          <div className="strategy-workbench-live-diagnostics-title">回测阶段诊断</div>
+                          <div className="strategy-workbench-live-diagnostics-title">回测阶段诊断（8条）</div>
                           {visibleDiagnostics.length <= 0 ? (
                             <div className="strategy-workbench-live-diagnostics-empty">暂无诊断日志</div>
                           ) : (
@@ -4502,6 +4491,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               </div>
                             ))
                           )}
+                        </div>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
