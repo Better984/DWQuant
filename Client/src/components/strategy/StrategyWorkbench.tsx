@@ -3646,6 +3646,114 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     };
   }, []);
 
+  const liveListPanel = (
+    <div
+      className={[
+        'strategy-workbench-live-list',
+        workbenchLayoutMode === 'backtest' ? 'strategy-workbench-live-list--backtest' : '',
+      ].join(' ').trim()}
+    >
+      <div className="strategy-workbench-live-list-header">
+        <span>仓位列表</span>
+        <div className="strategy-workbench-live-list-header-right">
+          <label
+            className={`strategy-workbench-live-sync-toggle ${previewScrollSyncEnabled ? 'is-enabled' : ''}`}
+            title="控制滚动联动：仓位列表滚动跟随K线，K线拖动回推仓位列表"
+          >
+            <input
+              type="checkbox"
+              checked={previewScrollSyncEnabled}
+              onChange={(event) => {
+                setPreviewScrollSyncEnabled(event.target.checked);
+              }}
+            />
+            <span className="strategy-workbench-live-sync-toggle-icon" aria-hidden="true" />
+            <span>{previewScrollSyncEnabled ? '联动开' : '联动关'}</span>
+          </label>
+          <span>{previewTrades.length} 条</span>
+          <label className="strategy-workbench-live-mode-toggle">
+            <input
+              type="checkbox"
+              checked={previewTradeMode === 'full'}
+              onChange={(event) => {
+                setPreviewTradeMode(event.target.checked ? 'full' : 'normal');
+              }}
+            />
+            <span>全量预览</span>
+          </label>
+        </div>
+      </div>
+      <div
+        className="strategy-workbench-live-list-body"
+        ref={previewListBodyRef}
+        onScroll={handlePreviewListScroll}
+      >
+        {previewTrades.length === 0 ? (
+          <div className="strategy-workbench-live-empty">
+            暂无仓位记录，回测执行后会实时出现在右侧列表。
+          </div>
+        ) : (
+          previewTrades.map((trade, index) => {
+            const tradeKey = buildPreviewTradeKey(trade, index);
+            const isSelected = activePreviewTradeKey === tradeKey;
+            return (
+              <div
+                key={tradeKey}
+                className={`strategy-workbench-live-item ${trade.isOpen ? 'is-open' : ''} ${isSelected ? 'is-selected' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-pressed={isSelected}
+                data-preview-trade-key={tradeKey}
+                ref={(node) => {
+                  if (node) {
+                    previewTradeItemRefs.current.set(tradeKey, node);
+                  } else {
+                    previewTradeItemRefs.current.delete(tradeKey);
+                  }
+                }}
+                onClick={() => handlePreviewTradeActivate(trade, index)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handlePreviewTradeActivate(trade, index);
+                  }
+                }}
+              >
+                <div className="strategy-workbench-live-item-head">
+                  <span className={`strategy-workbench-live-item-side ${trade.side === 'Long' ? 'is-long' : 'is-short'}`}>
+                    {trade.side}
+                  </span>
+                  <span className="strategy-workbench-live-item-status">
+                    {trade.isOpen ? '持仓中' : '已平仓'}
+                  </span>
+                  <span className={`strategy-workbench-live-item-pnl ${trade.pnl >= 0 ? 'is-positive' : 'is-negative'}`}>
+                    {formatSignedNumber(trade.pnl)}
+                  </span>
+                </div>
+                <div className="strategy-workbench-live-item-row">
+                  <span>开仓: {formatDateTime(trade.entryTime)}</span>
+                  <span>平仓: {trade.isOpen ? '持仓中' : formatDateTime(trade.exitTime)}</span>
+                </div>
+                <div className="strategy-workbench-live-item-row">
+                  <span>开/平价: {trade.entryPrice.toFixed(4)} / {trade.exitPrice.toFixed(4)}</span>
+                  <span>数量: {trade.qty}</span>
+                </div>
+                <div className="strategy-workbench-live-item-row">
+                  <span>手续费: {trade.fee.toFixed(4)}</span>
+                  <span>资金费: {formatSignedNumber(trade.funding)}</span>
+                </div>
+                <div className="strategy-workbench-live-item-row">
+                  <span>离场: {trade.exitReason || '-'}</span>
+                  <span>滑点: {trade.slippageBps} Bps</span>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+
   if (typeof document === 'undefined') {
     return null;
   }
@@ -4029,7 +4137,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 ) : (
                   <>
                     <div
-                      className="strategy-workbench-live-preview strategy-workbench-live-preview--resizable"
+                      className={[
+                        'strategy-workbench-live-preview',
+                        'strategy-workbench-live-preview--resizable',
+                        workbenchLayoutMode === 'backtest' ? 'strategy-workbench-live-preview--backtest' : '',
+                      ].join(' ').trim()}
                       ref={livePreviewRef}
                       style={
                         {
@@ -4404,116 +4516,26 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                         </div>
                       </div>
 
-                      <ResizeHandle
-                        className="strategy-workbench-resize-handle strategy-workbench-resize-handle--live-preview"
-                        onResize={handleLivePreviewResize}
-                      />
-
-                      <div className="strategy-workbench-live-list">
-                        <div className="strategy-workbench-live-list-header">
-                          <span>仓位列表</span>
-                          <div className="strategy-workbench-live-list-header-right">
-                            <label
-                              className={`strategy-workbench-live-sync-toggle ${previewScrollSyncEnabled ? 'is-enabled' : ''}`}
-                              title="控制滚动联动：仓位列表滚动跟随K线，K线拖动回推仓位列表"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={previewScrollSyncEnabled}
-                                onChange={(event) => {
-                                  setPreviewScrollSyncEnabled(event.target.checked);
-                                }}
-                              />
-                              <span className="strategy-workbench-live-sync-toggle-icon" aria-hidden="true" />
-                              <span>{previewScrollSyncEnabled ? '联动开' : '联动关'}</span>
-                            </label>
-                            <span>{previewTrades.length} 条</span>
-                            <label className="strategy-workbench-live-mode-toggle">
-                              <input
-                                type="checkbox"
-                                checked={previewTradeMode === 'full'}
-                                onChange={(event) => {
-                                  setPreviewTradeMode(event.target.checked ? 'full' : 'normal');
-                                }}
-                              />
-                              <span>全量预览</span>
-                            </label>
-                          </div>
-                        </div>
-                        <div
-                          className="strategy-workbench-live-list-body"
-                          ref={previewListBodyRef}
-                          onScroll={handlePreviewListScroll}
-                        >
-                        {previewTrades.length === 0 ? (
-                          <div className="strategy-workbench-live-empty">
-                            暂无仓位记录，回测执行后会实时出现在右侧列表。
-                          </div>
-                        ) : (
-                          previewTrades.map((trade, index) => {
-                            const tradeKey = buildPreviewTradeKey(trade, index);
-                            const isSelected = activePreviewTradeKey === tradeKey;
-                            return (
-                              <div
-                                key={tradeKey}
-                                className={`strategy-workbench-live-item ${trade.isOpen ? 'is-open' : ''} ${isSelected ? 'is-selected' : ''}`}
-                                role="button"
-                                tabIndex={0}
-                                aria-pressed={isSelected}
-                                data-preview-trade-key={tradeKey}
-                                ref={(node) => {
-                                  if (node) {
-                                    previewTradeItemRefs.current.set(tradeKey, node);
-                                  } else {
-                                    previewTradeItemRefs.current.delete(tradeKey);
-                                  }
-                                }}
-                                onClick={() => handlePreviewTradeActivate(trade, index)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    handlePreviewTradeActivate(trade, index);
-                                  }
-                                }}
-                              >
-                                <div className="strategy-workbench-live-item-head">
-                                  <span className={`strategy-workbench-live-item-side ${trade.side === 'Long' ? 'is-long' : 'is-short'}`}>
-                                    {trade.side}
-                                  </span>
-                                  <span className="strategy-workbench-live-item-status">
-                                    {trade.isOpen ? '持仓中' : '已平仓'}
-                                  </span>
-                                  <span className={`strategy-workbench-live-item-pnl ${trade.pnl >= 0 ? 'is-positive' : 'is-negative'}`}>
-                                    {formatSignedNumber(trade.pnl)}
-                                  </span>
-                                </div>
-                                <div className="strategy-workbench-live-item-row">
-                                  <span>开仓: {formatDateTime(trade.entryTime)}</span>
-                                  <span>平仓: {trade.isOpen ? '持仓中' : formatDateTime(trade.exitTime)}</span>
-                                </div>
-                                <div className="strategy-workbench-live-item-row">
-                                  <span>开/平价: {trade.entryPrice.toFixed(4)} / {trade.exitPrice.toFixed(4)}</span>
-                                  <span>数量: {trade.qty}</span>
-                                </div>
-                                <div className="strategy-workbench-live-item-row">
-                                  <span>手续费: {trade.fee.toFixed(4)}</span>
-                                  <span>资金费: {formatSignedNumber(trade.funding)}</span>
-                                </div>
-                                <div className="strategy-workbench-live-item-row">
-                                  <span>离场: {trade.exitReason || '-'}</span>
-                                  <span>滑点: {trade.slippageBps} Bps</span>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                        </div>
-                      </div>
+                      {workbenchLayoutMode !== 'backtest' ? (
+                        <>
+                          <ResizeHandle
+                            className="strategy-workbench-resize-handle strategy-workbench-resize-handle--live-preview"
+                            onResize={handleLivePreviewResize}
+                          />
+                          {liveListPanel}
+                        </>
+                      ) : null}
                     </div>
                   </>
                 )}
               </div>
             </div>
+
+            {workbenchLayoutMode === 'backtest' ? (
+              <div className="strategy-workbench-backtest-side">
+                {liveListPanel}
+              </div>
+            ) : null}
 
             <ResizeHandle
               className="strategy-workbench-resize-handle strategy-workbench-resize-handle--main"
