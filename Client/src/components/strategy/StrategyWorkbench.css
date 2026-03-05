@@ -603,29 +603,6 @@
   min-width: 0;
 }
 
-.strategy-workbench-live-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.strategy-workbench-live-stat {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 8px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  color: #4b5563;
-}
-
-.strategy-workbench-live-stat strong {
-  font-size: 18px;
-  color: #111827;
-}
-
 .strategy-workbench-live-progress {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -683,6 +660,37 @@
   font-size: 12px;
   font-weight: 700;
   color: #334155;
+}
+
+.strategy-workbench-live-chart-title--with-metrics {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.strategy-workbench-live-chart-title-metrics {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.strategy-workbench-live-chart-title-metrics strong {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.strategy-workbench-live-chart-title-metrics strong.is-positive {
+  color: #15803d;
+}
+
+.strategy-workbench-live-chart-title-metrics strong.is-negative {
+  color: #b91c1c;
 }
 
 .strategy-workbench-live-chart-canvas {
@@ -2407,7 +2415,6 @@
     grid-template-columns: 1fr;
   }
 
-  .strategy-workbench-live-stat-grid,
   .strategy-workbench-live-advanced-grid {
     grid-template-columns: 1fr;
   }
@@ -3164,11 +3171,6 @@
 
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis-table th {
   background: #f3f8ff;
-}
-
-.strategy-workbench--refactor .strategy-workbench-live-stat {
-  border-color: #dde9f8;
-  background: #f8fbff;
 }
 
 .strategy-workbench--refactor .strategy-workbench-live-progress {

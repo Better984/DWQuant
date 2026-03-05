@@ -2681,7 +2681,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   );
   const dashboardProgressText = `回测进度 ${dashboardProgressProcessedBars}/${dashboardProgressTotalBars} · ${progressPercent}%`;
   const livePositionCount = previewTrades.length;
-  const liveWinRate = localBacktestSummary.winRate;
   const liveAveragePnl = averageClosedPnl;
   const backtestStats = localBacktestSummary.stats;
   const tradeSummary = localBacktestSummary.tradeSummary;
@@ -4150,35 +4149,25 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                       }
                     >
                       <div className="strategy-workbench-live-summary">
-                        <div className="strategy-workbench-live-stat-grid">
-                          <div className="strategy-workbench-live-stat">
-                            <span>仓位</span>
-                            <strong>{livePositionCount}</strong>
-                          </div>
-                          <div className="strategy-workbench-live-stat">
-                            <span>平仓笔数</span>
-                            <strong>{tradeSummary.totalCount}</strong>
-                          </div>
-                          <div className="strategy-workbench-live-stat">
-                            <span>胜率</span>
-                            <strong>{formatPercentValue(liveWinRate)}</strong>
-                          </div>
-                          <div className="strategy-workbench-live-stat">
-                            <span>平均盈亏</span>
-                            <strong>{formatSignedNumber(liveAveragePnl)}</strong>
-                          </div>
-                          <div className="strategy-workbench-live-stat">
-                            <span>累计收益</span>
-                            <strong>{formatSignedNumber(localBacktestSummary.totalProfit)}</strong>
-                          </div>
-                          <div className="strategy-workbench-live-stat">
-                            <span>最大回撤</span>
-                            <strong>{formatPercentValue(backtestStats.maxDrawdown)}</strong>
-                          </div>
-                        </div>
                         <div className="strategy-workbench-live-visual-grid">
                           <div className="strategy-workbench-live-chart-card strategy-workbench-live-chart-card--equity">
-                            <div className="strategy-workbench-live-chart-title">收益资金曲线</div>
+                            <div className="strategy-workbench-live-chart-title strategy-workbench-live-chart-title--with-metrics">
+                              <span>收益资金曲线</span>
+                              <span className="strategy-workbench-live-chart-title-metrics">
+                                <span>
+                                  平均盈亏
+                                  <strong className={liveAveragePnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                    {formatSignedNumber(liveAveragePnl)}
+                                  </strong>
+                                </span>
+                                <span>
+                                  累计收益
+                                  <strong className={localBacktestSummary.totalProfit >= 0 ? 'is-positive' : 'is-negative'}>
+                                    {formatSignedNumber(localBacktestSummary.totalProfit)}
+                                  </strong>
+                                </span>
+                              </span>
+                            </div>
                             <StrategyWorkbenchEChart
                               className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--equity"
                               option={equityCurveOption}
