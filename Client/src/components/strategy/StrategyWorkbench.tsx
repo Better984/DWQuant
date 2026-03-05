@@ -834,7 +834,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [selectedPreviewTradeKey, setSelectedPreviewTradeKey] = useState<string | null>(null);
   const [focusedPreviewTradeRange, setFocusedPreviewTradeRange] = useState<StrategyWorkbenchTradeFocusRange | null>(null);
   const [previewTradeMode, setPreviewTradeMode] = useState<PreviewTradeMode>('normal');
-  const [previewScrollSyncEnabled, setPreviewScrollSyncEnabled] = useState(true);
+  const [previewScrollSyncEnabled, setPreviewScrollSyncEnabled] = useState(false);
   const [fullPreviewAnchorTradeKey, setFullPreviewAnchorTradeKey] = useState<string | null>(null);
   /** 左侧面板宽度占比 (20–80%)，用于 refactor 布局 */
   const [leftPanelWidth, setLeftPanelWidth] = useState(52.8);

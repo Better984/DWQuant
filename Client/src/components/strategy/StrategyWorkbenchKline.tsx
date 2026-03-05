@@ -998,6 +998,8 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
         return {
           name: overlayName,
           groupId,
+          lock: true,
+          onRightClick: () => true,
           points: [
             { timestamp: range.startTime, value: entryPrice },
             { timestamp: range.endTime, value: entryPrice },
@@ -1108,6 +1110,8 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     chart.createOverlay({
       name: overlayName,
       groupId,
+      lock: true,
+      onRightClick: () => true,
       points: [
         { timestamp: startTime, value: entryPrice },
         { timestamp: endTime, value: entryPrice },
