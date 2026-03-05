@@ -221,6 +221,45 @@ type CalendarBucketMetrics = {
   wins: number;
 };
 
+type TimeAnalysisReferenceMode = 'entry' | 'exit';
+type TimeAnalysisGranularity = 'day' | 'hour';
+
+type TradeTimeAnalysisPoint = {
+  referenceTimestamp: number;
+  holdingDurationMs: number;
+  returnPct: number;
+  pnl: number;
+  side: 'Long' | 'Short';
+  isWin: boolean;
+};
+
+type HoldingDurationBucket = {
+  key: string;
+  label: string;
+  minMinutes: number;
+  maxMinutes: number;
+  count: number;
+  wins: number;
+  pnl: number;
+  returnPctSum: number;
+  avgReturnPct: number;
+  winRate: number;
+};
+
+type PeriodBucketMetrics = {
+  key: string;
+  label: string;
+  count: number;
+  wins: number;
+  losses: number;
+  pnl: number;
+  avgPnl: number;
+  returnPctSum: number;
+  avgReturnPct: number;
+  winRate: number;
+  lossRate: number;
+};
+
 const CATEGORY_LABELS: Record<string, string> = {
   compare: '比较类',
   cross: '交叉类',
@@ -615,6 +654,19 @@ const findNearestEquityPoint = (points: LocalBacktestEquityPoint[], timestamp: n
 };
 
 const CALENDAR_DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+const HOLDING_DURATION_BUCKET_DEFS: Array<{ key: string; label: string; minMinutes: number; maxMinutes: number }> = [
+  { key: '0-15m', label: '0-15m', minMinutes: 0, maxMinutes: 15 },
+  { key: '15-30m', label: '15-30m', minMinutes: 15, maxMinutes: 30 },
+  { key: '30-60m', label: '30-60m', minMinutes: 30, maxMinutes: 60 },
+  { key: '1-2h', label: '1-2h', minMinutes: 60, maxMinutes: 120 },
+  { key: '2-4h', label: '2-4h', minMinutes: 120, maxMinutes: 240 },
+  { key: '4-8h', label: '4-8h', minMinutes: 240, maxMinutes: 480 },
+  { key: '8-24h', label: '8-24h', minMinutes: 480, maxMinutes: 1440 },
+  { key: '1-3d', label: '1-3d', minMinutes: 1440, maxMinutes: 4320 },
+  { key: '3d+', label: '3d+', minMinutes: 4320, maxMinutes: Number.POSITIVE_INFINITY },
+];
 
 const toCalendarDateKey = (date: Date) => {
   const year = date.getFullYear();
@@ -685,6 +737,32 @@ const mergeCalendarMetrics = (a: CalendarBucketMetrics, b: CalendarBucketMetrics
   count: a.count + b.count,
   wins: a.wins + b.wins,
 });
+
+const resolveTradeReferenceTimestamp = (trade: LocalBacktestTrade, mode: TimeAnalysisReferenceMode) => {
+  const timestamp = mode === 'entry' ? Number(trade.entryTime) : Number(trade.exitTime);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return null;
+  }
+  return timestamp;
+};
+
+const resolveTradeHoldingDurationMs = (trade: LocalBacktestTrade, fallbackMs: number) => {
+  const entry = Number(trade.entryTime);
+  const exit = Number(trade.exitTime);
+  if (!Number.isFinite(entry) || !Number.isFinite(exit) || entry <= 0 || exit <= 0) {
+    return fallbackMs;
+  }
+  return Math.max(fallbackMs, exit - entry);
+};
+
+const resolveTradeReturnPct = (trade: LocalBacktestTrade) => {
+  const notional = Math.abs(Number(trade.entryPrice) * Number(trade.qty));
+  if (!Number.isFinite(notional) || notional <= 0) {
+    return 0;
+  }
+  const pnl = Number.isFinite(trade.pnl) ? Number(trade.pnl) : 0;
+  return (pnl / notional) * 100;
+};
 
 const buildPreviewTradeKey = (trade: LocalBacktestTrade, index: number) => {
   return [
@@ -1023,6 +1101,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [liveListPanelWidth, setLiveListPanelWidth] = useState(33.333);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('month');
   const [calendarAnchorTimestamp, setCalendarAnchorTimestamp] = useState(0);
+  const [timeAnalysisReferenceMode, setTimeAnalysisReferenceMode] = useState<TimeAnalysisReferenceMode>('entry');
+  const [timeAnalysisGranularity, setTimeAnalysisGranularity] = useState<TimeAnalysisGranularity>('hour');
   /** 左侧：K线图高度占比 (30–85%)，用于 refactor 布局 */
   const [leftKlineHeight, setLeftKlineHeight] = useState(63.6);
   /** 右侧左栏：已选指标高度占比 (25–75%)，用于 refactor 布局 */
@@ -2876,6 +2956,430 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const maxDrawdownPositionText = curveInsight.maxDrawdownPoint
     ? `最大回撤位置 ${formatDateTime(curveInsight.maxDrawdownPoint.timestamp)}（${formatPercentValue(curveInsight.maxDrawdownPoint.drawdown)}）`
     : '最大回撤位置 暂无';
+  const timeAnalysisReferenceModeLabel = timeAnalysisReferenceMode === 'entry' ? '开仓时间' : '平仓时间';
+  const tradeTimeAnalysisPoints = useMemo<TradeTimeAnalysisPoint[]>(() => {
+    const fallbackHoldingMs = Math.max(60_000, selectedTimeframeSec * 1000);
+    return previewTrades
+      .map((trade) => {
+        const referenceTimestamp = resolveTradeReferenceTimestamp(trade, timeAnalysisReferenceMode);
+        if (!referenceTimestamp) {
+          return null;
+        }
+        const pnl = Number.isFinite(trade.pnl) ? Number(trade.pnl) : 0;
+        const returnPct = resolveTradeReturnPct(trade);
+        return {
+          referenceTimestamp,
+          holdingDurationMs: resolveTradeHoldingDurationMs(trade, fallbackHoldingMs),
+          returnPct: Number.isFinite(returnPct) ? returnPct : 0,
+          pnl,
+          side: trade.side,
+          isWin: pnl > 0,
+        } satisfies TradeTimeAnalysisPoint;
+      })
+      .filter((item): item is TradeTimeAnalysisPoint => item !== null);
+  }, [previewTrades, selectedTimeframeSec, timeAnalysisReferenceMode]);
+  const holdingDurationBuckets = useMemo<HoldingDurationBucket[]>(() => {
+    const buckets = HOLDING_DURATION_BUCKET_DEFS.map((definition) => ({
+      ...definition,
+      count: 0,
+      wins: 0,
+      pnl: 0,
+      returnPctSum: 0,
+      avgReturnPct: 0,
+      winRate: 0,
+    }));
+    tradeTimeAnalysisPoints.forEach((point) => {
+      const holdingMinutes = point.holdingDurationMs / 60_000;
+      const bucket = buckets.find((item) => holdingMinutes >= item.minMinutes && holdingMinutes < item.maxMinutes);
+      if (!bucket) {
+        return;
+      }
+      bucket.count += 1;
+      bucket.wins += point.isWin ? 1 : 0;
+      bucket.pnl += point.pnl;
+      bucket.returnPctSum += point.returnPct;
+    });
+    return buckets.map((bucket) => ({
+      ...bucket,
+      avgReturnPct: bucket.count > 0 ? bucket.returnPctSum / bucket.count : 0,
+      winRate: bucket.count > 0 ? bucket.wins / bucket.count : 0,
+    }));
+  }, [tradeTimeAnalysisPoints]);
+  const holdingDurationSpeedInsight = useMemo<{
+    fastestProfitBucket: HoldingDurationBucket | null;
+    fastestLossBucket: HoldingDurationBucket | null;
+  }>(() => {
+    const activeBuckets = holdingDurationBuckets.filter((bucket) => bucket.count > 0);
+    const resolveBucketMidMinutes = (bucket: HoldingDurationBucket) => {
+      if (!Number.isFinite(bucket.maxMinutes)) {
+        return Math.max(bucket.minMinutes * 1.2, bucket.minMinutes + 60);
+      }
+      return (bucket.minMinutes + bucket.maxMinutes) / 2;
+    };
+    let fastestProfitBucket: HoldingDurationBucket | null = null;
+    let fastestProfitScore = Number.NEGATIVE_INFINITY;
+    let fastestLossBucket: HoldingDurationBucket | null = null;
+    let fastestLossScore = Number.POSITIVE_INFINITY;
+    activeBuckets.forEach((bucket) => {
+      const speedScore = bucket.avgReturnPct / Math.max(resolveBucketMidMinutes(bucket), 1);
+      if (bucket.avgReturnPct > 0 && speedScore > fastestProfitScore) {
+        fastestProfitBucket = bucket;
+        fastestProfitScore = speedScore;
+      }
+      if (bucket.avgReturnPct < 0 && speedScore < fastestLossScore) {
+        fastestLossBucket = bucket;
+        fastestLossScore = speedScore;
+      }
+    });
+    return { fastestProfitBucket, fastestLossBucket };
+  }, [holdingDurationBuckets]);
+  const hourPeriodBuckets = useMemo<PeriodBucketMetrics[]>(() => {
+    const buckets = Array.from({ length: 24 }, (_, hour) => ({
+      key: `hour-${hour}`,
+      label: `${`${hour}`.padStart(2, '0')}:00`,
+      count: 0,
+      wins: 0,
+      losses: 0,
+      pnl: 0,
+      avgPnl: 0,
+      returnPctSum: 0,
+      avgReturnPct: 0,
+      winRate: 0,
+      lossRate: 0,
+    }));
+    tradeTimeAnalysisPoints.forEach((point) => {
+      const date = new Date(point.referenceTimestamp);
+      const bucket = buckets[date.getHours()];
+      if (!bucket) {
+        return;
+      }
+      bucket.count += 1;
+      bucket.wins += point.isWin ? 1 : 0;
+      bucket.losses += point.pnl < 0 ? 1 : 0;
+      bucket.pnl += point.pnl;
+      bucket.returnPctSum += point.returnPct;
+    });
+    return buckets.map((bucket) => ({
+      ...bucket,
+      avgPnl: bucket.count > 0 ? bucket.pnl / bucket.count : 0,
+      avgReturnPct: bucket.count > 0 ? bucket.returnPctSum / bucket.count : 0,
+      winRate: bucket.count > 0 ? bucket.wins / bucket.count : 0,
+      lossRate: bucket.count > 0 ? bucket.losses / bucket.count : 0,
+    }));
+  }, [tradeTimeAnalysisPoints]);
+  const dayPeriodBuckets = useMemo<PeriodBucketMetrics[]>(() => {
+    const buckets = Array.from({ length: 7 }, (_, weekdayIndex) => ({
+      key: `day-${weekdayIndex}`,
+      label: WEEKDAY_LABELS[weekdayIndex] || `Day ${weekdayIndex + 1}`,
+      count: 0,
+      wins: 0,
+      losses: 0,
+      pnl: 0,
+      avgPnl: 0,
+      returnPctSum: 0,
+      avgReturnPct: 0,
+      winRate: 0,
+      lossRate: 0,
+    }));
+    tradeTimeAnalysisPoints.forEach((point) => {
+      const date = new Date(point.referenceTimestamp);
+      const weekdayIndex = (date.getDay() + 6) % 7;
+      const bucket = buckets[weekdayIndex];
+      if (!bucket) {
+        return;
+      }
+      bucket.count += 1;
+      bucket.wins += point.isWin ? 1 : 0;
+      bucket.losses += point.pnl < 0 ? 1 : 0;
+      bucket.pnl += point.pnl;
+      bucket.returnPctSum += point.returnPct;
+    });
+    return buckets.map((bucket) => ({
+      ...bucket,
+      avgPnl: bucket.count > 0 ? bucket.pnl / bucket.count : 0,
+      avgReturnPct: bucket.count > 0 ? bucket.returnPctSum / bucket.count : 0,
+      winRate: bucket.count > 0 ? bucket.wins / bucket.count : 0,
+      lossRate: bucket.count > 0 ? bucket.losses / bucket.count : 0,
+    }));
+  }, [tradeTimeAnalysisPoints]);
+  const selectedPeriodBuckets = useMemo(
+    () => (timeAnalysisGranularity === 'hour' ? hourPeriodBuckets : dayPeriodBuckets),
+    [dayPeriodBuckets, hourPeriodBuckets, timeAnalysisGranularity],
+  );
+  const selectedPeriodInsightText = useMemo(() => {
+    const activeBuckets = selectedPeriodBuckets.filter((bucket) => bucket.count > 0);
+    if (activeBuckets.length <= 0) {
+      return `当前按${timeAnalysisReferenceModeLabel}统计暂无时段样本`;
+    }
+    const bestWinBucket = activeBuckets.reduce<PeriodBucketMetrics | null>((best, bucket) => {
+      if (!best) {
+        return bucket;
+      }
+      if (bucket.winRate > best.winRate) {
+        return bucket;
+      }
+      if (bucket.winRate === best.winRate && bucket.count > best.count) {
+        return bucket;
+      }
+      return best;
+    }, null);
+    const worstReturnBucket = activeBuckets.reduce<PeriodBucketMetrics | null>((worst, bucket) => {
+      if (!worst || bucket.avgReturnPct < worst.avgReturnPct) {
+        return bucket;
+      }
+      return worst;
+    }, null);
+    const granularityLabel = timeAnalysisGranularity === 'hour' ? '小时级' : '日级';
+    if (!bestWinBucket || !worstReturnBucket) {
+      return `${granularityLabel}暂无足够样本用于总结`;
+    }
+    return `${granularityLabel}高胜率时段：${bestWinBucket.label}（${formatPercentValue(bestWinBucket.winRate, 1)}，${bestWinBucket.count} 笔） · 明显亏损时段：${worstReturnBucket.label}（均值 ${formatSignedNumber(worstReturnBucket.avgReturnPct, 2)}%）`;
+  }, [selectedPeriodBuckets, timeAnalysisGranularity, timeAnalysisReferenceModeLabel]);
+  const holdingDurationScatterOption = useMemo<EChartsOption>(() => {
+    const points = tradeTimeAnalysisPoints.map((point) => ({
+      value: [
+        Number((point.holdingDurationMs / 60_000).toFixed(4)),
+        Number(point.returnPct.toFixed(4)),
+        point.referenceTimestamp,
+        Number(point.pnl.toFixed(6)),
+        point.side,
+      ],
+      itemStyle: {
+        color: point.returnPct >= 0 ? '#16a34a' : '#dc2626',
+        opacity: 0.75,
+      },
+    }));
+    const formatDurationMinutes = (value: number) => {
+      if (!Number.isFinite(value) || value <= 0) {
+        return '0m';
+      }
+      if (value >= 1_440) {
+        return `${(value / 1_440).toFixed(value >= 10_080 ? 0 : 1)}d`;
+      }
+      if (value >= 60) {
+        return `${(value / 60).toFixed(value >= 600 ? 0 : 1)}h`;
+      }
+      return `${Math.round(value)}m`;
+    };
+    return {
+      animation: false,
+      grid: {
+        left: 54,
+        right: 16,
+        top: 24,
+        bottom: 36,
+      },
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          const values = Array.isArray(params.value) ? params.value : [];
+          const holdingMinutes = Number(values[0]);
+          const returnPct = Number(values[1]);
+          const timestamp = Number(values[2]);
+          const pnl = Number(values[3]);
+          const side = `${values[4] ?? '-'}`;
+          return [
+            `${side} · ${timeAnalysisReferenceModeLabel} ${formatDateTime(timestamp)}`,
+            `持仓时长: ${formatDuration(Math.max(0, holdingMinutes) * 60_000)}`,
+            `收益率: ${formatSignedNumber(returnPct, 2)}%`,
+            `盈亏: ${formatSignedNumber(pnl)}`,
+          ].join('<br/>');
+        },
+      },
+      xAxis: {
+        type: 'value',
+        name: '持仓时长',
+        nameTextStyle: {
+          color: '#64748b',
+          fontSize: 11,
+          padding: [8, 0, 0, 0],
+        },
+        axisLine: { lineStyle: { color: '#dbe2ef' } },
+        axisLabel: {
+          color: '#64748b',
+          formatter: (value: number) => formatDurationMinutes(Number(value)),
+        },
+        splitLine: {
+          lineStyle: { color: '#edf2fb' },
+        },
+      },
+      yAxis: {
+        type: 'value',
+        name: '收益率(%)',
+        nameTextStyle: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+        axisLine: { show: false },
+        axisLabel: {
+          color: '#64748b',
+          formatter: (value: number) => `${Number(value).toFixed(2)}%`,
+        },
+        splitLine: {
+          lineStyle: { color: '#edf2fb' },
+        },
+      },
+      series: [
+        {
+          type: 'scatter',
+          data: points,
+          symbolSize: (value: unknown) => {
+            if (!Array.isArray(value)) {
+              return 8;
+            }
+            const absReturnPct = Math.abs(Number(value[1]) || 0);
+            return Math.max(7, Math.min(16, 7 + absReturnPct * 0.5));
+          },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: {
+              color: 'rgba(71, 85, 105, 0.35)',
+              type: 'dashed',
+            },
+            data: [{ yAxis: 0 }],
+          },
+        },
+      ],
+      graphic: points.length > 0
+        ? undefined
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: `暂无${timeAnalysisReferenceModeLabel}统计点`,
+                fill: '#94a3b8',
+                fontSize: 12,
+              },
+            },
+          ],
+    };
+  }, [timeAnalysisReferenceModeLabel, tradeTimeAnalysisPoints]);
+  const periodDistributionOption = useMemo<EChartsOption>(() => {
+    const labels = selectedPeriodBuckets.map((bucket) => bucket.label);
+    return {
+      animation: false,
+      legend: {
+        top: 0,
+        right: 0,
+        textStyle: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+      },
+      grid: {
+        left: 54,
+        right: 46,
+        top: 30,
+        bottom: 36,
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const rows = Array.isArray(params) ? params : [params];
+          const dataIndex = Number(rows?.[0]?.dataIndex ?? -1);
+          const bucket = dataIndex >= 0 ? selectedPeriodBuckets[dataIndex] : null;
+          if (!bucket) {
+            return '';
+          }
+          return [
+            `${bucket.label}（${timeAnalysisReferenceModeLabel}）`,
+            `样本笔数: ${bucket.count}（胜 ${bucket.wins} / 负 ${bucket.losses}）`,
+            `胜率: ${formatPercentValue(bucket.winRate, 1)}`,
+            `平均收益率: ${formatSignedNumber(bucket.avgReturnPct, 2)}%`,
+            `总盈亏: ${formatSignedNumber(bucket.pnl)}`,
+          ].join('<br/>');
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: {
+          color: '#64748b',
+          interval: 0,
+        },
+        axisLine: {
+          lineStyle: { color: '#dbe2ef' },
+        },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: '平均收益率(%)',
+          axisLine: { show: false },
+          axisLabel: {
+            color: '#64748b',
+            formatter: (value: number) => `${Number(value).toFixed(1)}%`,
+          },
+          splitLine: {
+            lineStyle: { color: '#edf2fb' },
+          },
+        },
+        {
+          type: 'value',
+          name: '胜率(%)',
+          min: 0,
+          max: 100,
+          axisLine: { show: false },
+          axisLabel: {
+            color: '#64748b',
+            formatter: (value: number) => `${Number(value).toFixed(0)}%`,
+          },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: '平均收益率',
+          type: 'bar',
+          data: selectedPeriodBuckets.map((bucket) => bucket.avgReturnPct),
+          itemStyle: {
+            color: (params: any) => (Number(params?.value) >= 0 ? '#16a34a' : '#dc2626'),
+            opacity: 0.86,
+          },
+          barMaxWidth: 24,
+        },
+        {
+          name: '胜率',
+          type: 'line',
+          yAxisIndex: 1,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: {
+            width: 2,
+            color: '#2563eb',
+          },
+          areaStyle: {
+            color: 'rgba(37, 99, 235, 0.12)',
+          },
+          data: selectedPeriodBuckets.map((bucket) => Number((bucket.winRate * 100).toFixed(3))),
+        },
+      ],
+      graphic: selectedPeriodBuckets.some((bucket) => bucket.count > 0)
+        ? undefined
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: `暂无${timeAnalysisReferenceModeLabel}时段分布`,
+                fill: '#94a3b8',
+                fontSize: 12,
+              },
+            },
+          ],
+    };
+  }, [selectedPeriodBuckets, timeAnalysisReferenceModeLabel]);
+  const fastestProfitBucketText = holdingDurationSpeedInsight.fastestProfitBucket
+    ? `${holdingDurationSpeedInsight.fastestProfitBucket.label}（均值 ${formatSignedNumber(holdingDurationSpeedInsight.fastestProfitBucket.avgReturnPct, 2)}%，${holdingDurationSpeedInsight.fastestProfitBucket.count} 笔）`
+    : '暂无明显快速盈利持仓段';
+  const fastestLossBucketText = holdingDurationSpeedInsight.fastestLossBucket
+    ? `${holdingDurationSpeedInsight.fastestLossBucket.label}（均值 ${formatSignedNumber(holdingDurationSpeedInsight.fastestLossBucket.avgReturnPct, 2)}%，${holdingDurationSpeedInsight.fastestLossBucket.count} 笔）`
+    : '暂无明显快速亏损持仓段';
   const calendarBucketMaps = useMemo(() => {
     const dayMap = new Map<string, CalendarBucketMetrics>();
     const weekMap = new Map<string, CalendarBucketMetrics>();
@@ -3689,6 +4193,145 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                                 </div>
                               );
                             })}
+                          </div>
+                        </div>
+                        <div className="strategy-workbench-live-time-analysis">
+                          <div className="strategy-workbench-live-time-analysis-header">
+                            <div className="strategy-workbench-live-time-analysis-title">时段盈利分析</div>
+                            <div className="strategy-workbench-live-time-analysis-controls">
+                              <div
+                                className="strategy-workbench-live-time-analysis-toggle"
+                                role="tablist"
+                                aria-label="时段统计口径切换"
+                              >
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-time-analysis-toggle-button ${timeAnalysisReferenceMode === 'entry' ? 'is-active' : ''}`}
+                                  onClick={() => setTimeAnalysisReferenceMode('entry')}
+                                >
+                                  开仓时间
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-time-analysis-toggle-button ${timeAnalysisReferenceMode === 'exit' ? 'is-active' : ''}`}
+                                  onClick={() => setTimeAnalysisReferenceMode('exit')}
+                                >
+                                  平仓时间
+                                </button>
+                              </div>
+                              <div
+                                className="strategy-workbench-live-time-analysis-toggle"
+                                role="tablist"
+                                aria-label="时段粒度切换"
+                              >
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-time-analysis-toggle-button ${timeAnalysisGranularity === 'hour' ? 'is-active' : ''}`}
+                                  onClick={() => setTimeAnalysisGranularity('hour')}
+                                >
+                                  小时级
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-time-analysis-toggle-button ${timeAnalysisGranularity === 'day' ? 'is-active' : ''}`}
+                                  onClick={() => setTimeAnalysisGranularity('day')}
+                                >
+                                  日级
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="strategy-workbench-live-time-analysis-insights">
+                            <span>统计口径：{timeAnalysisReferenceModeLabel}</span>
+                            <span>盈利最快持仓段：{fastestProfitBucketText}</span>
+                            <span>亏损最快持仓段：{fastestLossBucketText}</span>
+                            <span>{selectedPeriodInsightText}</span>
+                          </div>
+                          <div className="strategy-workbench-live-time-analysis-chart-grid">
+                            <div className="strategy-workbench-live-time-analysis-card">
+                              <div className="strategy-workbench-live-time-analysis-card-title">持仓周期点阵图</div>
+                              <StrategyWorkbenchEChart
+                                className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--duration-scatter"
+                                option={holdingDurationScatterOption}
+                              />
+                            </div>
+                            <div className="strategy-workbench-live-time-analysis-card">
+                              <div className="strategy-workbench-live-time-analysis-card-title">
+                                {timeAnalysisGranularity === 'hour' ? '小时级平均收益与胜率' : '日级平均收益与胜率'}
+                              </div>
+                              <StrategyWorkbenchEChart
+                                className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--period-distribution"
+                                option={periodDistributionOption}
+                              />
+                            </div>
+                          </div>
+                          <div className="strategy-workbench-live-time-analysis-table-grid">
+                            <div className="strategy-workbench-live-time-analysis-card">
+                              <div className="strategy-workbench-live-time-analysis-card-title">日级分布（样本笔数/胜亏占比）</div>
+                              <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                <table className="strategy-workbench-live-time-analysis-table">
+                                  <thead>
+                                    <tr>
+                                      <th>时段</th>
+                                      <th>笔数</th>
+                                      <th>胜率</th>
+                                      <th>亏损占比</th>
+                                      <th>均值(%)</th>
+                                      <th>总盈亏</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {dayPeriodBuckets.map((bucket) => (
+                                      <tr key={bucket.key}>
+                                        <td>{bucket.label}</td>
+                                        <td>{bucket.count}</td>
+                                        <td>{formatPercentValue(bucket.winRate, 1)}</td>
+                                        <td>{formatPercentValue(bucket.lossRate, 1)}</td>
+                                        <td className={bucket.avgReturnPct >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.avgReturnPct, 2)}%
+                                        </td>
+                                        <td className={bucket.pnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.pnl)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                            <div className="strategy-workbench-live-time-analysis-card">
+                              <div className="strategy-workbench-live-time-analysis-card-title">小时级分布（样本笔数/胜亏占比）</div>
+                              <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                <table className="strategy-workbench-live-time-analysis-table">
+                                  <thead>
+                                    <tr>
+                                      <th>时段</th>
+                                      <th>笔数</th>
+                                      <th>胜率</th>
+                                      <th>亏损占比</th>
+                                      <th>均值(%)</th>
+                                      <th>总盈亏</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {hourPeriodBuckets.map((bucket) => (
+                                      <tr key={bucket.key}>
+                                        <td>{bucket.label}</td>
+                                        <td>{bucket.count}</td>
+                                        <td>{formatPercentValue(bucket.winRate, 1)}</td>
+                                        <td>{formatPercentValue(bucket.lossRate, 1)}</td>
+                                        <td className={bucket.avgReturnPct >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.avgReturnPct, 2)}%
+                                        </td>
+                                        <td className={bucket.pnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.pnl)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
                           </div>
                         </div>
                         <div className="strategy-workbench-live-advanced-grid">

@@ -899,6 +899,158 @@
   color: #475569;
 }
 
+.strategy-workbench-live-time-analysis {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategy-workbench-live-time-analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.strategy-workbench-live-time-analysis-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.strategy-workbench-live-time-analysis-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.strategy-workbench-live-time-analysis-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.strategy-workbench-live-time-analysis-toggle-button {
+  height: 26px;
+  border: 0;
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #64748b;
+  min-width: 62px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategy-workbench-live-time-analysis-toggle-button:last-child {
+  border-right: 0;
+}
+
+.strategy-workbench-live-time-analysis-toggle-button.is-active {
+  background: #eaf2ff;
+  color: #1d4ed8;
+}
+
+.strategy-workbench-live-time-analysis-insights {
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #475569;
+}
+
+.strategy-workbench-live-time-analysis-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-workbench-live-time-analysis-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategy-workbench-live-time-analysis-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.strategy-workbench-live-chart-canvas--duration-scatter,
+.strategy-workbench-live-chart-canvas--period-distribution {
+  min-height: 240px;
+}
+
+.strategy-workbench-live-time-analysis-table-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-workbench-live-time-analysis-table-scroll {
+  overflow: auto;
+  max-height: 258px;
+}
+
+.strategy-workbench-live-time-analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  color: #334155;
+}
+
+.strategy-workbench-live-time-analysis-table th,
+.strategy-workbench-live-time-analysis-table td {
+  border-bottom: 1px solid #e5e7eb;
+  text-align: right;
+  white-space: nowrap;
+  padding: 6px 6px;
+}
+
+.strategy-workbench-live-time-analysis-table th:first-child,
+.strategy-workbench-live-time-analysis-table td:first-child {
+  text-align: left;
+}
+
+.strategy-workbench-live-time-analysis-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.strategy-workbench-live-time-analysis-table td.is-positive {
+  color: #15803d;
+  font-weight: 700;
+}
+
+.strategy-workbench-live-time-analysis-table td.is-negative {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 .strategy-workbench-live-advanced-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2200,6 +2352,12 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .strategy-workbench-live-time-analysis-insights,
+  .strategy-workbench-live-time-analysis-chart-grid,
+  .strategy-workbench-live-time-analysis-table-grid {
+    grid-template-columns: 1fr;
+  }
+
   .strategy-workbench-live-events-line {
     grid-template-columns: 120px 52px minmax(0, 1fr);
   }
@@ -2241,6 +2399,25 @@
   .strategy-workbench-live-stat-grid,
   .strategy-workbench-live-advanced-grid {
     grid-template-columns: 1fr;
+  }
+
+  .strategy-workbench-live-time-analysis-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .strategy-workbench-live-time-analysis-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .strategy-workbench-live-time-analysis-toggle {
+    width: 100%;
+  }
+
+  .strategy-workbench-live-time-analysis-toggle-button {
+    flex: 1;
+    min-width: 0;
   }
 
   .strategy-workbench-live-item-row {
@@ -2938,6 +3115,28 @@
 .strategy-workbench--refactor .strategy-workbench-live-calendar-cell {
   border-color: #dde9f8;
   background: #f8fbff;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis,
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis-card {
+  border-color: #dde9f8;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis-toggle {
+  border-color: #c9dbf4;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis-toggle-button.is-active {
+  background: #eaf3ff;
+  color: #1247a6;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis-insights {
+  border-color: #c9dbf4;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-time-analysis-table th {
+  background: #f3f8ff;
 }
 
 .strategy-workbench--refactor .strategy-workbench-live-stat {
