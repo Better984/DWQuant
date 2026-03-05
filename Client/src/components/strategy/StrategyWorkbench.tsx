@@ -14,6 +14,8 @@ import {
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { KLineData } from 'klinecharts';
+import * as echarts from 'echarts';
+import type { ECharts, EChartsOption } from 'echarts';
 
 import type { GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
 import { registerTalibIndicators } from '../../lib/registerTalibIndicators';
@@ -28,6 +30,7 @@ import type {
 import {
   buildEmptyBacktestSummary,
   runLocalBacktestRealtime,
+  type LocalBacktestEquityPoint,
   type LocalBacktestTrade,
   type LocalBacktestSummary,
 } from './localBacktestEngine';
@@ -154,6 +157,8 @@ interface StrategyWorkbenchProps {
 type DashboardMode = 'settings' | 'preview';
 type BacktestRangeMode = 'latest_30d' | 'custom';
 type PreviewTradeMode = 'normal' | 'full';
+type WorkbenchLayoutMode = 'edit' | 'backtest';
+type CalendarViewMode = 'month' | 'week' | 'day';
 
 type WorkbenchBacktestParams = {
   takeProfitPct: number;
@@ -195,6 +200,25 @@ type PreviewTradeSyncItem = {
   startTime: number;
   endTime: number;
   midpoint: number;
+};
+
+type TradeStreakLocation = {
+  count: number;
+  startOrder: number;
+  endOrder: number;
+  endTimestamp: number;
+};
+
+type BacktestCurveInsight = {
+  maxWinStreak: TradeStreakLocation | null;
+  maxLossStreak: TradeStreakLocation | null;
+  maxDrawdownPoint: LocalBacktestEquityPoint | null;
+};
+
+type CalendarBucketMetrics = {
+  pnl: number;
+  count: number;
+  wins: number;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -540,6 +564,128 @@ const formatDuration = (durationMs: number) => {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 };
 
+const formatDateTimeShort = (timestamp: number) => {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return '-';
+  }
+  const date = new Date(timestamp);
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const hour = `${date.getHours()}`.padStart(2, '0');
+  const minute = `${date.getMinutes()}`.padStart(2, '0');
+  return `${month}/${day} ${hour}:${minute}`;
+};
+
+const sampleEquityPoints = (points: LocalBacktestEquityPoint[], maxPoints: number) => {
+  if (points.length <= maxPoints) {
+    return points;
+  }
+  const stride = Math.ceil(points.length / maxPoints);
+  const sampled: LocalBacktestEquityPoint[] = [];
+  for (let index = 0; index < points.length; index += stride) {
+    sampled.push(points[index]);
+  }
+  const last = points[points.length - 1];
+  if (sampled[sampled.length - 1]?.timestamp !== last.timestamp) {
+    sampled.push(last);
+  }
+  return sampled;
+};
+
+const findNearestEquityPoint = (points: LocalBacktestEquityPoint[], timestamp: number): LocalBacktestEquityPoint | null => {
+  if (points.length <= 0 || !Number.isFinite(timestamp)) {
+    return null;
+  }
+  let left = 0;
+  let right = points.length - 1;
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (points[mid].timestamp < timestamp) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+  const current = points[left];
+  const previous = left > 0 ? points[left - 1] : null;
+  if (!previous) {
+    return current;
+  }
+  return Math.abs(current.timestamp - timestamp) < Math.abs(previous.timestamp - timestamp) ? current : previous;
+};
+
+const CALENDAR_DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+
+const toCalendarDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const toCalendarMonthKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  return `${year}-${month}`;
+};
+
+const startOfLocalDay = (timestamp: number) => {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const startOfLocalWeek = (date: Date) => {
+  const start = new Date(date);
+  const weekday = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - weekday);
+  start.setHours(0, 0, 0, 0);
+  return start;
+};
+
+const startOfLocalMonth = (date: Date) => {
+  const start = new Date(date);
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  return start;
+};
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const addMonths = (date: Date, months: number) => {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+};
+
+const formatCalendarPeriodLabel = (mode: CalendarViewMode, anchorDate: Date) => {
+  if (mode === 'month') {
+    return `${anchorDate.getFullYear()}年 ${anchorDate.getMonth() + 1}月`;
+  }
+  if (mode === 'week') {
+    const weekStart = startOfLocalWeek(anchorDate);
+    const weekEnd = addDays(weekStart, 6);
+    return `${weekStart.getMonth() + 1}/${weekStart.getDate()} - ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
+  }
+  return `${anchorDate.getFullYear()}/${anchorDate.getMonth() + 1}/${anchorDate.getDate()}`;
+};
+
+const buildEmptyCalendarMetrics = (): CalendarBucketMetrics => ({
+  pnl: 0,
+  count: 0,
+  wins: 0,
+});
+
+const mergeCalendarMetrics = (a: CalendarBucketMetrics, b: CalendarBucketMetrics): CalendarBucketMetrics => ({
+  pnl: a.pnl + b.pnl,
+  count: a.count + b.count,
+  wins: a.wins + b.wins,
+});
+
 const buildPreviewTradeKey = (trade: LocalBacktestTrade, index: number) => {
   return [
     trade.side,
@@ -750,6 +896,38 @@ const ResizeHandleVertical: React.FC<{
   return <div className={className} onPointerDown={handlePointerDown} role="separator" aria-orientation="horizontal" />;
 };
 
+const StrategyWorkbenchEChart: React.FC<{ option: EChartsOption; className: string }> = ({ option, className }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<ECharts | null>(null);
+
+  useEffect(() => {
+    const dom = containerRef.current;
+    if (!dom) {
+      return;
+    }
+    const chart = echarts.getInstanceByDom(dom) ?? echarts.init(dom);
+    chartRef.current = chart;
+    chart.setOption(option, true);
+
+    const resizeObserver = new ResizeObserver(() => {
+      chart.resize();
+    });
+    resizeObserver.observe(dom);
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    chartRef.current?.setOption(option, true);
+  }, [option]);
+
+  return <div ref={containerRef} className={className} />;
+};
+
 const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const {
     selectedIndicators,
@@ -820,7 +998,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [appliedBacktestParams, setAppliedBacktestParams] = useState<WorkbenchBacktestParams>(() =>
     normalizeBacktestParams(createDefaultBacktestParams(takeProfitPct, stopLossPct, leverage, orderQty)),
   );
-  const [backtestParamError, setBacktestParamError] = useState('');
+  const [, setBacktestParamError] = useState('');
   const [localBacktestSummary, setLocalBacktestSummary] = useState<LocalBacktestSummary>(() =>
     buildEmptyBacktestSummary('waiting_data', '等待开始创建'),
   );
@@ -834,20 +1012,27 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [selectedPreviewTradeKey, setSelectedPreviewTradeKey] = useState<string | null>(null);
   const [focusedPreviewTradeRange, setFocusedPreviewTradeRange] = useState<StrategyWorkbenchTradeFocusRange | null>(null);
   const [previewTradeMode, setPreviewTradeMode] = useState<PreviewTradeMode>('normal');
+  const [workbenchLayoutMode, setWorkbenchLayoutMode] = useState<WorkbenchLayoutMode>('edit');
   const [previewScrollSyncEnabled, setPreviewScrollSyncEnabled] = useState(false);
   const [fullPreviewAnchorTradeKey, setFullPreviewAnchorTradeKey] = useState<string | null>(null);
   /** 左侧面板宽度占比 (20–80%)，用于 refactor 布局 */
   const [leftPanelWidth, setLeftPanelWidth] = useState(52.8);
   /** 右侧内部：右左面板宽度占比 (25–75%)，用于 refactor 布局 */
   const [rightLeftPanelWidth, setRightLeftPanelWidth] = useState(46.3);
+  /** 仪表盘预览区：仓位列表宽度占比 (20–55%)，默认约 1/3 */
+  const [liveListPanelWidth, setLiveListPanelWidth] = useState(33.333);
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('month');
+  const [calendarAnchorTimestamp, setCalendarAnchorTimestamp] = useState(0);
   /** 左侧：K线图高度占比 (30–85%)，用于 refactor 布局 */
   const [leftKlineHeight, setLeftKlineHeight] = useState(63.6);
   /** 右侧左栏：已选指标高度占比 (25–75%)，用于 refactor 布局 */
   const [rightPanelHeight, setRightPanelHeight] = useState(50);
+  const [rightPanelHeightCustomized, setRightPanelHeightCustomized] = useState(false);
   const mainLayoutRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightLeftRef = useRef<HTMLDivElement>(null);
+  const livePreviewRef = useRef<HTMLDivElement>(null);
   const previewListBodyRef = useRef<HTMLDivElement | null>(null);
   const previewTradeItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previewListScrollRafRef = useRef<number | null>(null);
@@ -876,6 +1061,15 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     });
   }, []);
 
+  const handleLivePreviewResize = useCallback((deltaX: number) => {
+    setLiveListPanelWidth((prev) => {
+      const el = livePreviewRef.current;
+      const w = el?.offsetWidth ?? 640;
+      const newPct = prev - (deltaX / w) * 100;
+      return Math.min(55, Math.max(20, newPct));
+    });
+  }, []);
+
   const handleLeftVerticalResize = useCallback((deltaY: number) => {
     setLeftKlineHeight((prev) => {
       const el = leftPanelRef.current;
@@ -886,6 +1080,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   }, []);
 
   const handleRightLeftVerticalResize = useCallback((deltaY: number) => {
+    setRightPanelHeightCustomized((prev) => (prev ? prev : true));
     setRightPanelHeight((prev) => {
       const el = rightLeftRef.current;
       const h = el?.offsetHeight ?? 400;
@@ -2352,6 +2547,18 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return Number(backtestBars[index]?.timestamp ?? 0);
   }, [backtestBars, backtestProgress.processedBars]);
   const detectedTimeText = detectedTimestamp > 0 ? formatDateTime(detectedTimestamp) : '-';
+  useEffect(() => {
+    const fallback = detectedTimestamp > 0 ? detectedTimestamp : latestBacktestTimestamp;
+    if (fallback <= 0) {
+      return;
+    }
+    setCalendarAnchorTimestamp((prev) => (prev > 0 ? prev : fallback));
+  }, [detectedTimestamp, latestBacktestTimestamp]);
+
+  useEffect(() => {
+    setCalendarAnchorTimestamp(0);
+  }, [selectedExchange, selectedSymbol, selectedTimeframeSec]);
+
   const loadedDataDays = useMemo(() => {
     if (backtestBars.length < 2) {
       return 0;
@@ -2387,6 +2594,12 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       : localBacktestSummary.status === 'waiting_data'
         ? '等待数据'
         : '未开始';
+  const dashboardProgressTotalBars = Math.max(backtestProgress.totalBars || localBacktestSummary.bars || backtestBars.length, 0);
+  const dashboardProgressProcessedBars = Math.max(
+    0,
+    Math.min(backtestProgress.processedBars, dashboardProgressTotalBars || backtestProgress.processedBars),
+  );
+  const dashboardProgressText = `回测进度 ${dashboardProgressProcessedBars}/${dashboardProgressTotalBars} · ${progressPercent}%`;
   const livePositionCount = previewTrades.length;
   const liveWinRate = localBacktestSummary.winRate;
   const liveAveragePnl = averageClosedPnl;
@@ -2409,6 +2622,425 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       .map(([key, count]) => `${key}:${count}`)
       .join(' / ');
   }, [eventSummary.typeCounts]);
+  const equityCurvePoints = useMemo(() => {
+    return sampleEquityPoints(localBacktestSummary.equityPreview || [], 1200);
+  }, [localBacktestSummary.equityPreview]);
+  const curveInsight = useMemo<BacktestCurveInsight>(() => {
+    const orderedClosedTrades = [...closedPreviewTrades].sort((a, b) => {
+      const byExit = Number(a.exitTime) - Number(b.exitTime);
+      if (byExit !== 0) {
+        return byExit;
+      }
+      return Number(a.entryTime) - Number(b.entryTime);
+    });
+    let currentWins = 0;
+    let currentLosses = 0;
+    let maxWin: TradeStreakLocation | null = null;
+    let maxLoss: TradeStreakLocation | null = null;
+    orderedClosedTrades.forEach((trade, index) => {
+      const pnl = Number(trade.pnl);
+      const order = index + 1;
+      if (pnl > 0) {
+        currentWins += 1;
+        currentLosses = 0;
+        if (!maxWin || currentWins > maxWin.count) {
+          maxWin = {
+            count: currentWins,
+            startOrder: order - currentWins + 1,
+            endOrder: order,
+            endTimestamp: Number(trade.exitTime) || Number(trade.entryTime) || 0,
+          };
+        }
+        return;
+      }
+      if (pnl < 0) {
+        currentLosses += 1;
+        currentWins = 0;
+        if (!maxLoss || currentLosses > maxLoss.count) {
+          maxLoss = {
+            count: currentLosses,
+            startOrder: order - currentLosses + 1,
+            endOrder: order,
+            endTimestamp: Number(trade.exitTime) || Number(trade.entryTime) || 0,
+          };
+        }
+        return;
+      }
+      currentWins = 0;
+      currentLosses = 0;
+    });
+
+    const equityPoints = localBacktestSummary.equityPreview || [];
+    let maxDrawdownPoint: LocalBacktestEquityPoint | null = null;
+    for (let index = 0; index < equityPoints.length; index += 1) {
+      const point = equityPoints[index];
+      if (!maxDrawdownPoint || point.drawdown > maxDrawdownPoint.drawdown) {
+        maxDrawdownPoint = point;
+      }
+    }
+    if (maxDrawdownPoint && maxDrawdownPoint.drawdown <= 0) {
+      maxDrawdownPoint = null;
+    }
+
+    return {
+      maxWinStreak: maxWin,
+      maxLossStreak: maxLoss,
+      maxDrawdownPoint,
+    };
+  }, [closedPreviewTrades, localBacktestSummary.equityPreview]);
+  const maxWinStreakMarkerPoint = useMemo(() => {
+    if (!curveInsight.maxWinStreak) {
+      return null;
+    }
+    return findNearestEquityPoint(localBacktestSummary.equityPreview || [], curveInsight.maxWinStreak.endTimestamp);
+  }, [curveInsight.maxWinStreak, localBacktestSummary.equityPreview]);
+  const maxLossStreakMarkerPoint = useMemo(() => {
+    if (!curveInsight.maxLossStreak) {
+      return null;
+    }
+    return findNearestEquityPoint(localBacktestSummary.equityPreview || [], curveInsight.maxLossStreak.endTimestamp);
+  }, [curveInsight.maxLossStreak, localBacktestSummary.equityPreview]);
+  const equityCurveOption = useMemo<EChartsOption>(() => {
+    const lineData = equityCurvePoints.map((point) => [point.timestamp, point.equity]);
+    const series: any[] = [
+      {
+        name: '资金',
+        type: 'line',
+        smooth: false,
+        showSymbol: false,
+        symbol: 'circle',
+        lineStyle: {
+          width: 2,
+          color: '#2563eb',
+        },
+        areaStyle: {
+          color: 'rgba(37, 99, 235, 0.1)',
+        },
+        data: lineData,
+      },
+    ];
+    if (curveInsight.maxDrawdownPoint) {
+      series.push({
+        name: '最大回撤',
+        type: 'scatter',
+        symbolSize: 10,
+        itemStyle: { color: '#dc2626' },
+        label: {
+          show: true,
+          position: 'top',
+          color: '#991b1b',
+          fontSize: 10,
+          formatter: `最大回撤 ${formatPercentValue(curveInsight.maxDrawdownPoint.drawdown)}`,
+        },
+        data: [[curveInsight.maxDrawdownPoint.timestamp, curveInsight.maxDrawdownPoint.equity]],
+      });
+    }
+    if (curveInsight.maxWinStreak && maxWinStreakMarkerPoint) {
+      series.push({
+        name: '最大连胜',
+        type: 'scatter',
+        symbolSize: 9,
+        itemStyle: { color: '#16a34a' },
+        label: {
+          show: true,
+          position: 'top',
+          color: '#166534',
+          fontSize: 10,
+          formatter: `连胜 ${curveInsight.maxWinStreak.count}`,
+        },
+        data: [[maxWinStreakMarkerPoint.timestamp, maxWinStreakMarkerPoint.equity]],
+      });
+    }
+    if (curveInsight.maxLossStreak && maxLossStreakMarkerPoint) {
+      series.push({
+        name: '最大连败',
+        type: 'scatter',
+        symbolSize: 9,
+        itemStyle: { color: '#ea580c' },
+        label: {
+          show: true,
+          position: 'top',
+          color: '#c2410c',
+          fontSize: 10,
+          formatter: `连败 ${curveInsight.maxLossStreak.count}`,
+        },
+        data: [[maxLossStreakMarkerPoint.timestamp, maxLossStreakMarkerPoint.equity]],
+      });
+    }
+    return {
+      animation: false,
+      grid: {
+        left: 48,
+        right: 14,
+        top: 18,
+        bottom: 30,
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'line' },
+      },
+      xAxis: {
+        type: 'time',
+        axisLine: { lineStyle: { color: '#dbe2ef' } },
+        axisLabel: {
+          color: '#64748b',
+          formatter: (value: number) => formatDateTimeShort(Number(value)),
+        },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        axisLine: { show: false },
+        axisLabel: {
+          color: '#64748b',
+          formatter: (value: number) => formatNumberValue(Number(value), 2),
+        },
+        splitLine: {
+          lineStyle: { color: '#edf2fb' },
+        },
+      },
+      series,
+      graphic: lineData.length > 0
+        ? undefined
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: '暂无资金曲线数据',
+                fill: '#94a3b8',
+                fontSize: 12,
+              },
+            },
+          ],
+    };
+  }, [
+    curveInsight.maxDrawdownPoint,
+    curveInsight.maxLossStreak,
+    curveInsight.maxWinStreak,
+    equityCurvePoints,
+    maxLossStreakMarkerPoint,
+    maxWinStreakMarkerPoint,
+  ]);
+  const winLossPieOption = useMemo<EChartsOption>(() => {
+    const closedCount = Math.max(0, tradeSummary.winCount + tradeSummary.lossCount);
+    const hasClosed = closedCount > 0;
+    const pieData = hasClosed
+      ? [
+          { value: Math.max(0, tradeSummary.winCount), name: '盈利平仓', itemStyle: { color: '#16a34a' } },
+          { value: Math.max(0, tradeSummary.lossCount), name: '亏损平仓', itemStyle: { color: '#dc2626' } },
+        ]
+      : [{ value: 1, name: '暂无平仓', itemStyle: { color: '#cbd5e1' } }];
+    return {
+      animation: false,
+      tooltip: {
+        trigger: 'item',
+      },
+      legend: {
+        bottom: 0,
+        left: 'center',
+        textStyle: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+      },
+      series: [
+        {
+          type: 'pie',
+          radius: ['48%', '76%'],
+          center: ['50%', '40%'],
+          avoidLabelOverlap: true,
+          label: {
+            show: true,
+            formatter: hasClosed ? '{b}\n{d}%' : '{b}',
+            color: '#334155',
+            fontSize: 11,
+          },
+          labelLine: {
+            length: 10,
+            length2: 8,
+          },
+          data: pieData,
+        },
+      ],
+    };
+  }, [tradeSummary.lossCount, tradeSummary.winCount]);
+  const maxWinStreakText = curveInsight.maxWinStreak
+    ? `最大连胜 ${curveInsight.maxWinStreak.count} 次（第 ${curveInsight.maxWinStreak.startOrder}-${curveInsight.maxWinStreak.endOrder} 笔，${formatDateTime(curveInsight.maxWinStreak.endTimestamp)}）`
+    : '最大连胜 暂无';
+  const maxLossStreakText = curveInsight.maxLossStreak
+    ? `最大连败 ${curveInsight.maxLossStreak.count} 次（第 ${curveInsight.maxLossStreak.startOrder}-${curveInsight.maxLossStreak.endOrder} 笔，${formatDateTime(curveInsight.maxLossStreak.endTimestamp)}）`
+    : '最大连败 暂无';
+  const maxDrawdownPositionText = curveInsight.maxDrawdownPoint
+    ? `最大回撤位置 ${formatDateTime(curveInsight.maxDrawdownPoint.timestamp)}（${formatPercentValue(curveInsight.maxDrawdownPoint.drawdown)}）`
+    : '最大回撤位置 暂无';
+  const calendarBucketMaps = useMemo(() => {
+    const dayMap = new Map<string, CalendarBucketMetrics>();
+    const weekMap = new Map<string, CalendarBucketMetrics>();
+    const monthMap = new Map<string, CalendarBucketMetrics>();
+    const hourMap = new Map<string, CalendarBucketMetrics>();
+    const mergeToMap = (map: Map<string, CalendarBucketMetrics>, key: string, pnl: number, win: number) => {
+      const prev = map.get(key) || buildEmptyCalendarMetrics();
+      map.set(key, {
+        pnl: prev.pnl + pnl,
+        count: prev.count + 1,
+        wins: prev.wins + win,
+      });
+    };
+    previewTrades.forEach((trade) => {
+      const entryTimestamp = Number(trade.entryTime);
+      if (!Number.isFinite(entryTimestamp) || entryTimestamp <= 0) {
+        return;
+      }
+      const entryDate = new Date(entryTimestamp);
+      const dayKey = toCalendarDateKey(entryDate);
+      const monthKey = toCalendarMonthKey(entryDate);
+      const weekKey = toCalendarDateKey(startOfLocalWeek(entryDate));
+      const hourKey = `${dayKey}-${`${entryDate.getHours()}`.padStart(2, '0')}`;
+      const pnl = Number.isFinite(trade.pnl) ? trade.pnl : 0;
+      const win = pnl > 0 ? 1 : 0;
+      mergeToMap(dayMap, dayKey, pnl, win);
+      mergeToMap(weekMap, weekKey, pnl, win);
+      mergeToMap(monthMap, monthKey, pnl, win);
+      mergeToMap(hourMap, hourKey, pnl, win);
+    });
+    return { dayMap, weekMap, monthMap, hourMap };
+  }, [previewTrades]);
+  const calendarAnchorDate = useMemo(() => {
+    const fallbackTimestamp =
+      calendarAnchorTimestamp > 0
+        ? calendarAnchorTimestamp
+        : detectedTimestamp > 0
+          ? detectedTimestamp
+          : latestBacktestTimestamp > 0
+            ? latestBacktestTimestamp
+            : Date.now();
+    return new Date(fallbackTimestamp);
+  }, [calendarAnchorTimestamp, detectedTimestamp, latestBacktestTimestamp]);
+  const handleCalendarShift = useCallback((direction: -1 | 1) => {
+    setCalendarAnchorTimestamp((prev) => {
+      const baseTimestamp =
+        prev > 0
+          ? prev
+          : detectedTimestamp > 0
+            ? detectedTimestamp
+            : latestBacktestTimestamp > 0
+              ? latestBacktestTimestamp
+              : Date.now();
+      const baseDate = new Date(baseTimestamp);
+      const shiftedDate =
+        calendarViewMode === 'month'
+          ? addMonths(baseDate, direction)
+          : calendarViewMode === 'week'
+            ? addDays(baseDate, direction * 7)
+            : addDays(baseDate, direction);
+      return shiftedDate.getTime();
+    });
+  }, [calendarViewMode, detectedTimestamp, latestBacktestTimestamp]);
+  const handleCalendarBackToLatest = useCallback(() => {
+    const fallback = detectedTimestamp > 0 ? detectedTimestamp : latestBacktestTimestamp;
+    if (fallback > 0) {
+      setCalendarAnchorTimestamp(fallback);
+    }
+  }, [detectedTimestamp, latestBacktestTimestamp]);
+  const calendarViewData = useMemo(() => {
+    type CalendarCell = {
+      id: string;
+      label: string;
+      subLabel?: string;
+      inCurrentPeriod: boolean;
+      metrics: CalendarBucketMetrics;
+    };
+    const anchor = calendarAnchorDate;
+    if (calendarViewMode === 'day') {
+      const dayStart = startOfLocalDay(anchor.getTime());
+      const dayKey = toCalendarDateKey(dayStart);
+      const cells: CalendarCell[] = Array.from({ length: 24 }, (_, hour) => {
+        const hourText = `${hour}`.padStart(2, '0');
+        const key = `${dayKey}-${hourText}`;
+        return {
+          id: key,
+          label: `${hourText}:00`,
+          subLabel: hour === 0 ? `${dayStart.getMonth() + 1}/${dayStart.getDate()}` : undefined,
+          inCurrentPeriod: true,
+          metrics: calendarBucketMaps.hourMap.get(key) || buildEmptyCalendarMetrics(),
+        };
+      });
+      const periodMetrics = cells.reduce(
+        (acc, cell) => mergeCalendarMetrics(acc, cell.metrics),
+        buildEmptyCalendarMetrics(),
+      );
+      const maxAbsPnl = cells.reduce((acc, cell) => Math.max(acc, Math.abs(cell.metrics.pnl)), 0);
+      return {
+        cells,
+        periodLabel: formatCalendarPeriodLabel('day', anchor),
+        periodMetrics,
+        maxAbsPnl,
+      };
+    }
+    if (calendarViewMode === 'week') {
+      const weekStart = startOfLocalWeek(anchor);
+      const cells: CalendarCell[] = Array.from({ length: 7 }, (_, index) => {
+        const cellDate = addDays(weekStart, index);
+        const key = toCalendarDateKey(cellDate);
+        return {
+          id: key,
+          label: `周${CALENDAR_DAY_LABELS[index]}`,
+          subLabel: `${cellDate.getMonth() + 1}/${cellDate.getDate()}`,
+          inCurrentPeriod: true,
+          metrics: calendarBucketMaps.dayMap.get(key) || buildEmptyCalendarMetrics(),
+        };
+      });
+      const periodMetrics = cells.reduce(
+        (acc, cell) => mergeCalendarMetrics(acc, cell.metrics),
+        buildEmptyCalendarMetrics(),
+      );
+      const maxAbsPnl = cells.reduce((acc, cell) => Math.max(acc, Math.abs(cell.metrics.pnl)), 0);
+      return {
+        cells,
+        periodLabel: formatCalendarPeriodLabel('week', anchor),
+        periodMetrics,
+        maxAbsPnl,
+      };
+    }
+    const monthStart = startOfLocalMonth(anchor);
+    const monthKey = toCalendarMonthKey(monthStart);
+    const monthWeekStart = startOfLocalWeek(monthStart);
+    const cells: CalendarCell[] = Array.from({ length: 42 }, (_, index) => {
+      const cellDate = addDays(monthWeekStart, index);
+      const key = toCalendarDateKey(cellDate);
+      return {
+        id: key,
+        label: `${cellDate.getDate()}`,
+        inCurrentPeriod: cellDate.getMonth() === monthStart.getMonth() && cellDate.getFullYear() === monthStart.getFullYear(),
+        metrics: calendarBucketMaps.dayMap.get(key) || buildEmptyCalendarMetrics(),
+      };
+    });
+    const periodMetrics = calendarBucketMaps.monthMap.get(monthKey) || buildEmptyCalendarMetrics();
+    const maxAbsPnl = cells.reduce(
+      (acc, cell) => (cell.inCurrentPeriod ? Math.max(acc, Math.abs(cell.metrics.pnl)) : acc),
+      0,
+    );
+    return {
+      cells,
+      periodLabel: formatCalendarPeriodLabel('month', anchor),
+      periodMetrics,
+      maxAbsPnl,
+    };
+  }, [calendarAnchorDate, calendarBucketMaps.dayMap, calendarBucketMaps.hourMap, calendarBucketMaps.monthMap, calendarViewMode]);
+  const getCalendarCellBackground = useCallback((pnl: number, maxAbsPnl: number) => {
+    if (!Number.isFinite(pnl) || Math.abs(pnl) <= 0 || maxAbsPnl <= 0) {
+      return undefined;
+    }
+    const intensity = Math.min(1, Math.abs(pnl) / maxAbsPnl);
+    const alpha = 0.06 + intensity * 0.28;
+    if (pnl > 0) {
+      return `rgba(22, 163, 74, ${alpha.toFixed(3)})`;
+    }
+    return `rgba(220, 38, 38, ${alpha.toFixed(3)})`;
+  }, []);
   const visibleDiagnostics = useMemo(
     () => (Array.isArray(localBacktestSummary.diagnostics) ? localBacktestSummary.diagnostics : []).slice(0, 14),
     [localBacktestSummary.diagnostics],
@@ -2525,9 +3157,27 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     >
       <div className="strategy-workbench strategy-workbench--refactor">
         <div className="strategy-workbench-topbar">
-          <button type="button" className="strategy-workbench-topbar-button" onClick={onClose}>
-            返回
-          </button>
+          <div className="strategy-workbench-topbar-left">
+            <button type="button" className="strategy-workbench-topbar-button" onClick={onClose}>
+              返回
+            </button>
+            <div className="strategy-workbench-layout-toggle" role="tablist" aria-label="工作台布局模式">
+              <button
+                type="button"
+                className={`strategy-workbench-layout-toggle-button ${workbenchLayoutMode === 'edit' ? 'is-active' : ''}`}
+                onClick={() => setWorkbenchLayoutMode('edit')}
+              >
+                编辑模式
+              </button>
+              <button
+                type="button"
+                className={`strategy-workbench-layout-toggle-button ${workbenchLayoutMode === 'backtest' ? 'is-active' : ''}`}
+                onClick={() => setWorkbenchLayoutMode('backtest')}
+              >
+                回测模式
+              </button>
+            </div>
+          </div>
           <div className="strategy-workbench-title-wrap">
             <div className="strategy-workbench-title">
               策略指标工作台
@@ -2630,14 +3280,15 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           </div>
         ) : (
           <div
-            className="strategy-workbench-main strategy-workbench-main--resizable"
+            className={`strategy-workbench-main strategy-workbench-main--resizable ${workbenchLayoutMode === 'backtest' ? 'is-backtest-mode' : 'is-edit-mode'}`}
             ref={mainLayoutRef}
             style={
               {
                 '--wb-left-width': `${leftPanelWidth}%`,
                 '--wb-right-left-width': `${rightLeftPanelWidth}%`,
                 '--wb-left-kline-height': `${leftKlineHeight}%`,
-                '--wb-right-panel-height': `${rightPanelHeight}%`,
+                '--wb-right-panel-height': rightPanelHeightCustomized ? `${rightPanelHeight}%` : undefined,
+                '--wb-right-panel-auto-max-height': '66.666vh',
               } as React.CSSProperties
             }
           >
@@ -2656,6 +3307,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                     previewMode={previewTradeMode}
                     focusRange={previewTradeMode === 'normal' ? focusedPreviewTradeRange : null}
                     fullPreviewRanges={previewTradeMode === 'full' ? previewTradeRanges : []}
+                    selectedRangeId={activePreviewTradeKey}
                     syncTargetRange={previewTradeMode === 'full' ? fullPreviewAnchorRange : null}
                     onVisibleRangeChange={
                       previewTradeMode === 'full' && previewScrollSyncEnabled
@@ -2676,12 +3328,15 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 
               <div className="strategy-workbench-card strategy-workbench-card--dashboard">
                 <div className="strategy-workbench-card-header">
-                  <span className="strategy-workbench-card-title">仪表盘</span>
+                  <div className="strategy-workbench-dashboard-title-group">
+                    <span className="strategy-workbench-card-title">仪表盘</span>
+                    <span className={`strategy-workbench-dashboard-progress-chip ${isBacktestRunning ? 'is-running' : ''}`}>
+                      {dashboardProgressText}
+                    </span>
+                  </div>
                   <div className="strategy-workbench-dashboard-header-actions">
                     <span className="strategy-workbench-card-meta">
-                      {isBacktestRunning
-                        ? `运行中 · ${progressPercent}% · 检测至 ${detectedTimeText}`
-                        : `${headerRunText} · 检测至 ${detectedTimeText}`}
+                      {headerRunText} · 检测至 {detectedTimeText} · 耗时 {formatDuration(backtestProgress.elapsedMs)}
                     </span>
                     <button
                       type="button"
@@ -2866,26 +3521,18 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                         确认并预览
                       </button>
                     </div>
-
-                    <div
-                      className={`strategy-workbench-detect-status ${backtestParamError ? 'is-blocked' : 'is-ready'}`}
-                    >
-                      {backtestParamError || '参数已就绪，点击“确认并预览”后进入回测结果与仓位列表。'}
-                    </div>
                   </>
                 ) : (
                   <>
                     <div
-                      className={`strategy-workbench-detect-status ${localBacktestSummary.status === 'running' ? 'is-ready' : 'is-blocked'}`}
+                      className="strategy-workbench-live-preview strategy-workbench-live-preview--resizable"
+                      ref={livePreviewRef}
+                      style={
+                        {
+                          '--wb-live-list-width': `${liveListPanelWidth}%`,
+                        } as React.CSSProperties
+                      }
                     >
-                      {localBacktestSummary.message}
-                      {' · '}
-                      已检查 {backtestProgress.processedBars}/{backtestProgress.totalBars || localBacktestSummary.bars} 根 K 线
-                      {' · '}
-                      当前检测时间 {detectedTimeText}
-                    </div>
-
-                    <div className="strategy-workbench-live-preview">
                       <div className="strategy-workbench-live-summary">
                         <div className="strategy-workbench-live-stat-grid">
                           <div className="strategy-workbench-live-stat">
@@ -2913,20 +3560,135 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                             <strong>{formatPercentValue(backtestStats.maxDrawdown)}</strong>
                           </div>
                         </div>
-                        <div className="strategy-workbench-live-progress">
-                          <div className="strategy-workbench-live-progress-label">
-                            回测进度 {backtestProgress.processedBars}/{backtestProgress.totalBars || localBacktestSummary.bars}
-                          </div>
-                          <div className="strategy-workbench-live-progress-track">
-                            <div
-                              className="strategy-workbench-live-progress-fill"
-                              style={{ width: `${progressPercent}%` }}
+                        <div className="strategy-workbench-live-visual-grid">
+                          <div className="strategy-workbench-live-chart-card strategy-workbench-live-chart-card--equity">
+                            <div className="strategy-workbench-live-chart-title">收益资金曲线</div>
+                            <StrategyWorkbenchEChart
+                              className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--equity"
+                              option={equityCurveOption}
                             />
+                            <div className="strategy-workbench-live-chart-insights">
+                              <span>{maxWinStreakText}</span>
+                              <span>{maxLossStreakText}</span>
+                              <span>{maxDrawdownPositionText}</span>
+                            </div>
                           </div>
-                          <div className="strategy-workbench-live-progress-meta">
-                            <span>{progressPercent}%</span>
-                            <span>耗时 {formatDuration(backtestProgress.elapsedMs)}</span>
-                            <span>{backtestProgress.done ? '已完成' : '进行中'}</span>
+                          <div className="strategy-workbench-live-chart-card strategy-workbench-live-chart-card--winrate">
+                            <div className="strategy-workbench-live-chart-title">胜负分布</div>
+                            <StrategyWorkbenchEChart
+                              className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--winrate"
+                              option={winLossPieOption}
+                            />
+                            <div className="strategy-workbench-live-winrate-total">
+                              开仓总数量
+                              <strong>{livePositionCount}</strong>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="strategy-workbench-live-calendar">
+                          <div className="strategy-workbench-live-calendar-header">
+                            <div className="strategy-workbench-live-calendar-title">盈亏日历分析</div>
+                            <div className="strategy-workbench-live-calendar-header-right">
+                              <div className="strategy-workbench-live-calendar-mode-toggle" role="tablist" aria-label="日历视图切换">
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-calendar-mode-button ${calendarViewMode === 'month' ? 'is-active' : ''}`}
+                                  onClick={() => setCalendarViewMode('month')}
+                                >
+                                  月
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-calendar-mode-button ${calendarViewMode === 'week' ? 'is-active' : ''}`}
+                                  onClick={() => setCalendarViewMode('week')}
+                                >
+                                  周
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`strategy-workbench-live-calendar-mode-button ${calendarViewMode === 'day' ? 'is-active' : ''}`}
+                                  onClick={() => setCalendarViewMode('day')}
+                                >
+                                  日
+                                </button>
+                              </div>
+                              <div className="strategy-workbench-live-calendar-nav">
+                                <button
+                                  type="button"
+                                  className="strategy-workbench-live-calendar-nav-button"
+                                  onClick={() => handleCalendarShift(-1)}
+                                  aria-label="上一周期"
+                                >
+                                  {'<'}
+                                </button>
+                                <span className="strategy-workbench-live-calendar-period-label">{calendarViewData.periodLabel}</span>
+                                <button
+                                  type="button"
+                                  className="strategy-workbench-live-calendar-nav-button"
+                                  onClick={() => handleCalendarShift(1)}
+                                  aria-label="下一周期"
+                                >
+                                  {'>'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="strategy-workbench-live-calendar-nav-button"
+                                  onClick={handleCalendarBackToLatest}
+                                >
+                                  最新
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="strategy-workbench-live-calendar-summary">
+                            <span>
+                              总盈亏
+                              <strong className={calendarViewData.periodMetrics.pnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                {formatSignedNumber(calendarViewData.periodMetrics.pnl)}
+                              </strong>
+                            </span>
+                            <span>
+                              开仓单数
+                              <strong>{calendarViewData.periodMetrics.count}</strong>
+                            </span>
+                            <span>
+                              胜率
+                              <strong>
+                                {formatPercentValue(
+                                  calendarViewData.periodMetrics.count > 0
+                                    ? calendarViewData.periodMetrics.wins / calendarViewData.periodMetrics.count
+                                    : 0,
+                                )}
+                              </strong>
+                            </span>
+                          </div>
+                          <div className={`strategy-workbench-live-calendar-grid is-${calendarViewMode}`}>
+                            {calendarViewData.cells.map((cell) => {
+                              const cellWinRate = cell.metrics.count > 0 ? cell.metrics.wins / cell.metrics.count : 0;
+                              const tone = getCalendarCellBackground(cell.metrics.pnl, calendarViewData.maxAbsPnl);
+                              return (
+                                <div
+                                  key={cell.id}
+                                  className={[
+                                    'strategy-workbench-live-calendar-cell',
+                                    cell.inCurrentPeriod ? '' : 'is-outside',
+                                    cell.metrics.pnl > 0 ? 'is-positive' : '',
+                                    cell.metrics.pnl < 0 ? 'is-negative' : '',
+                                  ].join(' ').trim()}
+                                  style={tone ? { backgroundColor: tone } : undefined}
+                                >
+                                  <div className="strategy-workbench-live-calendar-cell-head">
+                                    <span>{cell.label}</span>
+                                    {cell.subLabel ? (
+                                      <span className="strategy-workbench-live-calendar-cell-sub">{cell.subLabel}</span>
+                                    ) : null}
+                                  </div>
+                                  <div className="strategy-workbench-live-calendar-cell-pnl">{formatSignedNumber(cell.metrics.pnl)}</div>
+                                  <div className="strategy-workbench-live-calendar-cell-meta">开仓 {cell.metrics.count}</div>
+                                  <div className="strategy-workbench-live-calendar-cell-meta">胜率 {formatPercentValue(cellWinRate, 1)}</div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                         <div className="strategy-workbench-live-advanced-grid">
@@ -2998,6 +3760,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                           )}
                         </div>
                       </div>
+
+                      <ResizeHandle
+                        className="strategy-workbench-resize-handle strategy-workbench-resize-handle--live-preview"
+                        onResize={handleLivePreviewResize}
+                      />
 
                       <div className="strategy-workbench-live-list">
                         <div className="strategy-workbench-live-list-header">
@@ -3111,7 +3878,10 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             />
 
             <div className="strategy-workbench-right" ref={rightPanelRef}>
-              <div className="strategy-workbench-right-left strategy-workbench-right-left--resizable" ref={rightLeftRef}>
+              <div
+                className={`strategy-workbench-right-left strategy-workbench-right-left--resizable ${rightPanelHeightCustomized ? '' : 'is-auto-height'}`}
+                ref={rightLeftRef}
+              >
                 <div className="strategy-workbench-card strategy-workbench-card--panel">
                   <div className="strategy-workbench-card-header">
                     <span className="strategy-workbench-card-title">已选指标</span>

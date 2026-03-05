@@ -315,6 +315,11 @@ function shouldShowRiskLabels(overlay: { extendData?: unknown; isDrawing?: () =>
   return isHovered || isSelected || isDrawing;
 }
 
+function isRiskOverlaySelected(overlay: { extendData?: unknown }): boolean {
+  const extendData = ensureRiskExtendData(overlay);
+  return extendData.previewSelected === true || extendData.labelSelected === true;
+}
+
 function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fallbackDirection: RiskDirection) {
   return {
     name,
@@ -501,6 +506,13 @@ function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fal
         startTimestamp: trade.hasEntry ? bars[trade.startIndex]?.timestamp ?? null : null,
         endTimestamp: trade.hasEntry ? bars[trade.endIndex]?.timestamp ?? null : null,
       };
+      const isSelected = isRiskOverlaySelected(overlay);
+      const takeProfitPlanColor = isSelected ? "rgba(34, 197, 94, 0.28)" : RISK_ZONE_COLORS.takeProfitPlan;
+      const stopLossPlanColor = isSelected ? "rgba(239, 68, 68, 0.34)" : RISK_ZONE_COLORS.stopLossPlan;
+      const takeProfitLineColor = "rgba(22, 163, 74, 0.5)";
+      const stopLossLineColor = "rgba(220, 38, 38, 0.5)";
+      const levelLineSize = isSelected ? 1.8 : 1;
+      const levelLineStyle = "dashed";
 
       const figures: Array<Record<string, unknown>> = [];
 
@@ -511,7 +523,7 @@ function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fal
         attrs: { coordinates: createRectCoordinates(xStart, xEnd, takeTop, takeBottom) },
         styles: {
           style: "fill",
-          color: RISK_ZONE_COLORS.takeProfitPlan,
+          color: takeProfitPlanColor,
           borderSize: 0,
           borderColor: "rgba(0, 0, 0, 0)",
         },
@@ -525,9 +537,9 @@ function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fal
           ],
         },
         styles: {
-          style: "dashed",
-          size: 1,
-          color: "rgba(22, 163, 74, 0.88)",
+          style: levelLineStyle,
+          size: levelLineSize,
+          color: takeProfitLineColor,
           dashedValue: [5, 4],
           smooth: false,
         },
@@ -540,7 +552,7 @@ function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fal
         attrs: { coordinates: createRectCoordinates(xStart, xEnd, stopTop, stopBottom) },
         styles: {
           style: "fill",
-          color: RISK_ZONE_COLORS.stopLossPlan,
+          color: stopLossPlanColor,
           borderSize: 0,
           borderColor: "rgba(0, 0, 0, 0)",
         },
@@ -554,9 +566,9 @@ function createRiskRewardOverlay(name: "riskRewardLong" | "riskRewardShort", fal
           ],
         },
         styles: {
-          style: "dashed",
-          size: 1,
-          color: "rgba(220, 38, 38, 0.9)",
+          style: levelLineStyle,
+          size: levelLineSize,
+          color: stopLossLineColor,
           dashedValue: [5, 4],
           smooth: false,
         },

@@ -45,6 +45,7 @@ interface StrategyWorkbenchKlineProps {
   previewMode?: StrategyWorkbenchPreviewMode;
   focusRange?: StrategyWorkbenchTradeFocusRange | null;
   fullPreviewRanges?: StrategyWorkbenchTradeFocusRange[];
+  selectedRangeId?: string | null;
   syncTargetRange?: StrategyWorkbenchTradeFocusRange | null;
   onVisibleRangeChange?: (range: StrategyWorkbenchVisibleRange) => void;
   hoverValueId?: string;
@@ -586,6 +587,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   previewMode = 'normal',
   focusRange,
   fullPreviewRanges = [],
+  selectedRangeId = null,
   syncTargetRange,
   onVisibleRangeChange,
   hoverValueId,
@@ -971,7 +973,8 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
         .slice(0, maxOverlayCount);
     }
 
-    const signature = `${snapshot.fromIndex}:${snapshot.toIndex}|${visibleRanges.map((item) => item.id).join(',')}`;
+    const activeRangeId = (selectedRangeId || '').trim();
+    const signature = `${snapshot.fromIndex}:${snapshot.toIndex}|sel:${activeRangeId || '-'}|${visibleRanges.map((item) => item.id).join(',')}`;
     if (signature === fullPreviewOverlaySignatureRef.current) {
       return;
     }
@@ -982,7 +985,14 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     fullPreviewOverlayGroupIdRef.current = groupId;
     const getBars = () => chart.getDataList();
     const currentBars = getBars();
-    const payloads = visibleRanges
+    const orderedVisibleRanges = activeRangeId
+      ? [
+          ...visibleRanges.filter((item) => item.id !== activeRangeId),
+          ...visibleRanges.filter((item) => item.id === activeRangeId),
+        ]
+      : visibleRanges;
+
+    const payloads = orderedVisibleRanges
       .map((range) => {
         const side = normalizeTradeSide(range.side);
         const overlayName = side === 'short' ? 'riskRewardShort' : 'riskRewardLong';
@@ -1010,6 +1020,8 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
             direction: side,
             getBars,
             bars: currentBars,
+            previewSelected: range.id === activeRangeId,
+            labelSelected: range.id === activeRangeId,
             positionEntryTime: range.startTime,
             positionExitTime: range.endTime,
             positionExitPrice: exitPrice,
@@ -1026,7 +1038,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     }
 
     chart.createOverlay(payloads as never);
-  }, [chartReady, clearFullPreviewOverlay, fullPreviewRanges, intervalMs, previewMode]);
+  }, [chartReady, clearFullPreviewOverlay, fullPreviewRanges, intervalMs, previewMode, selectedRangeId]);
 
   const scheduleFullPreviewOverlayRefresh = useCallback(() => {
     if (fullPreviewOverlayRafRef.current !== null) {
@@ -1122,6 +1134,8 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
         direction: side,
         getBars: () => chart.getDataList(),
         bars: chart.getDataList(),
+        previewSelected: true,
+        labelSelected: true,
         positionEntryTime: startTime,
         positionExitTime: endTime,
         positionExitPrice: exitPrice,
@@ -1164,7 +1178,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
 
   useEffect(() => {
     scheduleFullPreviewOverlayRefresh();
-  }, [bars, fullPreviewRanges, scheduleFullPreviewOverlayRefresh]);
+  }, [bars, fullPreviewRanges, scheduleFullPreviewOverlayRefresh, selectedRangeId]);
 
   useEffect(() => {
     const chart = chartRef.current;

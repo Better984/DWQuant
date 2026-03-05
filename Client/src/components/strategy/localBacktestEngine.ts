@@ -299,6 +299,7 @@ type LocalBacktestMetrics = {
   maxPeriodLoss: number;
   maxPeriodLossAt: number;
   equityPointCount: number;
+  equityPreviewLimit: number;
   equityPreview: LocalBacktestEquityPoint[];
   firstTimestamp: number;
   lastTimestamp: number;
@@ -323,7 +324,18 @@ const DEFAULT_SLIPPAGE_BPS = 0;
 const DEFAULT_INITIAL_CAPITAL = 10_000;
 const FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
-const MAX_EQUITY_PREVIEW_POINTS = 360;
+const MIN_EQUITY_PREVIEW_POINTS = 720;
+const MAX_EQUITY_PREVIEW_POINTS = 100_000;
+const EQUITY_PREVIEW_BUFFER_POINTS = 256;
+
+const resolveEquityPreviewLimit = (barsTotal: number) => {
+  const safeBars = Number.isFinite(barsTotal) ? Math.max(0, Math.trunc(barsTotal)) : 0;
+  if (safeBars <= 0) {
+    return MIN_EQUITY_PREVIEW_POINTS;
+  }
+  // 与回测样本量同级扩容，默认覆盖完整区间；超大样本时用上限保护内存与渲染性能。
+  return Math.min(MAX_EQUITY_PREVIEW_POINTS, Math.max(MIN_EQUITY_PREVIEW_POINTS, safeBars + 64));
+};
 
 const createStageCounters = (barsTotal: number): BacktestStageCounters => ({
   barsTotal,
@@ -1965,8 +1977,8 @@ const updateMetrics = (
     periodPnl,
     drawdown,
   });
-  if (metrics.equityPreview.length > MAX_EQUITY_PREVIEW_POINTS + 48) {
-    metrics.equityPreview.splice(0, metrics.equityPreview.length - MAX_EQUITY_PREVIEW_POINTS);
+  if (metrics.equityPreview.length > metrics.equityPreviewLimit + EQUITY_PREVIEW_BUFFER_POINTS) {
+    metrics.equityPreview.splice(0, metrics.equityPreview.length - metrics.equityPreviewLimit);
   }
 
   metrics.lastEquity = equity;
@@ -2250,6 +2262,7 @@ const prepareBacktestContext = (input: LocalBacktestInput): LocalBacktestPrepare
     maxPeriodLoss: Number.POSITIVE_INFINITY,
     maxPeriodLossAt: 0,
     equityPointCount: 0,
+    equityPreviewLimit: resolveEquityPreviewLimit(bars.length),
     equityPreview: [],
     firstTimestamp: 0,
     lastTimestamp: 0,

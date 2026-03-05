@@ -17,11 +17,52 @@
   height: 56px;
   padding: 0 12px;
   display: grid;
-  grid-template-columns: 90px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid #d1d5db;
   background: #ffffff;
+}
+
+.strategy-workbench-topbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategy-workbench-layout-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.strategy-workbench-layout-toggle-button {
+  height: 30px;
+  border: 0;
+  border-right: 1px solid #e5e7eb;
+  background: transparent;
+  color: #64748b;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.strategy-workbench-layout-toggle-button:last-child {
+  border-right: 0;
+}
+
+.strategy-workbench-layout-toggle-button:hover {
+  background: #f8fafc;
+}
+
+.strategy-workbench-layout-toggle-button.is-active {
+  background: #e8f0ff;
+  color: #1d4f95;
 }
 
 .strategy-workbench-topbar-actions {
@@ -279,6 +320,32 @@
   color: #111827;
 }
 
+.strategy-workbench-dashboard-title-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategy-workbench-dashboard-progress-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  background: #f8fafc;
+}
+
+.strategy-workbench-dashboard-progress-chip.is-running {
+  border-color: #93c5fd;
+  color: #1e40af;
+  background: #eff6ff;
+}
+
 .strategy-workbench-card-meta {
   font-size: 11px;
   color: #6b7280;
@@ -505,16 +572,21 @@
 }
 
 .strategy-workbench-live-preview {
+  --wb-live-list-width: 33.333%;
   margin: 10px 10px 10px;
   display: grid;
-  grid-template-columns: minmax(240px, 0.95fr) minmax(0, 1.35fr);
-  gap: 10px;
+  grid-template-columns:
+    minmax(0, calc(100% - var(--wb-live-list-width, 33.333%) - 12px))
+    minmax(12px, 12px)
+    minmax(220px, var(--wb-live-list-width, 33.333%));
+  gap: 0;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
 .strategy-workbench-live-summary {
+  grid-column: 1;
   border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #ffffff;
@@ -524,6 +596,7 @@
   gap: 8px;
   min-height: 0;
   overflow-y: auto;
+  min-width: 0;
 }
 
 .strategy-workbench-live-stat-grid {
@@ -583,6 +656,247 @@
   justify-content: space-between;
   font-size: 11px;
   color: #64748b;
+}
+
+.strategy-workbench-live-visual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.9fr);
+  gap: 10px;
+}
+
+.strategy-workbench-live-chart-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.strategy-workbench-live-chart-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.strategy-workbench-live-chart-canvas {
+  width: 100%;
+  min-height: 220px;
+}
+
+.strategy-workbench-live-chart-canvas--winrate {
+  min-height: 230px;
+}
+
+.strategy-workbench-live-chart-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #475569;
+}
+
+.strategy-workbench-live-winrate-total {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.strategy-workbench-live-winrate-total strong {
+  font-size: 22px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.strategy-workbench-live-calendar {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.strategy-workbench-live-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.strategy-workbench-live-calendar-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.strategy-workbench-live-calendar-header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.strategy-workbench-live-calendar-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.strategy-workbench-live-calendar-mode-button {
+  height: 26px;
+  border: 0;
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #64748b;
+  min-width: 32px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategy-workbench-live-calendar-mode-button:last-child {
+  border-right: 0;
+}
+
+.strategy-workbench-live-calendar-mode-button.is-active {
+  background: #eaf2ff;
+  color: #1d4ed8;
+}
+
+.strategy-workbench-live-calendar-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.strategy-workbench-live-calendar-nav-button {
+  height: 26px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  min-width: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.strategy-workbench-live-calendar-nav-button:hover {
+  border-color: #93c5fd;
+}
+
+.strategy-workbench-live-calendar-period-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  min-width: 124px;
+  text-align: center;
+}
+
+.strategy-workbench-live-calendar-summary {
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  font-size: 11px;
+  color: #475569;
+}
+
+.strategy-workbench-live-calendar-summary span {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.strategy-workbench-live-calendar-summary strong {
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.strategy-workbench-live-calendar-summary strong.is-positive {
+  color: #15803d;
+}
+
+.strategy-workbench-live-calendar-summary strong.is-negative {
+  color: #b91c1c;
+}
+
+.strategy-workbench-live-calendar-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.strategy-workbench-live-calendar-grid.is-month,
+.strategy-workbench-live-calendar-grid.is-week {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.strategy-workbench-live-calendar-grid.is-day {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.strategy-workbench-live-calendar-cell {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 92px;
+}
+
+.strategy-workbench-live-calendar-cell.is-outside {
+  opacity: 0.38;
+}
+
+.strategy-workbench-live-calendar-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.strategy-workbench-live-calendar-cell-sub {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.strategy-workbench-live-calendar-cell-pnl {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.strategy-workbench-live-calendar-cell.is-positive .strategy-workbench-live-calendar-cell-pnl {
+  color: #15803d;
+}
+
+.strategy-workbench-live-calendar-cell.is-negative .strategy-workbench-live-calendar-cell-pnl {
+  color: #b91c1c;
+}
+
+.strategy-workbench-live-calendar-cell-meta {
+  font-size: 10px;
+  color: #475569;
 }
 
 .strategy-workbench-live-advanced-grid {
@@ -688,6 +1002,7 @@
 }
 
 .strategy-workbench-live-list {
+  grid-column: 3;
   border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #ffffff;
@@ -695,6 +1010,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.strategy-workbench-resize-handle--live-preview {
+  grid-column: 2;
   min-height: 0;
 }
 
@@ -1182,6 +1503,11 @@
 .strategy-indicator-field-zone {
   border-top: 1px solid #e5e7eb;
   padding: 8px 10px 10px;
+  min-height: 0;
+  max-height: min(66.666vh, 100%);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .strategy-indicator-field-title {
@@ -1846,6 +2172,32 @@
 
   .strategy-workbench-live-preview {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .strategy-workbench-resize-handle--live-preview {
+    display: none;
+  }
+
+  .strategy-workbench-live-summary,
+  .strategy-workbench-live-list {
+    grid-column: 1;
+  }
+
+  .strategy-workbench-live-visual-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-workbench-live-chart-canvas {
+    min-height: 200px;
+  }
+
+  .strategy-workbench-live-calendar-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-workbench-live-calendar-grid.is-day {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .strategy-workbench-live-events-line {
@@ -2228,6 +2580,21 @@
   color: #1247a6;
 }
 
+.strategy-workbench--refactor .strategy-workbench-layout-toggle {
+  border-color: var(--wb-border-strong);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.strategy-workbench--refactor .strategy-workbench-layout-toggle-button {
+  color: #58708f;
+}
+
+.strategy-workbench--refactor .strategy-workbench-layout-toggle-button.is-active {
+  background: linear-gradient(180deg, #f2f8ff 0%, #e6f1ff 100%);
+  color: #1247a6;
+}
+
 .strategy-workbench--refactor .strategy-workbench-main {
   padding: 12px;
   gap: 12px;
@@ -2239,6 +2606,35 @@
 .strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable {
   gap: 0;
   grid-template-columns: minmax(0, var(--wb-left-width, 52.8%)) minmax(12px, 12px) minmax(0, 1fr);
+}
+
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode .strategy-workbench-left.strategy-workbench-left--resizable {
+  display: grid;
+  gap: 0;
+  border-right: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, var(--wb-left-kline-height, 68%)) minmax(12px, 12px) minmax(0, 1fr);
+}
+
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode .strategy-workbench-left.strategy-workbench-left--resizable > .strategy-workbench-card--kline {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode .strategy-workbench-left.strategy-workbench-left--resizable > .strategy-workbench-resize-handle--left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode .strategy-workbench-left.strategy-workbench-left--resizable > .strategy-workbench-card--dashboard {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode > .strategy-workbench-resize-handle--main,
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode > .strategy-workbench-right {
+  display: none;
 }
 
 .strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable .strategy-workbench-right {
@@ -2342,6 +2738,13 @@
   grid-template-rows: minmax(0, var(--wb-right-panel-height, 50%)) minmax(12px, 12px) minmax(0, 1fr);
 }
 
+.strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable .strategy-workbench-right-left.strategy-workbench-right-left--resizable.is-auto-height {
+  grid-template-rows:
+    minmax(0, fit-content(var(--wb-right-panel-auto-max-height, 66.666vh)))
+    minmax(12px, 12px)
+    minmax(0, 1fr);
+}
+
 .strategy-workbench--refactor .strategy-workbench-right {
   gap: 12px;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.1fr);
@@ -2365,6 +2768,17 @@
   background: var(--wb-surface);
   box-shadow: var(--wb-shadow-soft);
   overflow: hidden;
+}
+
+.strategy-workbench--refactor .strategy-workbench-card.strategy-workbench-card--panel,
+.strategy-workbench--refactor .strategy-workbench-card.strategy-workbench-card--operator {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.strategy-workbench--refactor .strategy-workbench-right-left--resizable.is-auto-height .strategy-workbench-card--panel {
+  max-height: var(--wb-right-panel-auto-max-height, 66.666vh);
 }
 
 .strategy-workbench--refactor .strategy-workbench-card + .strategy-workbench-card {
@@ -2484,6 +2898,48 @@
   border-radius: 12px;
 }
 
+.strategy-workbench--refactor .strategy-workbench-dashboard-progress-chip {
+  border-color: #c5d8f3;
+  background: #f5f9ff;
+  color: #28558f;
+}
+
+.strategy-workbench--refactor .strategy-workbench-dashboard-progress-chip.is-running {
+  border-color: #9fc0ee;
+  background: #eaf3ff;
+  color: #1247a6;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-chart-card {
+  border-color: #dde9f8;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-calendar {
+  border-color: #dde9f8;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-calendar-mode-toggle {
+  border-color: #c9dbf4;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-calendar-mode-button.is-active {
+  background: #eaf3ff;
+  color: #1247a6;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-calendar-nav-button {
+  border-color: #c9dbf4;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-calendar-summary {
+  border-color: #c9dbf4;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-calendar-cell {
+  border-color: #dde9f8;
+  background: #f8fbff;
+}
+
 .strategy-workbench--refactor .strategy-workbench-live-stat {
   border-color: #dde9f8;
   background: #f8fbff;
@@ -2521,6 +2977,10 @@
   border-color: #5b8ed8;
   background: #edf5ff;
   box-shadow: 0 0 0 2px rgba(91, 142, 216, 0.18);
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-winrate-total strong {
+  color: #1247a6;
 }
 
 .strategy-workbench--refactor .strategy-workbench-position-panel {
@@ -2563,6 +3023,8 @@
   border-radius: 12px;
   background: #f8fbff;
   padding: 8px 10px 10px;
+  max-height: var(--wb-right-panel-auto-max-height, 66.666vh);
+  scrollbar-gutter: stable;
 }
 
 .strategy-workbench--refactor .strategy-indicator-field-title {
@@ -2779,8 +3241,19 @@
     grid-template-rows: minmax(0, 1.75fr) minmax(0, 0fr) minmax(0, 1fr);
   }
 
+  .strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable.is-backtest-mode .strategy-workbench-left.strategy-workbench-left--resizable {
+    grid-template-rows: minmax(0, var(--wb-left-kline-height, 68%)) minmax(0, 0fr) minmax(0, 1fr);
+  }
+
   .strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable .strategy-workbench-right-left.strategy-workbench-right-left--resizable {
     grid-template-rows: minmax(0, 0.95fr) minmax(0, 0fr) minmax(0, 1.1fr);
+  }
+
+  .strategy-workbench--refactor .strategy-workbench-main.strategy-workbench-main--resizable .strategy-workbench-right-left.strategy-workbench-right-left--resizable.is-auto-height {
+    grid-template-rows:
+      minmax(0, fit-content(var(--wb-right-panel-auto-max-height, 66.666vh)))
+      minmax(0, 0fr)
+      minmax(0, 1fr);
   }
 
   .strategy-workbench--refactor .strategy-workbench-right-left {
@@ -2803,6 +3276,16 @@
   .strategy-workbench--refactor .strategy-workbench-topbar {
     height: 56px;
     padding: 0 10px;
+  }
+
+  .strategy-workbench--refactor .strategy-workbench-topbar-left {
+    gap: 6px;
+  }
+
+  .strategy-workbench--refactor .strategy-workbench-layout-toggle-button {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 11px;
   }
 
   .strategy-workbench--refactor .strategy-workbench-title {
