@@ -35,6 +35,17 @@ export type StrategyWorkbenchVisibleRange = {
   centerTime: number;
 };
 
+export type StrategyWorkbenchFocusRangeCoverage = {
+  rangeId: string;
+  timeframeSec: number;
+  startTime: number;
+  endTime: number;
+  requiredBars: number;
+  currentVisibleBars: number;
+  visibleBarMin: number;
+  visibleBarMax: number;
+};
+
 type StrategyWorkbenchPreviewMode = 'normal' | 'full';
 
 interface StrategyWorkbenchKlineProps {
@@ -48,6 +59,7 @@ interface StrategyWorkbenchKlineProps {
   selectedRangeId?: string | null;
   syncTargetRange?: StrategyWorkbenchTradeFocusRange | null;
   onVisibleRangeChange?: (range: StrategyWorkbenchVisibleRange) => void;
+  onFocusRangeCoverage?: (coverage: StrategyWorkbenchFocusRangeCoverage) => void;
   hoverValueId?: string;
   hoverHasReference?: boolean;
   onBarsUpdate?: (bars: KLineData[]) => void;
@@ -121,6 +133,8 @@ const MAX_INITIAL_LOAD_BAR_COUNT = 50_000;
 const LOAD_MORE_BAR_COUNT = 1200;
 const FULL_PREVIEW_OVERLAY_MIN_COUNT = 48;
 const FULL_PREVIEW_OVERLAY_MAX_COUNT = 220;
+const FOCUS_RANGE_TARGET_OCCUPANCY = 0.2; // 目标：仓位区间约占可视宽度 1/5
+const FOCUS_RANGE_MAX_OCCUPANCY = 2 / 3; // 兼容下限：最差不超过可视宽度 2/3
 
 // 按周期换算“最近30天”需要的K线条数，作为工作台默认样本窗口。
 const resolveInitialLoadBarCount = (intervalMs: number) => {
@@ -260,6 +274,40 @@ const buildVisibleRangeSnapshotFromChart = (
     toTime,
     centerTime,
   };
+};
+
+const resolveVisibleBarCountLimits = (chart: Chart, dataCount: number) => {
+  const chartWithExtendedApi = chart as Chart & {
+    getVisibleBarCountLimits?: () => { min: number; max: number };
+  };
+  const limits = chartWithExtendedApi.getVisibleBarCountLimits?.();
+  const safeDataCount = Math.max(1, Math.floor(dataCount));
+  const rawMin = Number(limits?.min ?? 0);
+  const rawMax = Number(limits?.max ?? 0);
+  const min = Number.isFinite(rawMin) && rawMin > 0 ? Math.floor(rawMin) : 1;
+  const maxCandidate = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : safeDataCount;
+  const max = Math.max(1, Math.min(safeDataCount, maxCandidate));
+  return {
+    min: Math.max(1, Math.min(min, max)),
+    max,
+  };
+};
+
+const centerChartAtDataIndex = (chart: Chart, targetCenterIndex: number) => {
+  const visibleRange = chart.getVisibleRange();
+  const from = Number(visibleRange.from ?? Number.NaN);
+  const to = Number(visibleRange.to ?? Number.NaN);
+  const barSpace = Number(chart.getBarSpace());
+  if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(barSpace) || barSpace <= 0) {
+    return;
+  }
+  const currentCenterIndex = (from + to) / 2;
+  const deltaIndex = targetCenterIndex - currentCenterIndex;
+  if (!Number.isFinite(deltaIndex) || Math.abs(deltaIndex) < 0.35) {
+    return;
+  }
+  // `scrollByDistance` 正值会向更旧数据滚动，因此这里取负值让目标索引移动到可视中心。
+  chart.scrollByDistance(-deltaIndex * barSpace, 0);
 };
 
 const toKlineData = (item: OhlcvDto): KLineData | null => {
@@ -590,6 +638,7 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
   selectedRangeId = null,
   syncTargetRange,
   onVisibleRangeChange,
+  onFocusRangeCoverage,
   hoverValueId,
   hoverHasReference = false,
   onBarsUpdate,
@@ -1147,25 +1196,48 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
     const dataList = chart.getDataList();
     const leftIndex = findNearestDataIndexByTimestamp(dataList, startTime);
     const rightIndex = findNearestDataIndexByTimestamp(dataList, endTime);
-    const midpoint = Math.floor((startTime + endTime) / 2);
-
-    if (leftIndex !== null && rightIndex !== null) {
-      const fromIndex = Math.min(leftIndex, rightIndex);
-      const toIndex = Math.max(leftIndex, rightIndex);
-      const width = toIndex - fromIndex + 1;
-      if (width > 0) {
-        const visibleRange = chart.getVisibleRange();
-        const currentVisibleBars = Math.max(2, Math.round((visibleRange.to ?? 0) - (visibleRange.from ?? 0) + 1));
-        const desiredVisibleBars = clampNumber(Math.round(width * 1.8), 16, 420);
-        const scale = currentVisibleBars / desiredVisibleBars;
-        if (Number.isFinite(scale) && scale > 0 && Math.abs(scale - 1) > 0.08) {
-          chart.zoomAtTimestamp(scale, midpoint, 0);
-        }
-      }
+    if (leftIndex === null || rightIndex === null) {
+      return;
     }
 
-    chart.scrollToTimestamp(midpoint, 0);
-  }, [bars, chartReady, clearFocusOverlay, focusRange, previewMode]);
+    const fromIndex = Math.min(leftIndex, rightIndex);
+    const toIndex = Math.max(leftIndex, rightIndex);
+    const requiredBars = toIndex - fromIndex + 1;
+    if (requiredBars <= 0) {
+      return;
+    }
+
+    const visibleRange = chart.getVisibleRange();
+    const currentVisibleBars = Math.max(2, Math.round((visibleRange.to ?? 0) - (visibleRange.from ?? 0) + 1));
+    const visibleLimits = resolveVisibleBarCountLimits(chart, dataList.length);
+    const preferredVisibleBars = Math.ceil(requiredBars / FOCUS_RANGE_TARGET_OCCUPANCY);
+    const minimumCompatibleVisibleBars = Math.ceil(requiredBars / FOCUS_RANGE_MAX_OCCUPANCY);
+    const visibleBarsMin = Math.max(8, visibleLimits.min);
+    const visibleBarsMax = Math.max(visibleBarsMin, visibleLimits.max);
+    const desiredVisibleBarsMin = Math.min(visibleBarsMax, Math.max(visibleBarsMin, minimumCompatibleVisibleBars));
+    const desiredVisibleBars = clampNumber(
+      preferredVisibleBars,
+      desiredVisibleBarsMin,
+      visibleBarsMax,
+    );
+    const scale = currentVisibleBars / desiredVisibleBars;
+    if (Number.isFinite(scale) && scale > 0 && Math.abs(scale - 1) > 0.04) {
+      const midpoint = Math.floor((startTime + endTime) / 2);
+      chart.zoomAtTimestamp(scale, midpoint, 0);
+    }
+
+    centerChartAtDataIndex(chart, Math.round((fromIndex + toIndex) / 2));
+    onFocusRangeCoverage?.({
+      rangeId: focusRange.id,
+      timeframeSec,
+      startTime,
+      endTime,
+      requiredBars,
+      currentVisibleBars,
+      visibleBarMin: visibleLimits.min,
+      visibleBarMax: visibleLimits.max,
+    });
+  }, [bars, chartReady, clearFocusOverlay, focusRange, onFocusRangeCoverage, previewMode, timeframeSec]);
 
   useEffect(() => {
     if (previewMode !== 'full') {
@@ -1195,7 +1267,14 @@ const StrategyWorkbenchKline: React.FC<StrategyWorkbenchKlineProps> = ({
       return;
     }
     focusSyncTargetSignatureRef.current = signature;
-    chart.scrollToTimestamp(Math.floor((startTime + endTime) / 2), 0);
+    const dataList = chart.getDataList();
+    const leftIndex = findNearestDataIndexByTimestamp(dataList, startTime);
+    const rightIndex = findNearestDataIndexByTimestamp(dataList, endTime);
+    if (leftIndex !== null && rightIndex !== null) {
+      centerChartAtDataIndex(chart, Math.round((Math.min(leftIndex, rightIndex) + Math.max(leftIndex, rightIndex)) / 2));
+    } else {
+      chart.scrollToTimestamp(Math.floor((startTime + endTime) / 2), 0);
+    }
     scheduleFullPreviewOverlayRefresh();
   }, [chartReady, previewMode, scheduleFullPreviewOverlayRefresh, syncTargetRange]);
 

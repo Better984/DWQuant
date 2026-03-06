@@ -351,6 +351,50 @@
   color: #6b7280;
 }
 
+.strategy-workbench-card-header--kline {
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.strategy-workbench-kline-header-main {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.strategy-workbench-kline-timeframe-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.strategy-workbench-kline-timeframe-switch-label {
+  white-space: nowrap;
+}
+
+.strategy-workbench-kline-timeframe-switch select {
+  height: 24px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 12px;
+  outline: none;
+}
+
+.strategy-workbench-kline-timeframe-switch select:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
 .strategy-workbench-kline-wrap {
   flex: 1;
   min-height: 0;
@@ -911,6 +955,22 @@
   min-height: 92px;
 }
 
+.strategy-workbench-live-calendar-cell.is-clickable {
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.strategy-workbench-live-calendar-cell.is-clickable:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 2px 12px rgba(37, 99, 235, 0.14);
+}
+
+.strategy-workbench-live-calendar-cell.is-clickable:focus-visible {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
+}
+
 .strategy-workbench-live-calendar-cell.is-outside {
   opacity: 0.38;
 }
@@ -1057,30 +1117,6 @@
   gap: 8px;
 }
 
-.strategy-workbench-live-time-analysis-snapshot-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.strategy-workbench-live-time-analysis-snapshot-card {
-  border: 1px dashed #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  color: #64748b;
-}
-
-.strategy-workbench-live-time-analysis-snapshot-card strong {
-  font-size: 16px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
 .strategy-workbench-live-time-analysis-table-scroll {
   overflow: visible;
   max-height: none;
@@ -1145,6 +1181,87 @@
   font-size: 13px;
   font-weight: 700;
   color: #1f2937;
+}
+
+.strategy-workbench-live-professional {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategy-workbench-live-professional-note {
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.strategy-workbench-live-professional-note.is-warning {
+  border-color: #fdba74;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.strategy-workbench-live-professional-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-workbench-live-professional-metric {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.strategy-workbench-live-professional-metric-label {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.strategy-workbench-live-professional-metric-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.25;
+}
+
+.strategy-workbench-live-professional-metric-value.is-positive {
+  color: #15803d;
+}
+
+.strategy-workbench-live-professional-metric-value.is-negative {
+  color: #b91c1c;
+}
+
+.strategy-workbench-live-professional-metric-helper {
+  font-size: 10px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.strategy-workbench-live-professional-chart-grid,
+.strategy-workbench-live-professional-table-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-workbench-live-professional-table-card--full {
+  grid-column: 1 / -1;
+}
+
+.strategy-workbench-live-chart-canvas--professional {
+  min-height: 260px;
 }
 
 .strategy-workbench-live-summary-extra {
@@ -2437,10 +2554,12 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .strategy-workbench-live-professional-metrics,
+  .strategy-workbench-live-professional-chart-grid,
+  .strategy-workbench-live-professional-table-grid,
   .strategy-workbench-live-time-analysis-insights,
   .strategy-workbench-live-time-analysis-chart-grid,
-  .strategy-workbench-live-time-analysis-table-grid,
-  .strategy-workbench-live-time-analysis-snapshot-grid {
+  .strategy-workbench-live-time-analysis-table-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2487,6 +2606,10 @@
   }
 
   .strategy-workbench-live-advanced-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-workbench-live-professional-metrics {
     grid-template-columns: 1fr;
   }
 
@@ -3087,6 +3210,16 @@
   color: #667991;
 }
 
+.strategy-workbench--refactor .strategy-workbench-kline-timeframe-switch {
+  color: #516a86;
+}
+
+.strategy-workbench--refactor .strategy-workbench-kline-timeframe-switch select {
+  border-color: #b7cbe5;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
+  color: #123f73;
+}
+
 .strategy-workbench--refactor .strategy-workbench-dashboard-mode-button {
   border-color: #b9cde8;
   background: linear-gradient(180deg, #f9fcff 0%, #eef4ff 100%);
@@ -3243,10 +3376,6 @@
   border-color: #dde9f8;
 }
 
-.strategy-workbench--refactor .strategy-workbench-live-time-analysis-snapshot-card {
-  border-color: #c9dbf4;
-}
-
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis-toggle {
   border-color: #c9dbf4;
 }
@@ -3258,6 +3387,20 @@
 
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis-insights {
   border-color: #c9dbf4;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-professional-note {
+  border-color: #c9dbf4;
+  background: #f5f9ff;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-professional-note.is-warning {
+  border-color: #f3c995;
+  background: #fff8ee;
+}
+
+.strategy-workbench--refactor .strategy-workbench-live-professional-metric {
+  border-color: #dde9f8;
 }
 
 .strategy-workbench--refactor .strategy-workbench-live-time-analysis-table th {
@@ -3634,6 +3777,12 @@
 
   .strategy-workbench--refactor .strategy-workbench-dashboard-header-actions .strategy-workbench-card-meta {
     max-width: 180px;
+  }
+
+  .strategy-workbench--refactor .strategy-workbench-kline-timeframe-switch {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .strategy-workbench--refactor .strategy-workbench-position-table th,

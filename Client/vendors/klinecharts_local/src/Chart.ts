@@ -91,6 +91,8 @@ export interface Chart {
   setBarSpace: (space: number) => void
   getBarSpace: () => number
   getVisibleRange: () => VisibleRange
+  getTotalBarSpace: () => number
+  getVisibleBarCountLimits: () => { min: number; max: number }
   clearData: () => void
   getDataList: () => KLineData[]
   applyNewData: (dataList: KLineData[], more?: boolean, callback?: () => void) => void
@@ -663,6 +665,14 @@ export default class ChartImp implements Chart {
 
   getVisibleRange (): VisibleRange {
     return this._chartStore.getTimeScaleStore().getVisibleRange()
+  }
+
+  getTotalBarSpace (): number {
+    return this._chartStore.getTimeScaleStore().getTotalBarSpace()
+  }
+
+  getVisibleBarCountLimits (): { min: number; max: number } {
+    return this._chartStore.getTimeScaleStore().getVisibleBarCountLimits()
   }
 
   clearData (): void {

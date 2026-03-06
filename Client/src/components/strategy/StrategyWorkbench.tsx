@@ -35,6 +35,7 @@ import {
   type LocalBacktestSummary,
 } from './localBacktestEngine';
 import StrategyWorkbenchKline, {
+  type StrategyWorkbenchFocusRangeCoverage,
   type StrategyWorkbenchTradeFocusRange,
   type StrategyWorkbenchVisibleRange,
 } from './StrategyWorkbenchKline';
@@ -159,7 +160,7 @@ type BacktestRangeMode = 'latest_30d' | 'custom';
 type PreviewTradeMode = 'normal' | 'full';
 type WorkbenchLayoutMode = 'edit' | 'backtest';
 type CalendarViewMode = 'month' | 'week' | 'day';
-type LiveSummaryTab = 'overview' | 'stats' | 'calendar' | 'log';
+type LiveSummaryTab = 'overview' | 'stats' | 'professional' | 'calendar' | 'log';
 
 type WorkbenchBacktestParams = {
   takeProfitPct: number;
@@ -220,12 +221,15 @@ type CalendarBucketMetrics = {
   pnl: number;
   count: number;
   wins: number;
+  representativeTradeIndex: number | null;
+  representativeTimestamp: number;
 };
 
 type TimeAnalysisReferenceMode = 'entry' | 'exit';
 type TimeAnalysisGranularity = 'day' | 'hour';
 
 type TradeTimeAnalysisPoint = {
+  tradeIndex: number;
   referenceTimestamp: number;
   holdingDurationMs: number;
   returnPct: number;
@@ -259,6 +263,80 @@ type PeriodBucketMetrics = {
   avgReturnPct: number;
   winRate: number;
   lossRate: number;
+};
+
+type SideBreakdownRow = {
+  key: 'Long' | 'Short';
+  label: string;
+  count: number;
+  share: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  netPnl: number;
+  grossBeforeCosts: number;
+  totalFee: number;
+  totalFunding: number;
+  avgNetPnl: number;
+  avgHoldingMs: number;
+};
+
+type ExitReasonBreakdownRow = {
+  key: string;
+  label: string;
+  count: number;
+  share: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  netPnl: number;
+  avgNetPnl: number;
+  totalFee: number;
+  totalFunding: number;
+  avgHoldingMs: number;
+};
+
+type MonthlyPerformanceCell = {
+  key: string;
+  label: string;
+  year: number;
+  monthIndex: number;
+  count: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  netPnl: number;
+  totalFee: number;
+  totalFunding: number;
+  grossBeforeCosts: number;
+  startEquity: number;
+  endEquity: number;
+  returnPct: number;
+};
+
+type DrawdownEpisode = {
+  key: string;
+  startTimestamp: number;
+  troughTimestamp: number;
+  recoveryTimestamp: number;
+  peakEquity: number;
+  troughEquity: number;
+  lossFromPeak: number;
+  depth: number;
+  durationMs: number;
+  isRecovered: boolean;
+};
+
+type RollingQualityPoint = {
+  key: string;
+  timestamp: number;
+  tradeIndex: number;
+  windowStartIndex: number;
+  windowCount: number;
+  netPnl: number;
+  winRate: number;
+  avgNetPnl: number;
+  profitFactor: number;
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -324,6 +402,7 @@ const INDICATOR_COLOR_POOL = [
 const normalizeText = (value?: string) => (value || '').trim();
 const upperText = (value?: string) => normalizeText(value).toUpperCase();
 const DAY_MS = 86_400_000;
+const MONTH_LABELS = Array.from({ length: 12 }, (_, index) => `${index + 1}月`);
 
 const hashText = (value: string) => {
   let hash = 0;
@@ -654,6 +733,50 @@ const findNearestEquityPoint = (points: LocalBacktestEquityPoint[], timestamp: n
   return Math.abs(current.timestamp - timestamp) < Math.abs(previous.timestamp - timestamp) ? current : previous;
 };
 
+type EChartClickPayload = {
+  componentType?: string;
+  seriesType?: string;
+  dataIndex?: number;
+  value?: unknown;
+  data?: unknown;
+};
+
+type EChartTooltipParam = {
+  dataIndex?: number;
+  value?: unknown;
+  data?: unknown;
+};
+
+const toEChartTooltipParams = (params: unknown): EChartTooltipParam[] => {
+  if (Array.isArray(params)) {
+    return params.filter((item): item is EChartTooltipParam => typeof item === 'object' && item !== null);
+  }
+  if (typeof params === 'object' && params !== null) {
+    return [params as EChartTooltipParam];
+  }
+  return [];
+};
+
+const resolveTimestampFromEChartPayload = (payload: EChartClickPayload): number | null => {
+  const pickTimestamp = (value: unknown): number | null => {
+    if (Array.isArray(value) && value.length > 0) {
+      const ts = Number(value[0]);
+      return Number.isFinite(ts) && ts > 0 ? ts : null;
+    }
+    const ts = Number(value);
+    return Number.isFinite(ts) && ts > 0 ? ts : null;
+  };
+  const fromValue = pickTimestamp(payload.value);
+  if (fromValue !== null) {
+    return fromValue;
+  }
+  if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
+    const maybeValue = (payload.data as { value?: unknown }).value;
+    return pickTimestamp(maybeValue);
+  }
+  return null;
+};
+
 const CALENDAR_DAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -731,12 +854,19 @@ const buildEmptyCalendarMetrics = (): CalendarBucketMetrics => ({
   pnl: 0,
   count: 0,
   wins: 0,
+  representativeTradeIndex: null,
+  representativeTimestamp: 0,
 });
 
 const mergeCalendarMetrics = (a: CalendarBucketMetrics, b: CalendarBucketMetrics): CalendarBucketMetrics => ({
   pnl: a.pnl + b.pnl,
   count: a.count + b.count,
   wins: a.wins + b.wins,
+  representativeTradeIndex:
+    a.representativeTimestamp >= b.representativeTimestamp
+      ? a.representativeTradeIndex
+      : b.representativeTradeIndex,
+  representativeTimestamp: Math.max(a.representativeTimestamp, b.representativeTimestamp),
 });
 
 const resolveTradeReferenceTimestamp = (trade: LocalBacktestTrade, mode: TimeAnalysisReferenceMode) => {
@@ -763,6 +893,135 @@ const resolveTradeReturnPct = (trade: LocalBacktestTrade) => {
   }
   const pnl = Number.isFinite(trade.pnl) ? Number(trade.pnl) : 0;
   return (pnl / notional) * 100;
+};
+
+const resolveTradeFee = (trade: LocalBacktestTrade) => {
+  return Number.isFinite(trade.fee) ? Number(trade.fee) : 0;
+};
+
+const resolveTradeFunding = (trade: LocalBacktestTrade) => {
+  return Number.isFinite(trade.funding) ? Number(trade.funding) : 0;
+};
+
+const resolveTradeNetPnl = (trade: LocalBacktestTrade) => {
+  const pnl = Number.isFinite(trade.pnl) ? Number(trade.pnl) : 0;
+  return pnl - resolveTradeFunding(trade);
+};
+
+const formatExitReasonLabel = (reason?: string) => {
+  switch (normalizeText(reason)) {
+    case 'Signal':
+      return '信号平仓';
+    case 'Reverse':
+      return '反向换仓';
+    case 'TakeProfit':
+      return '止盈平仓';
+    case 'StopLoss':
+      return '止损平仓';
+    case 'Open':
+      return '未平仓快照';
+    default:
+      return normalizeText(reason) || '未知原因';
+  }
+};
+
+const toMonthlyBucketMeta = (timestamp: number) => {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const monthIndex = date.getMonth();
+  const month = `${monthIndex + 1}`.padStart(2, '0');
+  return {
+    key: `${year}-${month}`,
+    label: `${year}-${month}`,
+    year,
+    monthIndex,
+  };
+};
+
+const buildDrawdownEpisodes = (points: LocalBacktestEquityPoint[]): DrawdownEpisode[] => {
+  if (points.length < 2) {
+    return [];
+  }
+
+  const episodes: DrawdownEpisode[] = [];
+  let peakPoint = points[0];
+  let active: DrawdownEpisode | null = null;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    if (!Number.isFinite(point.equity) || !Number.isFinite(point.timestamp)) {
+      continue;
+    }
+
+    if (point.equity >= peakPoint.equity) {
+      if (active) {
+        episodes.push({
+          ...active,
+          recoveryTimestamp: point.timestamp,
+          durationMs: Math.max(0, point.timestamp - active.startTimestamp),
+          isRecovered: true,
+        });
+        active = null;
+      }
+      peakPoint = point;
+      continue;
+    }
+
+    if (!Number.isFinite(peakPoint.equity) || peakPoint.equity <= 0) {
+      continue;
+    }
+
+    const lossFromPeak = peakPoint.equity - point.equity;
+    const depth = lossFromPeak / peakPoint.equity;
+    if (depth <= 0) {
+      continue;
+    }
+
+    if (!active) {
+      active = {
+        key: `${peakPoint.timestamp}-${point.timestamp}`,
+        startTimestamp: peakPoint.timestamp,
+        troughTimestamp: point.timestamp,
+        recoveryTimestamp: 0,
+        peakEquity: peakPoint.equity,
+        troughEquity: point.equity,
+        lossFromPeak,
+        depth,
+        durationMs: Math.max(0, point.timestamp - peakPoint.timestamp),
+        isRecovered: false,
+      };
+      continue;
+    }
+
+    if (point.equity <= active.troughEquity) {
+      active = {
+        ...active,
+        troughTimestamp: point.timestamp,
+        troughEquity: point.equity,
+        lossFromPeak,
+        depth,
+        durationMs: Math.max(0, point.timestamp - active.startTimestamp),
+      };
+    }
+  }
+
+  if (active) {
+    const lastPoint = points[points.length - 1];
+    episodes.push({
+      ...active,
+      durationMs: Math.max(active.durationMs, Math.max(0, lastPoint.timestamp - active.startTimestamp)),
+    });
+  }
+
+  return episodes.sort((a, b) => {
+    if (b.depth !== a.depth) {
+      return b.depth - a.depth;
+    }
+    if (b.lossFromPeak !== a.lossFromPeak) {
+      return b.lossFromPeak - a.lossFromPeak;
+    }
+    return b.durationMs - a.durationMs;
+  });
 };
 
 const buildPreviewTradeKey = (trade: LocalBacktestTrade, index: number) => {
@@ -811,6 +1070,15 @@ const buildPreviewTradeFocusRange = (
     takeProfitPrice: trade.takeProfitPrice,
   };
 };
+
+const estimateTradeSpanBarsByTimeframe = (startTime: number, endTime: number, timeframeSec: number) => {
+  const rangeMs = Math.max(1_000, Math.abs(endTime - startTime));
+  const intervalMs = Math.max(1_000, Math.trunc(timeframeSec) * 1_000);
+  return Math.max(2, Math.ceil(rangeMs / intervalMs) + 1);
+};
+
+const FOCUS_RANGE_TARGET_OCCUPANCY = 0.2;
+const FOCUS_RANGE_MAX_OCCUPANCY = 2 / 3;
 
 const extractClientPoint = (event: Event | null | undefined) => {
   if (!event) {
@@ -975,7 +1243,11 @@ const ResizeHandleVertical: React.FC<{
   return <div className={className} onPointerDown={handlePointerDown} role="separator" aria-orientation="horizontal" />;
 };
 
-const StrategyWorkbenchEChart: React.FC<{ option: EChartsOption; className: string }> = ({ option, className }) => {
+const StrategyWorkbenchEChart: React.FC<{
+  option: EChartsOption;
+  className: string;
+  onChartClick?: (payload: EChartClickPayload) => void;
+}> = ({ option, className, onChartClick }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ECharts | null>(null);
 
@@ -1003,6 +1275,31 @@ const StrategyWorkbenchEChart: React.FC<{ option: EChartsOption; className: stri
   useEffect(() => {
     chartRef.current?.setOption(option, true);
   }, [option]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+    const setChartCursor = (style: 'pointer' | 'default') => {
+      const zr = (chart as { getZr?: () => { setCursorStyle?: (value: string) => void } | null }).getZr?.();
+      zr?.setCursorStyle?.(style);
+    };
+    const handleClick = (payload: unknown) => {
+      onChartClick?.(payload as EChartClickPayload);
+    };
+    chart.off('click', handleClick);
+    if (onChartClick) {
+      chart.on('click', handleClick);
+      setChartCursor('pointer');
+    } else {
+      setChartCursor('default');
+    }
+    return () => {
+      chart.off('click', handleClick);
+      setChartCursor('default');
+    };
+  }, [onChartClick]);
 
   return <div ref={containerRef} className={className} />;
 };
@@ -1102,6 +1399,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [liveListPanelWidth, setLiveListPanelWidth] = useState(33.333);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('month');
   const [liveSummaryTab, setLiveSummaryTab] = useState<LiveSummaryTab>('overview');
+  const [chartTimeframeSec, setChartTimeframeSec] = useState(selectedTimeframeSec);
   const [calendarAnchorTimestamp, setCalendarAnchorTimestamp] = useState(0);
   const [timeAnalysisReferenceMode, setTimeAnalysisReferenceMode] = useState<TimeAnalysisReferenceMode>('entry');
   const [timeAnalysisGranularity, setTimeAnalysisGranularity] = useState<TimeAnalysisGranularity>('hour');
@@ -1123,6 +1421,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const previewListSyncLockedRef = useRef(false);
   const pendingViewportRef = useRef<StrategyWorkbenchVisibleRange | null>(null);
   const fullPreviewAnchorTradeKeyRef = useRef<string | null>(null);
+  const previewAutoTimeframeSwitchKeyRef = useRef('');
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const handleMainResize = useCallback((deltaX: number) => {
@@ -1194,6 +1493,27 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const timeframeLabel = useMemo(() => {
     return timeframeOptions.find((item) => item.value === selectedTimeframeSec)?.label || `${selectedTimeframeSec}s`;
   }, [timeframeOptions, selectedTimeframeSec]);
+
+  const chartTimeframeOptions = useMemo(() => {
+    const map = new Map<number, string>();
+    timeframeOptions.forEach((item) => {
+      const value = Number(item.value);
+      if (!Number.isFinite(value) || value <= 0) {
+        return;
+      }
+      map.set(value, item.label || `${value}s`);
+    });
+    if (!map.has(selectedTimeframeSec) && selectedTimeframeSec > 0) {
+      map.set(selectedTimeframeSec, `${selectedTimeframeSec}s`);
+    }
+    return Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.value - b.value);
+  }, [selectedTimeframeSec, timeframeOptions]);
+
+  const chartTimeframeLabel = useMemo(() => {
+    return chartTimeframeOptions.find((item) => item.value === chartTimeframeSec)?.label || `${chartTimeframeSec}s`;
+  }, [chartTimeframeOptions, chartTimeframeSec]);
 
   const indicatorColorMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -2425,9 +2745,9 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 
   const previewTradeRanges = useMemo(() => {
     return previewTrades
-      .map((trade, index) => buildPreviewTradeFocusRange(trade, index, selectedTimeframeSec, latestBacktestTimestamp))
+      .map((trade, index) => buildPreviewTradeFocusRange(trade, index, chartTimeframeSec, latestBacktestTimestamp))
       .filter((range): range is StrategyWorkbenchTradeFocusRange => range !== null);
-  }, [latestBacktestTimestamp, previewTrades, selectedTimeframeSec]);
+  }, [chartTimeframeSec, latestBacktestTimestamp, previewTrades]);
 
   const previewTradeRangeMap = useMemo(() => {
     const map = new Map<string, StrategyWorkbenchTradeFocusRange>();
@@ -2456,7 +2776,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const activePreviewTradeKey = previewTradeMode === 'full' ? fullPreviewAnchorTradeKey : selectedPreviewTradeKey;
 
   const focusPreviewTrade = useCallback((trade: LocalBacktestTrade, index: number) => {
-    const range = buildPreviewTradeFocusRange(trade, index, selectedTimeframeSec, latestBacktestTimestamp);
+    const range = buildPreviewTradeFocusRange(trade, index, chartTimeframeSec, latestBacktestTimestamp);
     if (!range) {
       return;
     }
@@ -2472,7 +2792,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       stopLossPrice: range.stopLossPrice,
       takeProfitPrice: range.takeProfitPrice,
     });
-  }, [latestBacktestTimestamp, selectedTimeframeSec]);
+  }, [chartTimeframeSec, latestBacktestTimestamp]);
 
   const lockPreviewListSync = useCallback((durationMs = 90) => {
     previewListSyncLockedRef.current = true;
@@ -2592,18 +2912,162 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     });
   }, [previewScrollSyncEnabled, previewTradeMode, resolvePreviewTradeKeyFromViewport, scrollPreviewListToTrade]);
 
+  const handleChartTimeframeChange = useCallback((value: number) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return;
+    }
+    previewAutoTimeframeSwitchKeyRef.current = '';
+    setChartTimeframeSec((prev) => (prev === value ? prev : value));
+  }, []);
+
+  const handlePreviewFocusRangeCoverage = useCallback((coverage: StrategyWorkbenchFocusRangeCoverage) => {
+    if (previewTradeMode !== 'normal') {
+      return;
+    }
+    if (coverage.timeframeSec !== chartTimeframeSec) {
+      return;
+    }
+    const requiredBars = Math.max(0, Math.floor(Number(coverage.requiredBars)));
+    const maxVisibleBars = Math.max(0, Math.floor(Number(coverage.visibleBarMax)));
+    if (requiredBars <= 0 || maxVisibleBars <= 0) {
+      return;
+    }
+    const maxCompatibleBars = Math.max(1, Math.floor(maxVisibleBars * FOCUS_RANGE_MAX_OCCUPANCY));
+    if (requiredBars <= maxCompatibleBars) {
+      return;
+    }
+    const currentIndex = chartTimeframeOptions.findIndex((item) => item.value === chartTimeframeSec);
+    if (currentIndex < 0 || currentIndex >= chartTimeframeOptions.length - 1) {
+      return;
+    }
+    const coverageKey = `${coverage.rangeId}|${chartTimeframeSec}|${requiredBars}|${maxVisibleBars}`;
+    if (previewAutoTimeframeSwitchKeyRef.current === coverageKey) {
+      return;
+    }
+    const startTime = Math.min(coverage.startTime, coverage.endTime);
+    const endTime = Math.max(coverage.startTime, coverage.endTime);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime <= 0 || endTime <= 0 || endTime <= startTime) {
+      return;
+    }
+
+    const preferredMaxBars = Math.max(1, Math.floor(maxVisibleBars * FOCUS_RANGE_TARGET_OCCUPANCY));
+    let preferredTimeframeSec: number | null = null;
+    let compatibleTimeframeSec: number | null = null;
+    let nextTimeframeSec: number | null = null;
+    for (let index = currentIndex + 1; index < chartTimeframeOptions.length; index += 1) {
+      const candidate = chartTimeframeOptions[index];
+      if (!candidate) {
+        continue;
+      }
+      const estimatedBars = estimateTradeSpanBarsByTimeframe(startTime, endTime, candidate.value);
+      if (preferredTimeframeSec === null && estimatedBars <= preferredMaxBars) {
+        preferredTimeframeSec = candidate.value;
+        nextTimeframeSec = preferredTimeframeSec;
+        break;
+      }
+      if (compatibleTimeframeSec === null && estimatedBars <= maxCompatibleBars) {
+        compatibleTimeframeSec = candidate.value;
+      }
+    }
+    if (nextTimeframeSec === null) {
+      nextTimeframeSec = preferredTimeframeSec ?? compatibleTimeframeSec;
+    }
+    if (nextTimeframeSec === null) {
+      nextTimeframeSec = chartTimeframeOptions[chartTimeframeOptions.length - 1]?.value ?? null;
+    }
+    if (!nextTimeframeSec || nextTimeframeSec === chartTimeframeSec) {
+      return;
+    }
+    previewAutoTimeframeSwitchKeyRef.current = coverageKey;
+    setChartTimeframeSec(nextTimeframeSec);
+  }, [chartTimeframeOptions, chartTimeframeSec, previewTradeMode]);
+
   const handlePreviewTradeActivate = useCallback((trade: LocalBacktestTrade, index: number) => {
     if (previewTradeMode !== 'full') {
       focusPreviewTrade(trade, index);
       return;
     }
-    const range = buildPreviewTradeFocusRange(trade, index, selectedTimeframeSec, latestBacktestTimestamp);
+    const range = buildPreviewTradeFocusRange(trade, index, chartTimeframeSec, latestBacktestTimestamp);
     if (!range) {
       return;
     }
     setFullPreviewAnchorTradeKey(range.id);
     setSelectedPreviewTradeKey(range.id);
-  }, [focusPreviewTrade, latestBacktestTimestamp, previewTradeMode, selectedTimeframeSec]);
+  }, [chartTimeframeSec, focusPreviewTrade, latestBacktestTimestamp, previewTradeMode]);
+
+  const activatePreviewTradeByIndex = useCallback((tradeIndex: number) => {
+    const normalizedIndex = Math.floor(Number(tradeIndex));
+    if (!Number.isFinite(normalizedIndex) || normalizedIndex < 0 || normalizedIndex >= previewTrades.length) {
+      return;
+    }
+    const trade = previewTrades[normalizedIndex];
+    if (!trade) {
+      return;
+    }
+    handlePreviewTradeActivate(trade, normalizedIndex);
+    const tradeKey = buildPreviewTradeKey(trade, normalizedIndex);
+    window.requestAnimationFrame(() => {
+      scrollPreviewListToTrade(tradeKey);
+    });
+  }, [handlePreviewTradeActivate, previewTrades, scrollPreviewListToTrade]);
+
+  const activatePreviewTradeByTimestamp = useCallback((timestamp: number) => {
+    const targetTimestamp = Number(timestamp);
+    if (!Number.isFinite(targetTimestamp) || targetTimestamp <= 0 || previewTrades.length <= 0) {
+      return;
+    }
+    let bestTradeIndex = -1;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < previewTrades.length; index += 1) {
+      const trade = previewTrades[index];
+      const range = buildPreviewTradeFocusRange(trade, index, chartTimeframeSec, latestBacktestTimestamp);
+      if (!range) {
+        continue;
+      }
+      const startTime = Math.min(range.startTime, range.endTime);
+      const endTime = Math.max(range.startTime, range.endTime);
+      const midpoint = Math.floor((startTime + endTime) / 2);
+      const intersects = targetTimestamp >= startTime && targetTimestamp <= endTime;
+      const score = Math.abs(midpoint - targetTimestamp) + (intersects ? 0 : 1_000_000_000_000);
+      if (score < bestScore) {
+        bestScore = score;
+        bestTradeIndex = index;
+      }
+    }
+    if (bestTradeIndex >= 0) {
+      activatePreviewTradeByIndex(bestTradeIndex);
+    }
+  }, [activatePreviewTradeByIndex, chartTimeframeSec, latestBacktestTimestamp, previewTrades]);
+
+  const handleEquityChartClick = useCallback((payload: EChartClickPayload) => {
+    const targetTimestamp = resolveTimestampFromEChartPayload(payload);
+    if (targetTimestamp === null) {
+      return;
+    }
+    activatePreviewTradeByTimestamp(targetTimestamp);
+  }, [activatePreviewTradeByTimestamp]);
+
+  const handleHoldingDurationScatterClick = useCallback((payload: EChartClickPayload) => {
+    const value = Array.isArray(payload.value)
+      ? payload.value
+      : (
+        payload.data
+        && typeof payload.data === 'object'
+        && !Array.isArray(payload.data)
+        && Array.isArray((payload.data as { value?: unknown }).value)
+      )
+        ? (payload.data as { value: unknown[] }).value
+        : null;
+    const valueTradeIndex = value ? Number(value[5]) : Number.NaN;
+    if (Number.isFinite(valueTradeIndex) && valueTradeIndex >= 0) {
+      activatePreviewTradeByIndex(valueTradeIndex);
+      return;
+    }
+    const targetTimestamp = value ? Number(value[2]) : Number.NaN;
+    if (Number.isFinite(targetTimestamp) && targetTimestamp > 0) {
+      activatePreviewTradeByTimestamp(targetTimestamp);
+    }
+  }, [activatePreviewTradeByIndex, activatePreviewTradeByTimestamp]);
 
   const closedPreviewTrades = useMemo(() => {
     return previewTrades.filter((trade) => !trade.isOpen);
@@ -2639,6 +3103,11 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 
   useEffect(() => {
     setCalendarAnchorTimestamp(0);
+  }, [selectedExchange, selectedSymbol, selectedTimeframeSec]);
+
+  useEffect(() => {
+    setChartTimeframeSec(selectedTimeframeSec);
+    previewAutoTimeframeSwitchKeyRef.current = '';
   }, [selectedExchange, selectedSymbol, selectedTimeframeSec]);
 
   const loadedDataDays = useMemo(() => {
@@ -2706,19 +3175,21 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const equityCurvePoints = useMemo(() => {
     return sampleEquityPoints(localBacktestSummary.equityPreview || [], 1200);
   }, [localBacktestSummary.equityPreview]);
-  const curveInsight = useMemo<BacktestCurveInsight>(() => {
-    const orderedClosedTrades = [...closedPreviewTrades].sort((a, b) => {
+  const closedPreviewTradesByExit = useMemo(() => {
+    return [...closedPreviewTrades].sort((a, b) => {
       const byExit = Number(a.exitTime) - Number(b.exitTime);
       if (byExit !== 0) {
         return byExit;
       }
       return Number(a.entryTime) - Number(b.entryTime);
     });
+  }, [closedPreviewTrades]);
+  const curveInsight = useMemo<BacktestCurveInsight>(() => {
     let currentWins = 0;
     let currentLosses = 0;
     let maxWin: TradeStreakLocation | null = null;
     let maxLoss: TradeStreakLocation | null = null;
-    orderedClosedTrades.forEach((trade, index) => {
+    closedPreviewTradesByExit.forEach((trade, index) => {
       const pnl = Number(trade.pnl);
       const order = index + 1;
       if (pnl > 0) {
@@ -2768,7 +3239,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       maxLossStreak: maxLoss,
       maxDrawdownPoint,
     };
-  }, [closedPreviewTrades, localBacktestSummary.equityPreview]);
+  }, [closedPreviewTradesByExit, localBacktestSummary.equityPreview]);
   const maxWinStreakMarkerPoint = useMemo(() => {
     if (!curveInsight.maxWinStreak) {
       return null;
@@ -2961,7 +3432,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const tradeTimeAnalysisPoints = useMemo<TradeTimeAnalysisPoint[]>(() => {
     const fallbackHoldingMs = Math.max(60_000, selectedTimeframeSec * 1000);
     return previewTrades
-      .map((trade) => {
+      .map((trade, tradeIndex) => {
         const referenceTimestamp = resolveTradeReferenceTimestamp(trade, timeAnalysisReferenceMode);
         if (!referenceTimestamp) {
           return null;
@@ -2969,6 +3440,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         const pnl = Number.isFinite(trade.pnl) ? Number(trade.pnl) : 0;
         const returnPct = resolveTradeReturnPct(trade);
         return {
+          tradeIndex,
           referenceTimestamp,
           holdingDurationMs: resolveTradeHoldingDurationMs(trade, fallbackHoldingMs),
           returnPct: Number.isFinite(returnPct) ? returnPct : 0,
@@ -3144,6 +3616,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         point.referenceTimestamp,
         Number(point.pnl.toFixed(6)),
         point.side,
+        point.tradeIndex,
       ],
       itemStyle: {
         color: point.returnPct >= 0 ? '#16a34a' : '#dc2626',
@@ -3386,15 +3859,27 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const weekMap = new Map<string, CalendarBucketMetrics>();
     const monthMap = new Map<string, CalendarBucketMetrics>();
     const hourMap = new Map<string, CalendarBucketMetrics>();
-    const mergeToMap = (map: Map<string, CalendarBucketMetrics>, key: string, pnl: number, win: number) => {
+    const mergeToMap = (
+      map: Map<string, CalendarBucketMetrics>,
+      key: string,
+      pnl: number,
+      win: number,
+      tradeIndex: number,
+      timestamp: number,
+    ) => {
       const prev = map.get(key) || buildEmptyCalendarMetrics();
       map.set(key, {
         pnl: prev.pnl + pnl,
         count: prev.count + 1,
         wins: prev.wins + win,
+        representativeTradeIndex:
+          timestamp >= prev.representativeTimestamp
+            ? tradeIndex
+            : prev.representativeTradeIndex,
+        representativeTimestamp: Math.max(prev.representativeTimestamp, timestamp),
       });
     };
-    previewTrades.forEach((trade) => {
+    previewTrades.forEach((trade, tradeIndex) => {
       const entryTimestamp = Number(trade.entryTime);
       if (!Number.isFinite(entryTimestamp) || entryTimestamp <= 0) {
         return;
@@ -3406,10 +3891,10 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       const hourKey = `${dayKey}-${`${entryDate.getHours()}`.padStart(2, '0')}`;
       const pnl = Number.isFinite(trade.pnl) ? trade.pnl : 0;
       const win = pnl > 0 ? 1 : 0;
-      mergeToMap(dayMap, dayKey, pnl, win);
-      mergeToMap(weekMap, weekKey, pnl, win);
-      mergeToMap(monthMap, monthKey, pnl, win);
-      mergeToMap(hourMap, hourKey, pnl, win);
+      mergeToMap(dayMap, dayKey, pnl, win, tradeIndex, entryTimestamp);
+      mergeToMap(weekMap, weekKey, pnl, win, tradeIndex, entryTimestamp);
+      mergeToMap(monthMap, monthKey, pnl, win, tradeIndex, entryTimestamp);
+      mergeToMap(hourMap, hourKey, pnl, win, tradeIndex, entryTimestamp);
     });
     return { dayMap, weekMap, monthMap, hourMap };
   }, [previewTrades]);
@@ -3550,6 +4035,756 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     () => (Array.isArray(localBacktestSummary.diagnostics) ? localBacktestSummary.diagnostics : []).slice(0, 8),
     [localBacktestSummary.diagnostics],
   );
+  const professionalFallbackHoldingMs = Math.max(60_000, selectedTimeframeSec * 1000);
+  const closedCostSummary = useMemo(() => {
+    return closedPreviewTradesByExit.reduce(
+      (acc, trade) => {
+        const totalFee = resolveTradeFee(trade);
+        const totalFunding = resolveTradeFunding(trade);
+        const netPnl = resolveTradeNetPnl(trade);
+        acc.netPnl += netPnl;
+        acc.grossBeforeCosts += netPnl + totalFee + totalFunding;
+        acc.totalFee += totalFee;
+        acc.totalFunding += totalFunding;
+        return acc;
+      },
+      {
+        netPnl: 0,
+        grossBeforeCosts: 0,
+        totalFee: 0,
+        totalFunding: 0,
+      },
+    );
+  }, [closedPreviewTradesByExit]);
+  const sideBreakdownRows = useMemo<SideBreakdownRow[]>(() => {
+    const totalCount = closedPreviewTradesByExit.length;
+    const rows = new Map<'Long' | 'Short', Omit<SideBreakdownRow, 'share' | 'winRate' | 'avgNetPnl' | 'avgHoldingMs'>>([
+      [
+        'Long',
+        {
+          key: 'Long',
+          label: '多头',
+          count: 0,
+          wins: 0,
+          losses: 0,
+          netPnl: 0,
+          grossBeforeCosts: 0,
+          totalFee: 0,
+          totalFunding: 0,
+        },
+      ],
+      [
+        'Short',
+        {
+          key: 'Short',
+          label: '空头',
+          count: 0,
+          wins: 0,
+          losses: 0,
+          netPnl: 0,
+          grossBeforeCosts: 0,
+          totalFee: 0,
+          totalFunding: 0,
+        },
+      ],
+    ]);
+    const totalHoldingMs = new Map<'Long' | 'Short', number>([
+      ['Long', 0],
+      ['Short', 0],
+    ]);
+
+    closedPreviewTradesByExit.forEach((trade) => {
+      const side = trade.side === 'Short' ? 'Short' : 'Long';
+      const row = rows.get(side);
+      if (!row) {
+        return;
+      }
+      const totalFee = resolveTradeFee(trade);
+      const totalFunding = resolveTradeFunding(trade);
+      const netPnl = resolveTradeNetPnl(trade);
+      row.count += 1;
+      row.wins += netPnl > 0 ? 1 : 0;
+      row.losses += netPnl < 0 ? 1 : 0;
+      row.netPnl += netPnl;
+      row.grossBeforeCosts += netPnl + totalFee + totalFunding;
+      row.totalFee += totalFee;
+      row.totalFunding += totalFunding;
+      totalHoldingMs.set(side, (totalHoldingMs.get(side) || 0) + resolveTradeHoldingDurationMs(trade, professionalFallbackHoldingMs));
+    });
+
+    return (['Long', 'Short'] as const).map((side) => {
+      const row = rows.get(side)!;
+      return {
+        ...row,
+        share: totalCount > 0 ? row.count / totalCount : 0,
+        winRate: row.count > 0 ? row.wins / row.count : 0,
+        avgNetPnl: row.count > 0 ? row.netPnl / row.count : 0,
+        avgHoldingMs: row.count > 0 ? (totalHoldingMs.get(side) || 0) / row.count : 0,
+      };
+    });
+  }, [closedPreviewTradesByExit, professionalFallbackHoldingMs]);
+  const exitReasonRows = useMemo<ExitReasonBreakdownRow[]>(() => {
+    const totalCount = closedPreviewTradesByExit.length;
+    const rows = new Map<string, ExitReasonBreakdownRow & { totalHoldingMs: number }>();
+
+    closedPreviewTradesByExit.forEach((trade) => {
+      const key = normalizeText(trade.exitReason) || 'Unknown';
+      const current = rows.get(key) || {
+        key,
+        label: formatExitReasonLabel(key),
+        count: 0,
+        share: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        netPnl: 0,
+        avgNetPnl: 0,
+        totalFee: 0,
+        totalFunding: 0,
+        avgHoldingMs: 0,
+        totalHoldingMs: 0,
+      };
+      const totalFee = resolveTradeFee(trade);
+      const totalFunding = resolveTradeFunding(trade);
+      const netPnl = resolveTradeNetPnl(trade);
+      current.count += 1;
+      current.wins += netPnl > 0 ? 1 : 0;
+      current.losses += netPnl < 0 ? 1 : 0;
+      current.netPnl += netPnl;
+      current.totalFee += totalFee;
+      current.totalFunding += totalFunding;
+      current.totalHoldingMs += resolveTradeHoldingDurationMs(trade, professionalFallbackHoldingMs);
+      rows.set(key, current);
+    });
+
+    return Array.from(rows.values())
+      .map((row) => ({
+        key: row.key,
+        label: row.label,
+        count: row.count,
+        share: totalCount > 0 ? row.count / totalCount : 0,
+        wins: row.wins,
+        losses: row.losses,
+        winRate: row.count > 0 ? row.wins / row.count : 0,
+        netPnl: row.netPnl,
+        avgNetPnl: row.count > 0 ? row.netPnl / row.count : 0,
+        totalFee: row.totalFee,
+        totalFunding: row.totalFunding,
+        avgHoldingMs: row.count > 0 ? row.totalHoldingMs / row.count : 0,
+      }))
+      .sort((a, b) => {
+        if (b.count !== a.count) {
+          return b.count - a.count;
+        }
+        return Math.abs(b.netPnl) - Math.abs(a.netPnl);
+      });
+  }, [closedPreviewTradesByExit, professionalFallbackHoldingMs]);
+  const monthlyPerformance = useMemo(() => {
+    const bucketMap = new Map<string, MonthlyPerformanceCell>();
+    let runningEquity = Math.max(0, appliedBacktestParams.initialCapital);
+
+    closedPreviewTradesByExit.forEach((trade) => {
+      const exitTimestamp = Number(trade.exitTime) || Number(trade.entryTime);
+      if (!Number.isFinite(exitTimestamp) || exitTimestamp <= 0) {
+        return;
+      }
+      const meta = toMonthlyBucketMeta(exitTimestamp);
+      let cell = bucketMap.get(meta.key);
+      if (!cell) {
+        cell = {
+          key: meta.key,
+          label: meta.label,
+          year: meta.year,
+          monthIndex: meta.monthIndex,
+          count: 0,
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          netPnl: 0,
+          totalFee: 0,
+          totalFunding: 0,
+          grossBeforeCosts: 0,
+          startEquity: runningEquity,
+          endEquity: runningEquity,
+          returnPct: 0,
+        };
+        bucketMap.set(meta.key, cell);
+      }
+
+      const totalFee = resolveTradeFee(trade);
+      const totalFunding = resolveTradeFunding(trade);
+      const netPnl = resolveTradeNetPnl(trade);
+      cell.count += 1;
+      cell.wins += netPnl > 0 ? 1 : 0;
+      cell.losses += netPnl < 0 ? 1 : 0;
+      cell.netPnl += netPnl;
+      cell.totalFee += totalFee;
+      cell.totalFunding += totalFunding;
+      cell.grossBeforeCosts += netPnl + totalFee + totalFunding;
+      runningEquity += netPnl;
+      cell.endEquity = runningEquity;
+    });
+
+    const activeCells = Array.from(bucketMap.values())
+      .map((cell) => ({
+        ...cell,
+        winRate: cell.count > 0 ? cell.wins / cell.count : 0,
+        returnPct: cell.startEquity > 0 ? cell.netPnl / cell.startEquity : 0,
+      }))
+      .sort((a, b) => {
+        if (a.year !== b.year) {
+          return a.year - b.year;
+        }
+        return a.monthIndex - b.monthIndex;
+      });
+
+    const years = Array.from(new Set(activeCells.map((cell) => cell.year))).sort((a, b) => b - a);
+    const activeMap = new Map(activeCells.map((cell) => [cell.key, cell]));
+    const cells: MonthlyPerformanceCell[] = [];
+    years.forEach((year) => {
+      for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+        const key = `${year}-${`${monthIndex + 1}`.padStart(2, '0')}`;
+        cells.push(
+          activeMap.get(key) || {
+            key,
+            label: key,
+            year,
+            monthIndex,
+            count: 0,
+            wins: 0,
+            losses: 0,
+            winRate: 0,
+            netPnl: 0,
+            totalFee: 0,
+            totalFunding: 0,
+            grossBeforeCosts: 0,
+            startEquity: 0,
+            endEquity: 0,
+            returnPct: 0,
+          },
+        );
+      }
+    });
+
+    const bestCell = activeCells.reduce<MonthlyPerformanceCell | null>((best, cell) => {
+      if (!best || cell.returnPct > best.returnPct) {
+        return cell;
+      }
+      return best;
+    }, null);
+    const worstCell = activeCells.reduce<MonthlyPerformanceCell | null>((worst, cell) => {
+      if (!worst || cell.returnPct < worst.returnPct) {
+        return cell;
+      }
+      return worst;
+    }, null);
+
+    return {
+      cells,
+      activeCells,
+      years,
+      maxAbsReturnPct: activeCells.reduce((acc, cell) => Math.max(acc, Math.abs(cell.returnPct * 100)), 0),
+      bestCell,
+      worstCell,
+    };
+  }, [appliedBacktestParams.initialCapital, closedPreviewTradesByExit]);
+  const rollingWindowSize = useMemo(() => {
+    const count = closedPreviewTradesByExit.length;
+    if (count <= 0) {
+      return 0;
+    }
+    return Math.min(count, Math.min(24, Math.max(6, Math.round(count / 4) || 0)));
+  }, [closedPreviewTradesByExit.length]);
+  const rollingQualityPoints = useMemo<RollingQualityPoint[]>(() => {
+    if (rollingWindowSize <= 0 || closedPreviewTradesByExit.length <= 0) {
+      return [];
+    }
+
+    const prefixNetPnl = new Array<number>(closedPreviewTradesByExit.length + 1).fill(0);
+    const prefixWins = new Array<number>(closedPreviewTradesByExit.length + 1).fill(0);
+    const prefixGrossProfit = new Array<number>(closedPreviewTradesByExit.length + 1).fill(0);
+    const prefixGrossLoss = new Array<number>(closedPreviewTradesByExit.length + 1).fill(0);
+
+    closedPreviewTradesByExit.forEach((trade, index) => {
+      const netPnl = resolveTradeNetPnl(trade);
+      prefixNetPnl[index + 1] = prefixNetPnl[index] + netPnl;
+      prefixWins[index + 1] = prefixWins[index] + (netPnl > 0 ? 1 : 0);
+      prefixGrossProfit[index + 1] = prefixGrossProfit[index] + (netPnl > 0 ? netPnl : 0);
+      prefixGrossLoss[index + 1] = prefixGrossLoss[index] + (netPnl < 0 ? Math.abs(netPnl) : 0);
+    });
+
+    const points: RollingQualityPoint[] = [];
+    for (let index = 0; index < closedPreviewTradesByExit.length; index += 1) {
+      const windowStartIndex = Math.max(0, index - rollingWindowSize + 1);
+      const windowCount = index - windowStartIndex + 1;
+      const netPnl = prefixNetPnl[index + 1] - prefixNetPnl[windowStartIndex];
+      const winCount = prefixWins[index + 1] - prefixWins[windowStartIndex];
+      const grossProfit = prefixGrossProfit[index + 1] - prefixGrossProfit[windowStartIndex];
+      const grossLoss = prefixGrossLoss[index + 1] - prefixGrossLoss[windowStartIndex];
+      points.push({
+        key: `${closedPreviewTradesByExit[index].exitTime}-${index}`,
+        timestamp: Number(closedPreviewTradesByExit[index].exitTime) || Number(closedPreviewTradesByExit[index].entryTime) || 0,
+        tradeIndex: index,
+        windowStartIndex,
+        windowCount,
+        netPnl,
+        winRate: windowCount > 0 ? winCount / windowCount : 0,
+        avgNetPnl: windowCount > 0 ? netPnl / windowCount : 0,
+        profitFactor: grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Number.POSITIVE_INFINITY : 0),
+      });
+    }
+    return points;
+  }, [closedPreviewTradesByExit, rollingWindowSize]);
+  const drawdownEpisodes = useMemo<DrawdownEpisode[]>(() => {
+    return buildDrawdownEpisodes(localBacktestSummary.equityPreview || []).slice(0, 6);
+  }, [localBacktestSummary.equityPreview]);
+  const professionalCoverageNote = useMemo(() => {
+    const previewPointCount = localBacktestSummary.equityPreview?.length || 0;
+    if (equitySummary.pointCount > previewPointCount) {
+      return `回撤区间基于权益预览 ${previewPointCount}/${equitySummary.pointCount} 点，超长样本下主要用于观察结构，不建议视作完整逐点复盘。`;
+    }
+    return `回撤区间基于当前本地权益序列 ${previewPointCount} 点；成本、方向、平仓原因和月度收益均基于 ${closedPreviewTradesByExit.length} 笔已平仓交易。`;
+  }, [closedPreviewTradesByExit.length, equitySummary.pointCount, localBacktestSummary.equityPreview]);
+  const professionalMetricCards = useMemo(() => {
+    const longRow = sideBreakdownRows.find((row) => row.key === 'Long') || null;
+    const shortRow = sideBreakdownRows.find((row) => row.key === 'Short') || null;
+    const deepestDrawdown = drawdownEpisodes[0] || null;
+    return [
+      {
+        key: 'net-pnl',
+        label: '已平仓净收益',
+        value: formatSignedNumber(closedCostSummary.netPnl),
+        helper: `${closedPreviewTradesByExit.length} 笔已平仓`,
+        tone: closedCostSummary.netPnl >= 0 ? 'positive' : 'negative',
+      },
+      {
+        key: 'gross-edge',
+        label: '成本前边际',
+        value: formatSignedNumber(closedCostSummary.grossBeforeCosts),
+        helper: '扣除手续费与资金费前',
+        tone: closedCostSummary.grossBeforeCosts >= 0 ? 'positive' : 'negative',
+      },
+      {
+        key: 'fee-drag',
+        label: '手续费拖累',
+        value: formatSignedNumber(-closedCostSummary.totalFee),
+        helper: `累计手续费 ${formatNumberValue(closedCostSummary.totalFee, 2)}`,
+        tone: closedCostSummary.totalFee > 0 ? 'negative' : 'neutral',
+      },
+      {
+        key: 'funding-impact',
+        label: '资金费影响',
+        value: formatSignedNumber(-closedCostSummary.totalFunding),
+        helper: `累计资金费 ${formatSignedNumber(closedCostSummary.totalFunding, 2)}`,
+        tone: -closedCostSummary.totalFunding >= 0 ? 'positive' : 'negative',
+      },
+      {
+        key: 'long-net',
+        label: '多头净贡献',
+        value: formatSignedNumber(longRow?.netPnl || 0),
+        helper: longRow ? `${longRow.count} 笔 / 胜率 ${formatPercentValue(longRow.winRate, 1)}` : '暂无多头平仓',
+        tone: (longRow?.netPnl || 0) >= 0 ? 'positive' : 'negative',
+      },
+      {
+        key: 'short-net',
+        label: '空头净贡献',
+        value: formatSignedNumber(shortRow?.netPnl || 0),
+        helper: shortRow ? `${shortRow.count} 笔 / 胜率 ${formatPercentValue(shortRow.winRate, 1)}` : '暂无空头平仓',
+        tone: (shortRow?.netPnl || 0) >= 0 ? 'positive' : 'negative',
+      },
+      {
+        key: 'best-month',
+        label: '最佳月份',
+        value: monthlyPerformance.bestCell
+          ? `${monthlyPerformance.bestCell.label} ${formatPercentValue(monthlyPerformance.bestCell.returnPct, 1)}`
+          : '-',
+        helper: monthlyPerformance.bestCell
+          ? `净盈亏 ${formatSignedNumber(monthlyPerformance.bestCell.netPnl, 2)}`
+          : '暂无月度样本',
+        tone: monthlyPerformance.bestCell && monthlyPerformance.bestCell.returnPct >= 0 ? 'positive' : 'neutral',
+      },
+      {
+        key: 'deepest-drawdown',
+        label: '最深回撤区间',
+        value: deepestDrawdown ? formatPercentValue(deepestDrawdown.depth, 1) : '-',
+        helper: deepestDrawdown
+          ? `${formatDateTimeShort(deepestDrawdown.startTimestamp)} -> ${formatDateTimeShort(deepestDrawdown.troughTimestamp)}`
+          : '暂无显著回撤区间',
+        tone: deepestDrawdown ? 'negative' : 'neutral',
+      },
+    ] as const;
+  }, [closedCostSummary, closedPreviewTradesByExit.length, drawdownEpisodes, monthlyPerformance.bestCell, sideBreakdownRows]);
+  const costBreakdownOption = useMemo<EChartsOption>(() => {
+    const rows = [
+      {
+        label: '成本前边际',
+        value: closedCostSummary.grossBeforeCosts,
+        color: '#2563eb',
+        helper: '手续费和资金费尚未扣除',
+      },
+      {
+        label: '手续费影响',
+        value: -closedCostSummary.totalFee,
+        color: '#dc2626',
+        helper: `累计手续费 ${formatNumberValue(closedCostSummary.totalFee, 2)}`,
+      },
+      {
+        label: '资金费影响',
+        value: -closedCostSummary.totalFunding,
+        color: -closedCostSummary.totalFunding >= 0 ? '#16a34a' : '#dc2626',
+        helper: `累计资金费 ${formatSignedNumber(closedCostSummary.totalFunding, 2)}`,
+      },
+      {
+        label: '净收益',
+        value: closedCostSummary.netPnl,
+        color: closedCostSummary.netPnl >= 0 ? '#16a34a' : '#dc2626',
+        helper: '已平仓净口径',
+      },
+    ];
+    const hasValue = rows.some((row) => Math.abs(row.value) > 0);
+    return {
+      animation: false,
+      grid: {
+        left: 88,
+        right: 16,
+        top: 18,
+        bottom: 24,
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: unknown) => {
+          const rowsData = toEChartTooltipParams(params);
+          const dataIndex = Number(rowsData?.[0]?.dataIndex ?? -1);
+          const row = dataIndex >= 0 ? rows[dataIndex] : null;
+          if (!row) {
+            return '';
+          }
+          return [
+            row.label,
+            `金额: ${formatSignedNumber(row.value, 2)}`,
+            row.helper,
+          ].join('<br/>');
+        },
+      },
+      xAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: {
+          color: '#64748b',
+          formatter: (value: number) => formatNumberValue(Number(value), 2),
+        },
+        splitLine: {
+          lineStyle: { color: '#edf2fb' },
+        },
+      },
+      yAxis: {
+        type: 'category',
+        data: rows.map((row) => row.label),
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          color: '#475569',
+          fontSize: 11,
+        },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: rows.map((row) => ({
+            value: Number(row.value.toFixed(6)),
+            itemStyle: {
+              color: row.color,
+              borderRadius: 6,
+            },
+          })),
+          barMaxWidth: 22,
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: {
+              color: 'rgba(71, 85, 105, 0.35)',
+              type: 'dashed',
+            },
+            data: [{ xAxis: 0 }],
+          },
+        },
+      ],
+      graphic: hasValue
+        ? undefined
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: '暂无已平仓成本归因样本',
+                fill: '#94a3b8',
+                fontSize: 12,
+              },
+            },
+          ],
+    };
+  }, [
+    closedCostSummary.grossBeforeCosts,
+    closedCostSummary.netPnl,
+    closedCostSummary.totalFee,
+    closedCostSummary.totalFunding,
+  ]);
+  const rollingQualityOption = useMemo<EChartsOption>(() => {
+    const hasData = rollingQualityPoints.length > 0;
+    const labels = rollingQualityPoints.map((point) => formatDateTimeShort(point.timestamp));
+    return {
+      animation: false,
+      legend: {
+        top: 0,
+        right: 0,
+        textStyle: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+      },
+      grid: {
+        left: 52,
+        right: 48,
+        top: 30,
+        bottom: 36,
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: unknown) => {
+          const rows = toEChartTooltipParams(params);
+          const dataIndex = Number(rows?.[0]?.dataIndex ?? -1);
+          const point = dataIndex >= 0 ? rollingQualityPoints[dataIndex] : null;
+          if (!point) {
+            return '';
+          }
+          return [
+            `${formatDateTime(point.timestamp)} · 近 ${point.windowCount} 笔`,
+            `滚动净盈亏: ${formatSignedNumber(point.netPnl, 2)}`,
+            `滚动胜率: ${formatPercentValue(point.winRate, 1)}`,
+            `平均单笔净盈亏: ${formatSignedNumber(point.avgNetPnl, 2)}`,
+            `滚动 ProfitFactor: ${formatNumberValue(point.profitFactor, 2)}`,
+          ].join('<br/>');
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: {
+          color: '#64748b',
+          hideOverlap: true,
+        },
+        axisLine: {
+          lineStyle: { color: '#dbe2ef' },
+        },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          name: '滚动净盈亏',
+          axisLine: { show: false },
+          axisLabel: {
+            color: '#64748b',
+            formatter: (value: number) => formatNumberValue(Number(value), 1),
+          },
+          splitLine: {
+            lineStyle: { color: '#edf2fb' },
+          },
+        },
+        {
+          type: 'value',
+          name: '胜率(%)',
+          min: 0,
+          max: 100,
+          axisLine: { show: false },
+          axisLabel: {
+            color: '#64748b',
+            formatter: (value: number) => `${Number(value).toFixed(0)}%`,
+          },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: '滚动净盈亏',
+          type: 'bar',
+          data: rollingQualityPoints.map((point) => point.netPnl),
+          itemStyle: {
+            color: (params: { value?: unknown }) => (Number(params?.value) >= 0 ? '#16a34a' : '#dc2626'),
+            opacity: 0.82,
+          },
+          barMaxWidth: 16,
+        },
+        {
+          name: '滚动胜率',
+          type: 'line',
+          yAxisIndex: 1,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: {
+            width: 2,
+            color: '#2563eb',
+          },
+          areaStyle: {
+            color: 'rgba(37, 99, 235, 0.12)',
+          },
+          data: rollingQualityPoints.map((point) => Number((point.winRate * 100).toFixed(3))),
+        },
+      ],
+      graphic: hasData
+        ? undefined
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: '暂无滚动质量样本',
+                fill: '#94a3b8',
+                fontSize: 12,
+              },
+            },
+          ],
+    };
+  }, [rollingQualityPoints]);
+  const monthlyPerformanceOption = useMemo<EChartsOption>(() => {
+    const safeYears = monthlyPerformance.years.length > 0 ? monthlyPerformance.years.map((year) => `${year}`) : ['-'];
+    const yearIndexMap = new Map(safeYears.map((year, index) => [year, index]));
+    const maxAbsReturnPct = Math.max(1, monthlyPerformance.maxAbsReturnPct);
+    const hasData = monthlyPerformance.activeCells.length > 0;
+    const heatmapData = hasData
+      ? monthlyPerformance.cells.map((cell) => ({
+          value: [
+            cell.monthIndex,
+            yearIndexMap.get(`${cell.year}`) ?? 0,
+            Number((cell.returnPct * 100).toFixed(3)),
+          ],
+          label: cell.label,
+          count: cell.count,
+          winRate: cell.winRate,
+          pnl: cell.netPnl,
+          totalFee: cell.totalFee,
+          totalFunding: cell.totalFunding,
+        }))
+      : [];
+    return {
+      animation: false,
+      grid: {
+        left: 48,
+        right: 18,
+        top: 18,
+        bottom: 56,
+      },
+      tooltip: {
+        position: 'top',
+        formatter: (params: unknown) => {
+          const [entry] = toEChartTooltipParams(params);
+          const data = entry?.data as {
+            label?: string;
+            count?: number;
+            winRate?: number;
+            pnl?: number;
+            totalFee?: number;
+            totalFunding?: number;
+            value?: unknown[];
+          } | undefined;
+          if (!data) {
+            return '';
+          }
+          if (!data.count) {
+            return `${data.label || '月份'}<br/>暂无已平仓`;
+          }
+          const returnPct = Array.isArray(data.value) ? Number(data.value[2]) : 0;
+          return [
+            data.label || '月份',
+            `净收益率: ${returnPct.toFixed(2)}%`,
+            `净盈亏: ${formatSignedNumber(Number(data.pnl) || 0, 2)}`,
+            `样本: ${data.count} 笔 · 胜率 ${formatPercentValue(Number(data.winRate) || 0, 1)}`,
+            `手续费: ${formatNumberValue(Number(data.totalFee) || 0, 2)} · 资金费 ${formatSignedNumber(Number(data.totalFunding) || 0, 2)}`,
+          ].join('<br/>');
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: MONTH_LABELS,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+      },
+      yAxis: {
+        type: 'category',
+        data: safeYears,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+      },
+      visualMap: {
+        min: -maxAbsReturnPct,
+        max: maxAbsReturnPct,
+        calculable: false,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 6,
+        textStyle: {
+          color: '#64748b',
+          fontSize: 11,
+        },
+        inRange: {
+          color: ['#7f1d1d', '#fca5a5', '#f8fafc', '#86efac', '#166534'],
+        },
+      },
+      series: [
+        {
+          type: 'heatmap',
+          data: heatmapData,
+          label: {
+            show: true,
+            fontSize: 10,
+            color: '#0f172a',
+            formatter: (params: { data?: unknown }) => {
+              const data = params?.data as { count?: number; value?: unknown[] } | undefined;
+              if (!data || !data.count || !Array.isArray(data.value)) {
+                return '';
+              }
+              return `${Number(data.value[2]).toFixed(1)}%`;
+            },
+          },
+          itemStyle: {
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.66)',
+          },
+          emphasis: {
+            itemStyle: {
+              shadowBlur: 10,
+              shadowColor: 'rgba(15, 23, 42, 0.18)',
+            },
+          },
+        },
+      ],
+      graphic: hasData
+        ? undefined
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: '暂无月度收益热力图样本',
+                fill: '#94a3b8',
+                fontSize: 12,
+              },
+            },
+          ],
+    };
+  }, [monthlyPerformance]);
 
   useEffect(() => {
     fullPreviewAnchorTradeKeyRef.current = fullPreviewAnchorTradeKey;
@@ -3907,21 +5142,39 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           >
             <div className="strategy-workbench-left strategy-workbench-left--resizable" ref={leftPanelRef}>
               <div className="strategy-workbench-card strategy-workbench-card--kline">
-                <div className="strategy-workbench-card-header">
-                  <span className="strategy-workbench-card-title">K线图</span>
-                  <span className="strategy-workbench-card-meta">已联动指标：{selectedIndicators.length}</span>
+                <div className="strategy-workbench-card-header strategy-workbench-card-header--kline">
+                  <div className="strategy-workbench-kline-header-main">
+                    <span className="strategy-workbench-card-title">K线图</span>
+                    <span className="strategy-workbench-card-meta">
+                      当前周期：{chartTimeframeLabel} · 已联动指标：{selectedIndicators.length}
+                    </span>
+                  </div>
+                  <label className="strategy-workbench-kline-timeframe-switch">
+                    <span className="strategy-workbench-kline-timeframe-switch-label">图表周期</span>
+                    <select
+                      value={chartTimeframeSec}
+                      onChange={(event) => handleChartTimeframeChange(Number(event.target.value))}
+                    >
+                      {chartTimeframeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="strategy-workbench-kline-wrap">
                   <StrategyWorkbenchKline
                     exchange={selectedExchange}
                     symbol={selectedSymbol}
-                    timeframeSec={selectedTimeframeSec}
+                    timeframeSec={chartTimeframeSec}
                     selectedIndicators={selectedIndicators}
                     previewMode={previewTradeMode}
                     focusRange={previewTradeMode === 'normal' ? focusedPreviewTradeRange : null}
                     fullPreviewRanges={previewTradeMode === 'full' ? previewTradeRanges : []}
                     selectedRangeId={activePreviewTradeKey}
                     syncTargetRange={previewTradeMode === 'full' ? fullPreviewAnchorRange : null}
+                    onFocusRangeCoverage={handlePreviewFocusRangeCoverage}
                     onVisibleRangeChange={
                       previewTradeMode === 'full' && previewScrollSyncEnabled
                         ? handlePreviewKlineVisibleRangeChange
@@ -4168,6 +5421,13 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                           </button>
                           <button
                             type="button"
+                            className={`strategy-workbench-live-summary-tab ${liveSummaryTab === 'professional' ? 'is-active' : ''}`}
+                            onClick={() => setLiveSummaryTab('professional')}
+                          >
+                            专业
+                          </button>
+                          <button
+                            type="button"
                             className={`strategy-workbench-live-summary-tab ${liveSummaryTab === 'calendar' ? 'is-active' : ''}`}
                             onClick={() => setLiveSummaryTab('calendar')}
                           >
@@ -4205,6 +5465,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                             <StrategyWorkbenchEChart
                               className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--equity"
                               option={equityCurveOption}
+                              onChartClick={handleEquityChartClick}
                             />
                             <div className="strategy-workbench-live-chart-insights">
                               <span>{maxWinStreakText}</span>
@@ -4307,16 +5568,34 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                             {calendarViewData.cells.map((cell) => {
                               const cellWinRate = cell.metrics.count > 0 ? cell.metrics.wins / cell.metrics.count : 0;
                               const tone = getCalendarCellBackground(cell.metrics.pnl, calendarViewData.maxAbsPnl);
+                              const linkedTradeIndex = Number.isFinite(cell.metrics.representativeTradeIndex)
+                                ? Number(cell.metrics.representativeTradeIndex)
+                                : Number.NaN;
+                              const clickable = Number.isFinite(linkedTradeIndex) && linkedTradeIndex >= 0;
                               return (
                                 <div
                                   key={cell.id}
                                   className={[
                                     'strategy-workbench-live-calendar-cell',
+                                    clickable ? 'is-clickable' : '',
                                     cell.inCurrentPeriod ? '' : 'is-outside',
                                     cell.metrics.pnl > 0 ? 'is-positive' : '',
                                     cell.metrics.pnl < 0 ? 'is-negative' : '',
                                   ].join(' ').trim()}
                                   style={tone ? { backgroundColor: tone } : undefined}
+                                  role={clickable ? 'button' : undefined}
+                                  tabIndex={clickable ? 0 : undefined}
+                                  onClick={clickable ? () => activatePreviewTradeByIndex(linkedTradeIndex) : undefined}
+                                  onKeyDown={
+                                    clickable
+                                      ? (event) => {
+                                          if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            activatePreviewTradeByIndex(linkedTradeIndex);
+                                          }
+                                        }
+                                      : undefined
+                                  }
                                 >
                                   <div className="strategy-workbench-live-calendar-cell-head">
                                     <span>{cell.label}</span>
@@ -4393,6 +5672,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               <StrategyWorkbenchEChart
                                 className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--duration-scatter"
                                 option={holdingDurationScatterOption}
+                                onChartClick={handleHoldingDurationScatterClick}
                               />
                             </div>
                             <div className="strategy-workbench-live-time-analysis-card">
@@ -4405,16 +5685,72 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                               />
                             </div>
                           </div>
-                          <div className="strategy-workbench-live-time-analysis-snapshot-grid">
-                            <div className="strategy-workbench-live-time-analysis-snapshot-card">
-                              <span>日级样本</span>
-                              <strong>{dayPeriodBuckets.reduce((sum, bucket) => sum + bucket.count, 0)} 笔</strong>
-                              <span>有效时段 {dayPeriodBuckets.filter((bucket) => bucket.count > 0).length}/{dayPeriodBuckets.length}</span>
+                          <div className="strategy-workbench-live-time-analysis-table-grid">
+                            <div className="strategy-workbench-live-time-analysis-card">
+                              <div className="strategy-workbench-live-time-analysis-card-title">日级分布（样本笔数/胜亏占比）</div>
+                              <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                <table className="strategy-workbench-live-time-analysis-table">
+                                  <thead>
+                                    <tr>
+                                      <th>时段</th>
+                                      <th>笔数</th>
+                                      <th>胜率</th>
+                                      <th>亏损占比</th>
+                                      <th>均值(%)</th>
+                                      <th>总盈亏</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {dayPeriodBuckets.map((bucket) => (
+                                      <tr key={bucket.key}>
+                                        <td>{bucket.label}</td>
+                                        <td>{bucket.count}</td>
+                                        <td>{formatPercentValue(bucket.winRate, 1)}</td>
+                                        <td>{formatPercentValue(bucket.lossRate, 1)}</td>
+                                        <td className={bucket.avgReturnPct >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.avgReturnPct, 2)}%
+                                        </td>
+                                        <td className={bucket.pnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.pnl)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             </div>
-                            <div className="strategy-workbench-live-time-analysis-snapshot-card">
-                              <span>小时级样本</span>
-                              <strong>{hourPeriodBuckets.reduce((sum, bucket) => sum + bucket.count, 0)} 笔</strong>
-                              <span>有效时段 {hourPeriodBuckets.filter((bucket) => bucket.count > 0).length}/{hourPeriodBuckets.length}</span>
+                            <div className="strategy-workbench-live-time-analysis-card">
+                              <div className="strategy-workbench-live-time-analysis-card-title">小时级分布（样本笔数/胜亏占比）</div>
+                              <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                <table className="strategy-workbench-live-time-analysis-table">
+                                  <thead>
+                                    <tr>
+                                      <th>时段</th>
+                                      <th>笔数</th>
+                                      <th>胜率</th>
+                                      <th>亏损占比</th>
+                                      <th>均值(%)</th>
+                                      <th>总盈亏</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {hourPeriodBuckets.map((bucket) => (
+                                      <tr key={bucket.key}>
+                                        <td>{bucket.label}</td>
+                                        <td>{bucket.count}</td>
+                                        <td>{formatPercentValue(bucket.winRate, 1)}</td>
+                                        <td>{formatPercentValue(bucket.lossRate, 1)}</td>
+                                        <td className={bucket.avgReturnPct >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.avgReturnPct, 2)}%
+                                        </td>
+                                        <td className={bucket.pnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                          {formatSignedNumber(bucket.pnl)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -4453,6 +5789,184 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                           </div>
                         </div>
                             </>
+                          ) : null}
+                          {liveSummaryTab === 'professional' ? (
+                            <div className="strategy-workbench-live-professional">
+                              <div
+                                className={[
+                                  'strategy-workbench-live-professional-note',
+                                  equitySummary.pointCount > (localBacktestSummary.equityPreview?.length || 0) ? 'is-warning' : '',
+                                ].join(' ').trim()}
+                              >
+                                {professionalCoverageNote}
+                              </div>
+                              <div className="strategy-workbench-live-professional-metrics">
+                                {professionalMetricCards.map((card) => (
+                                  <div className="strategy-workbench-live-professional-metric" key={card.key}>
+                                    <span className="strategy-workbench-live-professional-metric-label">{card.label}</span>
+                                    <strong
+                                      className={[
+                                        'strategy-workbench-live-professional-metric-value',
+                                        card.tone !== 'neutral' ? `is-${card.tone}` : '',
+                                      ].join(' ').trim()}
+                                    >
+                                      {card.value}
+                                    </strong>
+                                    <span className="strategy-workbench-live-professional-metric-helper">{card.helper}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="strategy-workbench-live-professional-chart-grid">
+                                <div className="strategy-workbench-live-time-analysis-card">
+                                  <div className="strategy-workbench-live-time-analysis-card-title">已平仓成本归因</div>
+                                  <StrategyWorkbenchEChart
+                                    className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--professional"
+                                    option={costBreakdownOption}
+                                  />
+                                </div>
+                                <div className="strategy-workbench-live-time-analysis-card">
+                                  <div className="strategy-workbench-live-time-analysis-card-title">
+                                    {rollingWindowSize > 0 ? `近 ${rollingWindowSize} 笔滚动质量` : '滚动质量'}
+                                  </div>
+                                  <StrategyWorkbenchEChart
+                                    className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--professional"
+                                    option={rollingQualityOption}
+                                  />
+                                </div>
+                              </div>
+                              <div className="strategy-workbench-live-time-analysis-card">
+                                <div className="strategy-workbench-live-time-analysis-card-title">月度收益热力图</div>
+                                <StrategyWorkbenchEChart
+                                  className="strategy-workbench-live-chart-canvas strategy-workbench-live-chart-canvas--professional"
+                                  option={monthlyPerformanceOption}
+                                />
+                              </div>
+                              <div className="strategy-workbench-live-professional-table-grid">
+                                <div className="strategy-workbench-live-time-analysis-card">
+                                  <div className="strategy-workbench-live-time-analysis-card-title">Long / Short 分解</div>
+                                  <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                    <table className="strategy-workbench-live-time-analysis-table">
+                                      <thead>
+                                        <tr>
+                                          <th>方向</th>
+                                          <th>平仓</th>
+                                          <th>占比</th>
+                                          <th>胜率</th>
+                                          <th>净盈亏</th>
+                                          <th>成本前</th>
+                                          <th>手续费</th>
+                                          <th>资金费</th>
+                                          <th>平均持仓</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {sideBreakdownRows.map((row) => (
+                                          <tr key={row.key}>
+                                            <td>{row.label}</td>
+                                            <td>{row.count}</td>
+                                            <td>{formatPercentValue(row.share, 1)}</td>
+                                            <td>{formatPercentValue(row.winRate, 1)}</td>
+                                            <td className={row.netPnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                              {formatSignedNumber(row.netPnl, 2)}
+                                            </td>
+                                            <td className={row.grossBeforeCosts >= 0 ? 'is-positive' : 'is-negative'}>
+                                              {formatSignedNumber(row.grossBeforeCosts, 2)}
+                                            </td>
+                                            <td>{formatNumberValue(row.totalFee, 2)}</td>
+                                            <td className={row.totalFunding <= 0 ? 'is-positive' : 'is-negative'}>
+                                              {formatSignedNumber(row.totalFunding, 2)}
+                                            </td>
+                                            <td>{formatDuration(row.avgHoldingMs)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                                <div className="strategy-workbench-live-time-analysis-card">
+                                  <div className="strategy-workbench-live-time-analysis-card-title">平仓原因分解</div>
+                                  <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                    <table className="strategy-workbench-live-time-analysis-table">
+                                      <thead>
+                                        <tr>
+                                          <th>原因</th>
+                                          <th>平仓</th>
+                                          <th>占比</th>
+                                          <th>胜率</th>
+                                          <th>净盈亏</th>
+                                          <th>平均净盈亏</th>
+                                          <th>手续费</th>
+                                          <th>资金费</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {exitReasonRows.length <= 0 ? (
+                                          <tr>
+                                            <td colSpan={8}>暂无已平仓原因样本</td>
+                                          </tr>
+                                        ) : (
+                                          exitReasonRows.map((row) => (
+                                            <tr key={row.key}>
+                                              <td>{row.label}</td>
+                                              <td>{row.count}</td>
+                                              <td>{formatPercentValue(row.share, 1)}</td>
+                                              <td>{formatPercentValue(row.winRate, 1)}</td>
+                                              <td className={row.netPnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                                {formatSignedNumber(row.netPnl, 2)}
+                                              </td>
+                                              <td className={row.avgNetPnl >= 0 ? 'is-positive' : 'is-negative'}>
+                                                {formatSignedNumber(row.avgNetPnl, 2)}
+                                              </td>
+                                              <td>{formatNumberValue(row.totalFee, 2)}</td>
+                                              <td className={row.totalFunding <= 0 ? 'is-positive' : 'is-negative'}>
+                                                {formatSignedNumber(row.totalFunding, 2)}
+                                              </td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                                <div className="strategy-workbench-live-time-analysis-card strategy-workbench-live-professional-table-card--full">
+                                  <div className="strategy-workbench-live-time-analysis-card-title">Top 回撤区间</div>
+                                  <div className="strategy-workbench-live-time-analysis-table-scroll">
+                                    <table className="strategy-workbench-live-time-analysis-table">
+                                      <thead>
+                                        <tr>
+                                          <th>开始峰值</th>
+                                          <th>谷底</th>
+                                          <th>恢复</th>
+                                          <th>深度</th>
+                                          <th>回撤额</th>
+                                          <th>持续</th>
+                                          <th>状态</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {drawdownEpisodes.length <= 0 ? (
+                                          <tr>
+                                            <td colSpan={7}>暂无显著回撤区间</td>
+                                          </tr>
+                                        ) : (
+                                          drawdownEpisodes.map((episode) => (
+                                            <tr key={episode.key}>
+                                              <td>{formatDateTimeShort(episode.startTimestamp)}</td>
+                                              <td>{formatDateTimeShort(episode.troughTimestamp)}</td>
+                                              <td>{episode.isRecovered ? formatDateTimeShort(episode.recoveryTimestamp) : '未恢复'}</td>
+                                              <td className="is-negative">{formatPercentValue(episode.depth, 1)}</td>
+                                              <td className="is-negative">{formatSignedNumber(-episode.lossFromPeak, 2)}</td>
+                                              <td>{formatDuration(episode.durationMs)}</td>
+                                              <td>{episode.isRecovered ? '已恢复' : '进行中'}</td>
+                                            </tr>
+                                          ))
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
                           ) : null}
                           {liveSummaryTab === 'overview' ? (
                         <div className="strategy-workbench-live-summary-extra">
