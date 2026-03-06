@@ -2,13 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   pointerWithin,
   useDraggable,
   useDroppable,
   useSensor,
   useSensors,
-  type DragCancelEvent,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
@@ -40,6 +40,7 @@ import StrategyWorkbenchKline, {
   type StrategyWorkbenchVisibleRange,
 } from './StrategyWorkbenchKline';
 import KlineOfflineCacheDialog from '../dialogs/KlineOfflineCacheDialog';
+import { formatStrategyValueLabel } from './strategyValueLabel';
 import './StrategyWorkbench.css';
 
 type DropSlot = 'left' | 'method' | 'right' | 'extra';
@@ -329,6 +330,16 @@ type DrawdownEpisode = {
   isRecovered: boolean;
 };
 
+type MonthlyPerformanceHeatmapDatum = {
+  value: [number, number, number];
+  cellLabel: string;
+  count: number;
+  winRate: number;
+  pnl: number;
+  totalFee: number;
+  totalFunding: number;
+};
+
 type RollingQualityPoint = {
   key: string;
   timestamp: number;
@@ -592,9 +603,6 @@ const methodShortLabel = (label: string, fallback: string) => {
 
 const stripParenthetical = (value?: string) =>
   normalizeText((value || '').replace(/\s*[\(\（][^\)\）]*[\)\）]/g, '').replace(/\s{2,}/g, ' '));
-
-const stripFieldPrefix = (value?: string) =>
-  normalizeText((value || '').replace(/^K线字段\s*-\s*/i, ''));
 
 const indicatorCode = (indicator: GeneratedIndicatorPayload) =>
   upperText(typeof indicator.config?.indicator === 'string' ? indicator.config.indicator : indicator.code);
@@ -995,23 +1003,25 @@ const buildDrawdownEpisodes = (points: LocalBacktestEquityPoint[]): DrawdownEpis
       continue;
     }
 
-    if (point.equity <= active.troughEquity) {
+    const activeEpisode: DrawdownEpisode = active;
+    if (point.equity <= activeEpisode.troughEquity) {
       active = {
-        ...active,
+        ...activeEpisode,
         troughTimestamp: point.timestamp,
         troughEquity: point.equity,
         lossFromPeak,
         depth,
-        durationMs: Math.max(0, point.timestamp - active.startTimestamp),
+        durationMs: Math.max(0, point.timestamp - activeEpisode.startTimestamp),
       };
     }
   }
 
   if (active) {
     const lastPoint = points[points.length - 1];
+    const activeEpisode: DrawdownEpisode = active;
     episodes.push({
-      ...active,
-      durationMs: Math.max(active.durationMs, Math.max(0, lastPoint.timestamp - active.startTimestamp)),
+      ...activeEpisode,
+      durationMs: Math.max(activeEpisode.durationMs, Math.max(0, lastPoint.timestamp - activeEpisode.startTimestamp)),
     });
   }
 
@@ -1081,27 +1091,6 @@ const estimateTradeSpanBarsByTimeframe = (startTime: number, endTime: number, ti
 
 const FOCUS_RANGE_TARGET_OCCUPANCY = 0.2;
 const FOCUS_RANGE_MAX_OCCUPANCY = 2 / 3;
-
-const extractClientPoint = (event: Event | null | undefined) => {
-  if (!event) {
-    return null;
-  }
-  if ('clientX' in event && 'clientY' in event) {
-    const clientX = Number((event as MouseEvent).clientX);
-    const clientY = Number((event as MouseEvent).clientY);
-    if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
-      return { x: clientX, y: clientY };
-    }
-  }
-  if ('touches' in event) {
-    const touchEvent = event as TouchEvent;
-    const touch = touchEvent.touches?.[0] || touchEvent.changedTouches?.[0];
-    if (touch) {
-      return { x: touch.clientX, y: touch.clientY };
-    }
-  }
-  return null;
-};
 
 const DraggableToken: React.FC<{
   id: string;
@@ -1184,8 +1173,9 @@ const DroppableSlot: React.FC<{
 /** 可拖拽调整宽度的分隔条，用于左右面板之间 */
 const ResizeHandle: React.FC<{
   onResize: (deltaX: number) => void;
+  onResizeEnd?: () => void;
   className?: string;
-}> = ({ onResize, className }) => {
+}> = ({ onResize, onResizeEnd, className }) => {
   const startX = useRef(0);
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -1202,13 +1192,14 @@ const ResizeHandle: React.FC<{
         document.removeEventListener('pointerup', onUp);
         (document.body as HTMLElement).style.cursor = '';
         (document.body as HTMLElement).style.userSelect = '';
+        onResizeEnd?.();
       };
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
       (document.body as HTMLElement).style.cursor = 'col-resize';
       (document.body as HTMLElement).style.userSelect = 'none';
     },
-    [onResize],
+    [onResize, onResizeEnd],
   );
   return <div className={className} onPointerDown={handlePointerDown} role="separator" aria-orientation="vertical" />;
 };
@@ -1216,8 +1207,9 @@ const ResizeHandle: React.FC<{
 /** 可拖拽调整高度的分隔条，用于上下区块之间 */
 const ResizeHandleVertical: React.FC<{
   onResize: (deltaY: number) => void;
+  onResizeEnd?: () => void;
   className?: string;
-}> = ({ onResize, className }) => {
+}> = ({ onResize, onResizeEnd, className }) => {
   const startY = useRef(0);
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -1234,13 +1226,14 @@ const ResizeHandleVertical: React.FC<{
         document.removeEventListener('pointerup', onUp);
         (document.body as HTMLElement).style.cursor = '';
         (document.body as HTMLElement).style.userSelect = '';
+        onResizeEnd?.();
       };
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
       (document.body as HTMLElement).style.cursor = 'row-resize';
       (document.body as HTMLElement).style.userSelect = 'none';
     },
-    [onResize],
+    [onResize, onResizeEnd],
   );
   return <div className={className} onPointerDown={handlePointerDown} role="separator" aria-orientation="horizontal" />;
 };
@@ -1366,7 +1359,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const [klineBars, setKlineBars] = useState<KLineData[]>([]);
   const [talibReady, setTalibReady] = useState(false);
   const [activeDrag, setActiveDrag] = useState<DragPayload | null>(null);
-  const [dragCursor, setDragCursor] = useState<{ x: number; y: number } | null>(null);
   const [focusRightNumberKey, setFocusRightNumberKey] = useState('');
   const [focusExtraNumberKey, setFocusExtraNumberKey] = useState('');
   const [activeHoverValueId, setActiveHoverValueId] = useState('');
@@ -1417,6 +1409,13 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightLeftRef = useRef<HTMLDivElement>(null);
   const livePreviewRef = useRef<HTMLDivElement>(null);
+  // 拖动分隔条时直接更新 CSS 变量，避免每次 pointermove 都让整页重渲染。
+  const leftPanelWidthRef = useRef(leftPanelWidth);
+  const rightLeftPanelWidthRef = useRef(rightLeftPanelWidth);
+  const liveListPanelWidthRef = useRef(liveListPanelWidth);
+  const leftKlineHeightRef = useRef(leftKlineHeight);
+  const rightPanelHeightRef = useRef(rightPanelHeight);
+  const rightPanelHeightCustomizedRef = useRef(rightPanelHeightCustomized);
   const previewListBodyRef = useRef<HTMLDivElement | null>(null);
   const previewTradeItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const previewListScrollRafRef = useRef<number | null>(null);
@@ -1428,50 +1427,127 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   const previewAutoTimeframeSwitchKeyRef = useRef('');
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
+  useEffect(() => {
+    leftPanelWidthRef.current = leftPanelWidth;
+  }, [leftPanelWidth]);
+
+  useEffect(() => {
+    rightLeftPanelWidthRef.current = rightLeftPanelWidth;
+  }, [rightLeftPanelWidth]);
+
+  useEffect(() => {
+    liveListPanelWidthRef.current = liveListPanelWidth;
+  }, [liveListPanelWidth]);
+
+  useEffect(() => {
+    leftKlineHeightRef.current = leftKlineHeight;
+  }, [leftKlineHeight]);
+
+  useEffect(() => {
+    rightPanelHeightRef.current = rightPanelHeight;
+  }, [rightPanelHeight]);
+
+  useEffect(() => {
+    rightPanelHeightCustomizedRef.current = rightPanelHeightCustomized;
+  }, [rightPanelHeightCustomized]);
+
+  const setCssVariable = useCallback((element: HTMLElement | null, key: string, value: string | null) => {
+    if (!element) {
+      return;
+    }
+    if (value === null) {
+      element.style.removeProperty(key);
+      return;
+    }
+    element.style.setProperty(key, value);
+  }, []);
+
   const handleMainResize = useCallback((deltaX: number) => {
-    setLeftPanelWidth((prev) => {
-      const el = mainLayoutRef.current;
-      const w = el?.offsetWidth ?? 800;
-      const newPct = prev + (deltaX / w) * 100;
-      return Math.min(80, Math.max(20, newPct));
-    });
+    const el = mainLayoutRef.current;
+    const w = el?.offsetWidth ?? 800;
+    const next = Math.min(80, Math.max(20, leftPanelWidthRef.current + (deltaX / w) * 100));
+    if (Math.abs(next - leftPanelWidthRef.current) < 0.001) {
+      return;
+    }
+    leftPanelWidthRef.current = next;
+    setCssVariable(el, '--wb-left-width', `${next}%`);
+  }, [setCssVariable]);
+
+  const commitMainResize = useCallback(() => {
+    setLeftPanelWidth((prev) => (Math.abs(prev - leftPanelWidthRef.current) < 0.001 ? prev : leftPanelWidthRef.current));
   }, []);
 
   const handleRightResize = useCallback((deltaX: number) => {
-    setRightLeftPanelWidth((prev) => {
-      const el = rightPanelRef.current;
-      const w = el?.offsetWidth ?? 400;
-      const newPct = prev + (deltaX / w) * 100;
-      return Math.min(75, Math.max(25, newPct));
-    });
+    const el = rightPanelRef.current;
+    const w = el?.offsetWidth ?? 400;
+    const next = Math.min(75, Math.max(25, rightLeftPanelWidthRef.current + (deltaX / w) * 100));
+    if (Math.abs(next - rightLeftPanelWidthRef.current) < 0.001) {
+      return;
+    }
+    rightLeftPanelWidthRef.current = next;
+    setCssVariable(mainLayoutRef.current, '--wb-right-left-width', `${next}%`);
+  }, [setCssVariable]);
+
+  const commitRightResize = useCallback(() => {
+    setRightLeftPanelWidth((prev) => (
+      Math.abs(prev - rightLeftPanelWidthRef.current) < 0.001 ? prev : rightLeftPanelWidthRef.current
+    ));
   }, []);
 
   const handleLivePreviewResize = useCallback((deltaX: number) => {
-    setLiveListPanelWidth((prev) => {
-      const el = livePreviewRef.current;
-      const w = el?.offsetWidth ?? 640;
-      const newPct = prev - (deltaX / w) * 100;
-      return Math.min(55, Math.max(20, newPct));
-    });
+    const el = livePreviewRef.current;
+    const w = el?.offsetWidth ?? 640;
+    const next = Math.min(55, Math.max(20, liveListPanelWidthRef.current - (deltaX / w) * 100));
+    if (Math.abs(next - liveListPanelWidthRef.current) < 0.001) {
+      return;
+    }
+    liveListPanelWidthRef.current = next;
+    setCssVariable(el, '--wb-live-list-width', `${next}%`);
+  }, [setCssVariable]);
+
+  const commitLivePreviewResize = useCallback(() => {
+    setLiveListPanelWidth((prev) => (
+      Math.abs(prev - liveListPanelWidthRef.current) < 0.001 ? prev : liveListPanelWidthRef.current
+    ));
   }, []);
 
   const handleLeftVerticalResize = useCallback((deltaY: number) => {
-    setLeftKlineHeight((prev) => {
-      const el = leftPanelRef.current;
-      const h = el?.offsetHeight ?? 600;
-      const newPct = prev + (deltaY / h) * 100;
-      return Math.min(85, Math.max(30, newPct));
-    });
+    const el = leftPanelRef.current;
+    const h = el?.offsetHeight ?? 600;
+    const next = Math.min(85, Math.max(30, leftKlineHeightRef.current + (deltaY / h) * 100));
+    if (Math.abs(next - leftKlineHeightRef.current) < 0.001) {
+      return;
+    }
+    leftKlineHeightRef.current = next;
+    setCssVariable(mainLayoutRef.current, '--wb-left-kline-height', `${next}%`);
+  }, [setCssVariable]);
+
+  const commitLeftVerticalResize = useCallback(() => {
+    setLeftKlineHeight((prev) => (
+      Math.abs(prev - leftKlineHeightRef.current) < 0.001 ? prev : leftKlineHeightRef.current
+    ));
   }, []);
 
   const handleRightLeftVerticalResize = useCallback((deltaY: number) => {
-    setRightPanelHeightCustomized((prev) => (prev ? prev : true));
-    setRightPanelHeight((prev) => {
-      const el = rightLeftRef.current;
-      const h = el?.offsetHeight ?? 400;
-      const newPct = prev + (deltaY / h) * 100;
-      return Math.min(75, Math.max(25, newPct));
-    });
+    const el = rightLeftRef.current;
+    const h = el?.offsetHeight ?? 400;
+    const next = Math.min(75, Math.max(25, rightPanelHeightRef.current + (deltaY / h) * 100));
+    if (Math.abs(next - rightPanelHeightRef.current) < 0.001) {
+      return;
+    }
+    rightPanelHeightRef.current = next;
+    if (!rightPanelHeightCustomizedRef.current) {
+      rightPanelHeightCustomizedRef.current = true;
+      setRightPanelHeightCustomized(true);
+      setRightPanelHeight(next);
+    }
+    setCssVariable(mainLayoutRef.current, '--wb-right-panel-height', `${next}%`);
+  }, [setCssVariable]);
+
+  const commitRightLeftVerticalResize = useCallback(() => {
+    setRightPanelHeight((prev) => (
+      Math.abs(prev - rightPanelHeightRef.current) < 0.001 ? prev : rightPanelHeightRef.current
+    ));
   }, []);
 
   const availableDataRange = useMemo(() => {
@@ -1963,32 +2039,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     };
   }, []);
 
-  useEffect(() => {
-    if (!activeDrag) {
-      return;
-    }
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const point = extractClientPoint(event);
-      if (point) {
-        setDragCursor(point);
-      }
-    };
-    const handleTouchMove = (event: TouchEvent) => {
-      const point = extractClientPoint(event);
-      if (point) {
-        setDragCursor(point);
-      }
-    };
-
-    window.addEventListener('pointermove', handlePointerMove, { passive: true });
-    window.addEventListener('touchmove', handleTouchMove, { passive: true });
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('touchmove', handleTouchMove);
-    };
-  }, [activeDrag]);
-
   const resolveArgMode = (method: MethodOption | undefined, argIndex: number): ArgValueMode => {
     return method?.argValueTypes?.[argIndex] || 'both';
   };
@@ -2022,11 +2072,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
   };
 
   const renderValueText = (valueId?: string) => {
-    if (!valueId) {
-      return '未配置';
-    }
-    const rawText = compactValueLabelMap.get(valueId) || valueLabelMap.get(valueId) || valueId;
-    return stripFieldPrefix(rawText);
+    const preferredLabel = compactValueLabelMap.get(valueId || '') || valueLabelMap.get(valueId || '');
+    return formatStrategyValueLabel(valueId, preferredLabel);
   };
 
   const onDragStart = (event: DragStartEvent) => {
@@ -2035,15 +2082,10 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       setActiveDrag(payload);
     }
     setActiveHoverValueId('');
-    const point = extractClientPoint(event.activatorEvent);
-    if (point) {
-      setDragCursor(point);
-    }
   };
 
-  const onDragCancel = (_event: DragCancelEvent) => {
+  const onDragCancel = () => {
     setActiveDrag(null);
-    setDragCursor(null);
     setActiveHoverValueId('');
   };
 
@@ -2054,7 +2096,6 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const indicatorInputDrop = dropTargetId ? parseIndicatorInputDropId(dropTargetId) : null;
     const conditionCreateDrop = dropTargetId ? parseConditionCreateDropId(dropTargetId) : null;
     setActiveDrag(null);
-    setDragCursor(null);
     setActiveHoverValueId('');
 
     if (!payload) {
@@ -4658,14 +4699,14 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     const yearIndexMap = new Map(safeYears.map((year, index) => [year, index]));
     const maxAbsReturnPct = Math.max(1, monthlyPerformance.maxAbsReturnPct);
     const hasData = monthlyPerformance.activeCells.length > 0;
-    const heatmapData = hasData
+    const heatmapData: MonthlyPerformanceHeatmapDatum[] = hasData
       ? monthlyPerformance.cells.map((cell) => ({
           value: [
             cell.monthIndex,
             yearIndexMap.get(`${cell.year}`) ?? 0,
             Number((cell.returnPct * 100).toFixed(3)),
           ],
-          label: cell.label,
+          cellLabel: cell.label,
           count: cell.count,
           winRate: cell.winRate,
           pnl: cell.netPnl,
@@ -4673,6 +4714,32 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           totalFunding: cell.totalFunding,
         }))
       : [];
+    const heatmapSeries = {
+      type: 'heatmap',
+      data: heatmapData,
+      label: {
+        show: true,
+        fontSize: 10,
+        color: '#0f172a',
+        formatter: (params: { data?: unknown }) => {
+          const data = params?.data as MonthlyPerformanceHeatmapDatum | undefined;
+          if (!data || !data.count || !Array.isArray(data.value)) {
+            return '';
+          }
+          return `${Number(data.value[2]).toFixed(1)}%`;
+        },
+      },
+      itemStyle: {
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.66)',
+      },
+      emphasis: {
+        itemStyle: {
+          shadowBlur: 10,
+          shadowColor: 'rgba(15, 23, 42, 0.18)',
+        },
+      },
+    };
     return {
       animation: false,
       grid: {
@@ -4685,24 +4752,16 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         position: 'top',
         formatter: (params: unknown) => {
           const [entry] = toEChartTooltipParams(params);
-          const data = entry?.data as {
-            label?: string;
-            count?: number;
-            winRate?: number;
-            pnl?: number;
-            totalFee?: number;
-            totalFunding?: number;
-            value?: unknown[];
-          } | undefined;
+          const data = entry?.data as MonthlyPerformanceHeatmapDatum | undefined;
           if (!data) {
             return '';
           }
           if (!data.count) {
-            return `${data.label || '月份'}<br/>暂无已平仓`;
+            return `${data.cellLabel || '月份'}<br/>暂无已平仓`;
           }
           const returnPct = Array.isArray(data.value) ? Number(data.value[2]) : 0;
           return [
-            data.label || '月份',
+            data.cellLabel || '月份',
             `净收益率: ${returnPct.toFixed(2)}%`,
             `净盈亏: ${formatSignedNumber(Number(data.pnl) || 0, 2)}`,
             `样本: ${data.count} 笔 · 胜率 ${formatPercentValue(Number(data.winRate) || 0, 1)}`,
@@ -4745,34 +4804,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           color: ['#7f1d1d', '#fca5a5', '#f8fafc', '#86efac', '#166534'],
         },
       },
-      series: [
-        {
-          type: 'heatmap',
-          data: heatmapData,
-          label: {
-            show: true,
-            fontSize: 10,
-            color: '#0f172a',
-            formatter: (params: { data?: unknown }) => {
-              const data = params?.data as { count?: number; value?: unknown[] } | undefined;
-              if (!data || !data.count || !Array.isArray(data.value)) {
-                return '';
-              }
-              return `${Number(data.value[2]).toFixed(1)}%`;
-            },
-          },
-          itemStyle: {
-            borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.66)',
-          },
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowColor: 'rgba(15, 23, 42, 0.18)',
-            },
-          },
-        },
-      ],
+      series: [heatmapSeries] as EChartsOption['series'],
       graphic: hasData
         ? undefined
         : [
@@ -5137,10 +5169,10 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             ref={mainLayoutRef}
             style={
               {
-                '--wb-left-width': `${leftPanelWidth}%`,
-                '--wb-right-left-width': `${rightLeftPanelWidth}%`,
-                '--wb-left-kline-height': `${leftKlineHeight}%`,
-                '--wb-right-panel-height': rightPanelHeightCustomized ? `${rightPanelHeight}%` : undefined,
+                '--wb-left-width': `${leftPanelWidthRef.current}%`,
+                '--wb-right-left-width': `${rightLeftPanelWidthRef.current}%`,
+                '--wb-left-kline-height': `${leftKlineHeightRef.current}%`,
+                '--wb-right-panel-height': rightPanelHeightCustomized ? `${rightPanelHeightRef.current}%` : undefined,
                 '--wb-right-panel-auto-max-height': '66.666vh',
               } as React.CSSProperties
             }
@@ -5195,6 +5227,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               <ResizeHandleVertical
                 className="strategy-workbench-resize-handle strategy-workbench-resize-handle--vertical strategy-workbench-resize-handle--left"
                 onResize={handleLeftVerticalResize}
+                onResizeEnd={commitLeftVerticalResize}
               />
 
               <div className="strategy-workbench-card strategy-workbench-card--dashboard">
@@ -5404,7 +5437,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                       ref={livePreviewRef}
                       style={
                         {
-                          '--wb-live-list-width': `${liveListPanelWidth}%`,
+                          '--wb-live-list-width': `${liveListPanelWidthRef.current}%`,
                         } as React.CSSProperties
                       }
                     >
@@ -6021,6 +6054,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                           <ResizeHandle
                             className="strategy-workbench-resize-handle strategy-workbench-resize-handle--live-preview"
                             onResize={handleLivePreviewResize}
+                            onResizeEnd={commitLivePreviewResize}
                           />
                           {liveListPanel}
                         </>
@@ -6040,6 +6074,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             <ResizeHandle
               className="strategy-workbench-resize-handle strategy-workbench-resize-handle--main"
               onResize={handleMainResize}
+              onResizeEnd={commitMainResize}
             />
 
             <div className="strategy-workbench-right" ref={rightPanelRef}>
@@ -6183,6 +6218,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 <ResizeHandleVertical
                   className="strategy-workbench-resize-handle strategy-workbench-resize-handle--vertical strategy-workbench-resize-handle--right-left"
                   onResize={handleRightLeftVerticalResize}
+                  onResizeEnd={commitRightLeftVerticalResize}
                 />
 
                 <div className="strategy-workbench-card strategy-workbench-card--operator">
@@ -6232,6 +6268,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               <ResizeHandle
                 className="strategy-workbench-resize-handle strategy-workbench-resize-handle--right"
                 onResize={handleRightResize}
+                onResizeEnd={commitRightResize}
               />
 
               <div className="strategy-workbench-right-right">
@@ -6273,22 +6310,16 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         {ready && floatingOverlay}
       </div>
 
-      {activeDrag && dragCursor ? (
-        <div
-          className="strategy-workbench-pointer-ghost"
-          style={{
-            left: `${dragCursor.x}px`,
-            top: `${dragCursor.y}px`,
-          }}
-        >
+      <DragOverlay dropAnimation={null}>
+        {activeDrag ? (
           <div
             className={`${activeDrag.previewClassName || ''} strategy-workbench-pointer-ghost-item`}
             style={activeDrag.previewStyle}
           >
             {activeDrag.previewText || activeDrag.label}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </DragOverlay>
     </DndContext>,
     document.body,
   );

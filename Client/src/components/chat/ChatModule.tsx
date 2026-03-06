@@ -6,6 +6,7 @@ import {
   openStrategySaveDialogFromAi,
   openStrategyWorkbenchFromAi,
 } from '../strategy/strategyAiBridge';
+import { normalizeStrategyConfig } from '../strategy/strategyConfigNormalizer';
 
 type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -273,9 +274,7 @@ const ChatModule: React.FC = () => {
       );
 
       const replyText = response?.reply?.trim() || '已生成结果。';
-      const strategyConfig = isPlainObject(response?.strategyConfig)
-        ? (response.strategyConfig as StrategyConfig)
-        : undefined;
+      const strategyConfig = normalizeStrategyConfig(response?.strategyConfig);
       const strategyJson = strategyConfig ? JSON.stringify(strategyConfig, null, 2) : undefined;
       const suggestedQuestions = parseSuggestedQuestions(response?.suggestedQuestions);
 
@@ -564,16 +563,7 @@ function mapFromLabel(role: MessageRole): string {
 }
 
 function parseStrategyConfig(raw?: string | null): StrategyConfig | undefined {
-  if (!raw || !raw.trim()) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return isPlainObject(parsed) ? (parsed as StrategyConfig) : undefined;
-  } catch {
-    return undefined;
-  }
+  return normalizeStrategyConfig(raw);
 }
 
 function parseSuggestedQuestions(raw?: string[] | string | null): string[] | undefined {
@@ -684,10 +674,6 @@ function formatConversationTime(isoTime?: string): string {
 
 function createMessageId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export default ChatModule;

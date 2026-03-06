@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HttpClient, HttpError, getToken } from '../../network/index.ts';
 import type { StrategyConfig } from './StrategyModule.types';
 import type { AiStrategySource } from './strategyAiBridge';
+import { normalizeStrategyConfig } from './strategyConfigNormalizer';
 
 type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -780,23 +781,7 @@ function mapRoleLabel(role: MessageRole): string {
 }
 
 function parseStrategyConfig(raw?: Record<string, unknown> | string | null): StrategyConfig | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  if (typeof raw === 'string') {
-    if (!raw.trim()) {
-      return undefined;
-    }
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      return isPlainObject(parsed) ? (parsed as unknown as StrategyConfig) : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  return isPlainObject(raw) ? (raw as unknown as StrategyConfig) : undefined;
+  return normalizeStrategyConfig(raw);
 }
 
 function mapDisplayText(text: string): string {
@@ -866,10 +851,6 @@ function formatConversationTime(isoTime?: string): string {
 
 function createMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export default StrategyAiFloatingChat;

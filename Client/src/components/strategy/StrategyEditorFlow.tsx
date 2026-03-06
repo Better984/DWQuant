@@ -44,6 +44,8 @@ import {
   buildConditionFingerprint,
   validateConditionArgsSemantics,
 } from './strategyConditionGuard';
+import { normalizeStrategyConfig } from './strategyConfigNormalizer';
+import { formatStrategyValueLabel } from './strategyValueLabel';
 
 export type StrategyEditorSubmitPayload = {
   name: string;
@@ -769,6 +771,12 @@ const calcRangeDurationMinutes = (start: string, end: string) => {
     return endMinutes - startMinutes;
   }
   return 24 * 60 - startMinutes + endMinutes;
+};
+
+const hasAnyImportableCondition = (containers: ConditionContainer[]) => {
+  return containers.some((container) =>
+    container.groups.some((group) => group.conditions.length > 0),
+  );
 };
 
 const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
@@ -1897,15 +1905,19 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     return map;
   }, [selectedIndicators, tradeDefaultTimeframe]);
 
-  // 当指标加载后，更新条件容器中的 ID 映射
+  // 当指标加载后，将历史/导入配置里的引用键映射为当前前端值 ID。
+  // 这里不能依赖 initialConfig，否则新建策略场景下导入 AI 条件后会残留原始引用串。
   useEffect(() => {
-    if (selectedIndicators.length === 0 || !initialConfig) {
+    if (selectedIndicators.length === 0 || indicatorRefToValueIdMap.size === 0) {
       return;
     }
 
     setConditionContainers((prevContainers) => {
-      return prevContainers.map((container) => {
+      let hasChanged = false;
+      const nextContainers = prevContainers.map((container) => {
+        let containerChanged = false;
         const updatedGroups = container.groups.map((group) => {
+          let groupChanged = false;
           const updatedConditions = group.conditions.map((condition) => {
             let updatedLeftValueId = condition.leftValueId;
             let updatedRightValueId = condition.rightValueId;
@@ -1926,6 +1938,16 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
               updatedExtraValueId = indicatorRefToValueIdMap.get(condition.extraValueId) || condition.extraValueId;
             }
 
+            if (
+              updatedLeftValueId === condition.leftValueId
+              && updatedRightValueId === condition.rightValueId
+              && updatedExtraValueId === condition.extraValueId
+            ) {
+              return condition;
+            }
+
+            hasChanged = true;
+            groupChanged = true;
             return {
               ...condition,
               leftValueId: updatedLeftValueId,
@@ -1934,19 +1956,30 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
             };
           });
 
+          if (!groupChanged) {
+            return group;
+          }
+
+          containerChanged = true;
           return {
             ...group,
             conditions: updatedConditions,
           };
         });
 
+        if (!containerChanged) {
+          return container;
+        }
+
         return {
           ...container,
           groups: updatedGroups,
         };
       });
+
+      return hasChanged ? nextContainers : prevContainers;
     });
-  }, [selectedIndicators, indicatorRefToValueIdMap, initialConfig]);
+  }, [selectedIndicators, indicatorRefToValueIdMap]);
 
   const indicatorOutputGroups = useMemo<IndicatorOutputGroup[]>(() => {
     const fieldOptions: ValueOption[] = KLINE_FIELD_DEFINITIONS.map((field) => {
@@ -2115,10 +2148,10 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     if (!draft) {
       return '请先配置字段与操作符';
     }
-    const leftLabel =
-      indicatorValueMap.get(draft.leftValueId)?.fullLabel ||
-      indicatorValueMap.get(draft.leftValueId)?.label ||
-      '未选择字段';
+    const leftOption = indicatorValueMap.get(draft.leftValueId);
+    const leftLabel = draft.leftValueId
+      ? formatStrategyValueLabel(draft.leftValueId, leftOption?.fullLabel || leftOption?.label)
+      : '未选择字段';
     const methodMeta = resolveMethodMeta(draft.method);
     const methodValue = methodMeta.value || draft.method;
     const methodLabel =
@@ -2126,18 +2159,16 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
       || draft.method;
     const argsCount = methodMeta.argsCount ?? 2;
 
+    const rightOption = indicatorValueMap.get(draft.rightValueId || '');
     const rightLabel =
       draft.rightValueType === 'number'
         ? draft.rightNumber || '未填写数值'
-        : indicatorValueMap.get(draft.rightValueId || '')?.fullLabel ||
-          indicatorValueMap.get(draft.rightValueId || '')?.label ||
-          '未选择字段';
+        : formatStrategyValueLabel(draft.rightValueId, rightOption?.fullLabel || rightOption?.label);
+    const extraOption = indicatorValueMap.get(draft.extraValueId || '');
     const extraLabel =
       draft.extraValueType === 'number'
         ? draft.extraNumber || '未填写数值'
-        : indicatorValueMap.get(draft.extraValueId || '')?.fullLabel ||
-          indicatorValueMap.get(draft.extraValueId || '')?.label ||
-          '未选择字段';
+        : formatStrategyValueLabel(draft.extraValueId, extraOption?.fullLabel || extraOption?.label);
 
     const paramDefs = methodMeta.params || [];
     const paramValues = draft.paramValues || [];
@@ -3299,7 +3330,12 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   ]);
 
   const importAiRiskConfig = (source: AiStrategySource) => {
-    const nextRisk = mergeTradeConfig(source.strategyConfig.trade).risk;
+    const normalizedConfig = normalizeStrategyConfig(source.strategyConfig);
+    if (!normalizedConfig?.trade) {
+      error('AI 策略配置中的交易参数无法识别，已保留当前风控配置');
+      return;
+    }
+    const nextRisk = mergeTradeConfig(normalizedConfig.trade).risk;
     setTradeConfig((prev) => ({
       ...prev,
       risk: deepCloneJson(nextRisk),
@@ -3308,11 +3344,20 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   };
 
   const importAiLogicConfig = (source: AiStrategySource) => {
+    const normalizedConfig = normalizeStrategyConfig(source.strategyConfig);
+    if (!normalizedConfig?.logic) {
+      error('AI 策略配置中的条件判断无法识别，已保留当前条件配置');
+      return;
+    }
     const importedTimeframe = timeframeLabelFromSeconds(
-      source.strategyConfig.trade?.timeframeSec || tradeConfig.timeframeSec || 60,
+      normalizedConfig.trade?.timeframeSec || tradeConfig.timeframeSec || 60,
     );
-    const nextIndicators = extractIndicatorsFromConfig(source.strategyConfig, importedTimeframe);
-    const nextContainers = parseConditionContainersFromConfig(source.strategyConfig, importedTimeframe);
+    const nextIndicators = extractIndicatorsFromConfig(normalizedConfig, importedTimeframe);
+    const nextContainers = parseConditionContainersFromConfig(normalizedConfig, importedTimeframe);
+    if (!hasAnyImportableCondition(nextContainers)) {
+      error('AI 策略中没有可导入的条件判断，已保留当前条件配置');
+      return;
+    }
     markHistoryAction('导入 AI 条件判断');
     setSelectedIndicators(nextIndicators);
     setConditionContainers(nextContainers);
