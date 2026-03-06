@@ -46,6 +46,11 @@ namespace ServerTest.Options
                 failures.Add("DiscoverCalendar.InitBackfillMaxPages 必须大于 0");
             }
 
+            if (options.FutureWindowDays < 0 || options.FutureWindowDays > 30)
+            {
+                failures.Add("DiscoverCalendar.FutureWindowDays 必须在 0-30 之间");
+            }
+
             if (string.IsNullOrWhiteSpace(options.Language))
             {
                 failures.Add("DiscoverCalendar.Language 不能为空");

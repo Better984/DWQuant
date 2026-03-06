@@ -92,7 +92,8 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             string path,
             IReadOnlyDictionary<string, string?>? query,
             CancellationToken ct,
-            string? module = null)
+            string? module = null,
+            bool quietFailure = false)
         {
             EnsureReady();
             WarnIfUsingPiratedSource();
@@ -112,12 +113,24 @@ namespace ServerTest.Modules.Indicators.Infrastructure
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning(
-                    "{Tag} 请求失败: status={Status}, path={Path}, response={Response}",
-                    logTag,
-                    (int)response.StatusCode,
-                    requestPath,
-                    Truncate(payload, 500));
+                if (quietFailure)
+                {
+                    _logger.LogDebug(
+                        "{Tag} 请求失败: status={Status}, path={Path}, response={Response}",
+                        logTag,
+                        (int)response.StatusCode,
+                        requestPath,
+                        Truncate(payload, 500));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "{Tag} 请求失败: status={Status}, path={Path}, response={Response}",
+                        logTag,
+                        (int)response.StatusCode,
+                        requestPath,
+                        Truncate(payload, 500));
+                }
 
                 throw new HttpRequestException(
                     $"CoinGlass 请求失败，状态码={(int)response.StatusCode}",
