@@ -52,6 +52,19 @@ namespace ServerTest.Options
         public int InitBackfillMaxPages { get; set; } = 20;
 
         /// <summary>
+        /// 是否启用未来窗口探测补齐。
+        /// 为兼容上游默认仅返回当天数据的情况，开启后会在首页请求中附带 start_time/end_time，
+        /// 一次性拉取“当天 + 未来 N 天”的日历。
+        /// </summary>
+        public bool FutureWindowProbeEnabled { get; set; } = true;
+
+        /// <summary>
+        /// 未来窗口探测天数。
+        /// 例如为 7 时，表示从当天 00:00 拉取到未来第 7 天 23:59:59.999。
+        /// </summary>
+        public int FutureWindowDays { get; set; } = 7;
+
+        /// <summary>
         /// 央行活动接口路径（基于 CoinGlass BaseUrl）。
         /// </summary>
         public string CentralBankActivitiesPath { get; set; } = "/v4/api/calendar/central-bank-activities";

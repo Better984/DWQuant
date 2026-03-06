@@ -11,7 +11,7 @@
 - 两个模块各自独立自增 ID（数据库独立表），互不共用。
 - 当前数据源为开发联调用第三方聚合商（非官方源）；正式上线前需切换官方数据源。
 - 服务端对上游使用 `language/page/per_page` 参数拉取，新闻默认中文（`zh`）。
-- 日历服务端同样使用 `language/page/per_page` 参数拉取，默认中文（`zh`）。
+- 日历服务端同样使用 `language/page/per_page` 参数拉取，默认中文（`zh`）；后台刷新时会在同一条上游请求中附带 `start_time/end_time`，直接拉取“当天 + 未来 N 天”的区间数据并入库。
 
 ## discover.article.pull
 - 路径：`POST /api/discover/article/pull`
@@ -69,8 +69,13 @@
   - 返回发布时间落在区间内的数据。
   - 排序：按发布时间降序（新 -> 旧）。
 
+## 服务端补齐策略
+- Discover Calendar 后台刷新会在单次上游请求中附带 `start_time/end_time`，默认拉取当天 00:00 到未来 7 天 23:59:59.999 的区间数据。
+- 返回数据按去重键统一入库与刷新内存缓存，避免为了补齐未来事件重复请求上游。
+- 初始化补历史数据时，仍可继续按分页请求更早记录；常规刷新不再为未来窗口打多次探测请求。
+
 ## 响应 data
-- `mode` string：`latest` / `incremental` / `history`
+- `mode` string：`latest` / `incremental` / `history` / `range`
 - `latestServerId` number：当前服务端此模块最大 ID
 - `hasMore` bool：当前分页方向是否还有更多数据
 - `total` int：本次返回条数

@@ -23,6 +23,12 @@ namespace ServerTest.Modules.Discover.Application
     {
         private static readonly Regex MultiWhitespaceRegex = new("\\s+", RegexOptions.Compiled);
         private const int InitWarmupMinItemsFloor = 20;
+        private const int MaxFutureWindowDays = 30;
+
+        private readonly record struct FutureWindowQuery(
+            long StartTimeMs,
+            long EndTimeMs,
+            string TimeZoneName);
 
         private readonly DiscoverCalendarRepository _repository;
         private readonly DiscoverCalendarMemoryCache _memoryCache;
@@ -503,19 +509,37 @@ namespace ServerTest.Modules.Discover.Application
                 return Array.Empty<DiscoverCalendarItem>();
             }
 
+            var futureWindow = TryBuildFutureWindow(page);
             var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["language"] = string.IsNullOrWhiteSpace(language) ? "zh" : language.Trim().ToLowerInvariant(),
                 ["page"] = Math.Max(1, page).ToString(CultureInfo.InvariantCulture),
                 ["per_page"] = Math.Max(1, Math.Min(1000, perPage)).ToString(CultureInfo.InvariantCulture)
             };
+            if (futureWindow.HasValue)
+            {
+                query["start_time"] = futureWindow.Value.StartTimeMs.ToString(CultureInfo.InvariantCulture);
+                query["end_time"] = futureWindow.Value.EndTimeMs.ToString(CultureInfo.InvariantCulture);
+            }
 
             using var document = await _coinGlassClient
-                .GetJsonAsync(path, query, ct, "Discover-日历")
+                .GetJsonAsync(path, query, ct, futureWindow.HasValue ? "Discover-日历-区间刷新" : "Discover-日历")
                 .ConfigureAwait(false);
 
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var items = ParseProviderItems(kind, document.RootElement, now);
+            if (futureWindow.HasValue)
+            {
+                _logger.LogInformation(
+                    "[coinglass][Discover-日历] 区间拉取成功: kind={Kind}, start={StartTimeMs}, end={EndTimeMs}, timezone={TimeZone}, 解析条数={Count}",
+                    kind,
+                    futureWindow.Value.StartTimeMs,
+                    futureWindow.Value.EndTimeMs,
+                    futureWindow.Value.TimeZoneName,
+                    items.Count);
+                return items;
+            }
+
             _logger.LogInformation("[coinglass][Discover-日历] 拉取成功: kind={Kind}, 解析条数={Count}", kind, items.Count);
             return items;
         }
@@ -662,6 +686,40 @@ namespace ServerTest.Modules.Discover.Application
             }
 
             return null;
+        }
+
+        private FutureWindowQuery? TryBuildFutureWindow(int page)
+        {
+            if (page != 1)
+            {
+                return null;
+            }
+
+            var options = _calendarOptionsMonitor.CurrentValue;
+            if (!options.FutureWindowProbeEnabled)
+            {
+                return null;
+            }
+
+            var futureWindowDays = Math.Min(MaxFutureWindowDays, Math.Max(0, options.FutureWindowDays));
+            if (futureWindowDays <= 0)
+            {
+                return null;
+            }
+
+            return BuildFutureWindow(futureWindowDays);
+        }
+
+        private static FutureWindowQuery BuildFutureWindow(int futureWindowDays)
+        {
+            var timeZone = TimeZoneInfo.Local;
+            var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone);
+            var start = new DateTimeOffset(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, localNow.Offset);
+            var end = start.AddDays(futureWindowDays + 1).AddMilliseconds(-1);
+            return new FutureWindowQuery(
+                start.ToUnixTimeMilliseconds(),
+                end.ToUnixTimeMilliseconds(),
+                timeZone.Id);
         }
 
         private static string? ReadStringFromFields(JsonElement element, params string[] fields)
