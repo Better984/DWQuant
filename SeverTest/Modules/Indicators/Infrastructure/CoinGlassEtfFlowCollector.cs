@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace ServerTest.Modules.Indicators.Infrastructure
 {
     /// <summary>
-    /// CoinGlass 比特币现货 ETF 净流入采集器。
+    /// CoinGlass 现货 ETF 净流入采集器（支持 BTC/ETH/SOL/XRP）。
     /// </summary>
     public sealed class CoinGlassEtfFlowCollector : IIndicatorCollector
     {
@@ -42,10 +42,11 @@ namespace ServerTest.Modules.Indicators.Infrastructure
         public async Task<IndicatorCollectResult> CollectAsync(IndicatorDefinition definition, string scopeKey, CancellationToken ct)
         {
             var limit = _coinGlassOptions.EtfFlowSeriesLimit;
-            _logger.LogInformation("[coinglass][ETF净流入] 开始拉取 ETF 净流入指标: limit={Limit}, scopeKey={ScopeKey}", limit, scopeKey);
+            var asset = ResolveAsset(scopeKey);
+            _logger.LogInformation("[coinglass][ETF净流入] 开始拉取 ETF 净流入指标: asset={Asset}, limit={Limit}, scopeKey={ScopeKey}", asset, limit, scopeKey);
 
             using var response = await _coinGlassClient
-                .GetEtfFlowHistoryAsync(limit, ct)
+                .GetEtfFlowHistoryAsync(asset, limit, ct)
                 .ConfigureAwait(false);
 
             var points = ExtractPoints(response.RootElement);
@@ -72,6 +73,7 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             var latest = series[^1];
             var latestPayload = new
             {
+                asset,
                 value = latest.Point.NetFlowUsd,
                 netFlowUsd = latest.Point.NetFlowUsd,
                 priceUsd = latest.Point.PriceUsd,
@@ -84,6 +86,7 @@ namespace ServerTest.Modules.Indicators.Infrastructure
                 }).ToList(),
                 series = series.Select(item => new
                 {
+                    asset,
                     ts = item.Point.Timestamp,
                     value = item.Point.NetFlowUsd,
                     netFlowUsd = item.Point.NetFlowUsd,
@@ -103,6 +106,7 @@ namespace ServerTest.Modules.Indicators.Infrastructure
                     SourceTs = item.Point.Timestamp,
                     PayloadJson = ProtocolJson.Serialize(new
                     {
+                        asset,
                         value = item.Point.NetFlowUsd,
                         netFlowUsd = item.Point.NetFlowUsd,
                         priceUsd = item.Point.PriceUsd,
@@ -117,7 +121,8 @@ namespace ServerTest.Modules.Indicators.Infrastructure
                 .ToList();
 
             _logger.LogInformation(
-                "[coinglass][ETF净流入] ETF 净流入采集完成: count={Count}, latestFlowUsd={LatestFlowUsd}, latestTs={LatestTs}",
+                "[coinglass][ETF净流入] ETF 净流入采集完成: asset={Asset}, count={Count}, latestFlowUsd={LatestFlowUsd}, latestTs={LatestTs}",
+                asset,
                 series.Count,
                 latest.Point.NetFlowUsd,
                 latest.Point.Timestamp);
@@ -127,6 +132,43 @@ namespace ServerTest.Modules.Indicators.Infrastructure
                 SourceTs = latest.Point.Timestamp,
                 PayloadJson = ProtocolJson.Serialize(latestPayload),
                 History = history
+            };
+        }
+
+        private static string ResolveAsset(string scopeKey)
+        {
+            if (string.IsNullOrWhiteSpace(scopeKey) ||
+                string.Equals(scopeKey, "global", StringComparison.OrdinalIgnoreCase))
+            {
+                return "BTC";
+            }
+
+            var segments = scopeKey.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var segment in segments)
+            {
+                var kv = segment.Split('=', 2, StringSplitOptions.TrimEntries);
+                if (kv.Length != 2 ||
+                    !string.Equals(kv[0], "asset", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                return NormalizeAsset(kv[1]);
+            }
+
+            return "BTC";
+        }
+
+        private static string NormalizeAsset(string asset)
+        {
+            return (asset ?? string.Empty).Trim().ToUpperInvariant() switch
+            {
+                "" => "BTC",
+                "BTC" or "BITCOIN" => "BTC",
+                "ETH" or "ETHEREUM" => "ETH",
+                "SOL" or "SOLANA" => "SOL",
+                "XRP" => "XRP",
+                var unsupported => throw new InvalidOperationException($"暂不支持的 ETF 资产: {unsupported}")
             };
         }
 

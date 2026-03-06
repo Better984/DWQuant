@@ -14,5 +14,10 @@ namespace ServerTest.Modules.TradingExecution.Domain
         /// 因最大持仓限制被阻断。
         /// </summary>
         public const string BlockedByMaxPosition = "blocked_max_position";
+
+        /// <summary>
+        /// 因平台风控或交易规则被阻断。
+        /// </summary>
+        public const string BlockedByPlatformRule = "blocked_platform_rule";
     }
 }

@@ -93,9 +93,21 @@ const HOME_INDICATOR_PREVIEWS: IndicatorPreview[] = [
   },
   {
     id: 'etf-flow',
-    name: '比特币现货 ETF 净流入',
+    name: '现货 ETF 净流入（BTC / ETH / SOL / XRP）',
     category: '资金流向',
-    sample: '样例：+1.20 亿 USD / 日',
+    sample: '样例：支持 BTC / ETH / SOL / XRP 一键切换',
+  },
+  {
+    id: 'grayscale-holdings',
+    name: '灰度持仓',
+    category: '机构持仓',
+    sample: '样例：持仓市值、溢价率与近 1 / 7 / 30 天持仓变化',
+  },
+  {
+    id: 'coin-unlock',
+    name: '代币解锁',
+    category: '代币供给',
+    sample: '样例：解锁列表、锁仓分配与未来解锁计划',
   },
   {
     id: 'liquidation-heatmap',
@@ -104,16 +116,16 @@ const HOME_INDICATOR_PREVIEWS: IndicatorPreview[] = [
     sample: '样例：热力图 + K线叠加 + 100桶痛点与订单簿统计',
   },
   {
-    id: 'exchange-flow',
-    name: '交易所资金净流入 / 流出',
-    category: '资金流向',
-    sample: '样例：-8,500 BTC / 24h',
+    id: 'futures-footprint',
+    name: '合约足迹图（BTC / ETH · 15m）',
+    category: '合约杠杆',
+    sample: '样例：最近 15m 净主动买卖额 + 最新一根价格桶分布',
   },
   {
     id: 'long-short',
-    name: '多空持仓比 (Long / Short Ratio)',
+    name: '大户账户数多空比（BTC / ETH · 15m）',
     category: '合约杠杆',
-    sample: '样例：1.35',
+    sample: '样例：支持 BTC / ETH 切换，展示 Binance 15m 多空比',
   },
   {
     id: 'funding-rate',

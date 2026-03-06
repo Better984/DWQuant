@@ -139,6 +139,71 @@
   color: var(--text-secondary, #64748b);
 }
 
+.indicator-module-asset-switcher {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.indicator-module-asset-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 10px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-primary, #0f172a);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.indicator-module-asset-button:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+  transform: translateY(-1px);
+}
+
+.indicator-module-asset-button--active {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.16), rgba(6, 182, 212, 0.12));
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.12);
+}
+
+.indicator-module-asset-button-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+}
+
+.indicator-module-asset-button-subtitle {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.dark-theme .indicator-module-asset-button {
+  border-color: rgba(96, 165, 250, 0.22);
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+}
+
+.dark-theme .indicator-module-asset-button:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+}
+
+.dark-theme .indicator-module-asset-button--active {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.52), rgba(8, 145, 178, 0.28));
+  box-shadow: 0 12px 24px rgba(2, 8, 23, 0.32);
+}
+
+.dark-theme .indicator-module-asset-button-subtitle {
+  color: rgba(226, 232, 240, 0.75);
+}
+
 .indicator-module-chart-wrap {
   margin-top: auto;
   width: 100%;
@@ -154,9 +219,587 @@
   height: 420px;
 }
 
+.indicator-module-chart-wrap--footprint {
+  height: 440px;
+}
+
+.indicator-module-chart-wrap--grayscale {
+  height: 420px;
+  padding: 12px;
+}
+
+.indicator-module-chart-wrap--coin-unlock {
+  height: 480px;
+  padding: 12px;
+}
+
+.indicator-module-chart-wrap--exchange-assets {
+  height: 420px;
+  padding: 12px;
+}
+
+.indicator-module-chart-wrap--hyperliquid {
+  height: 460px;
+  padding: 12px;
+}
+
 .indicator-module-chart {
   width: 100%;
   height: 100%;
+}
+
+.indicator-module-grayscale-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.indicator-module-grayscale-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.indicator-module-grayscale-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.indicator-module-grayscale-summary-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-grayscale-summary-value {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-grayscale-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.indicator-module-grayscale-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, rgba(15, 23, 42, 0.08));
+  background: color-mix(in srgb, var(--bg-secondary, #f8fafc) 76%, white 24%);
+}
+
+.indicator-module-grayscale-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.indicator-module-grayscale-row-head {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.indicator-module-grayscale-symbol {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-grayscale-holdings {
+  min-width: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-grayscale-premium {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.indicator-module-grayscale-premium.is-positive {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.indicator-module-grayscale-premium.is-negative {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.indicator-module-grayscale-premium.is-neutral {
+  color: #475569;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.indicator-module-grayscale-bar {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.indicator-module-grayscale-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb 0%, #06b6d4 100%);
+}
+
+.indicator-module-grayscale-row-meta,
+.indicator-module-grayscale-row-changes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-coin-unlock-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.indicator-module-coin-unlock-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.indicator-module-coin-unlock-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(16, 185, 129, 0.08));
+}
+
+.indicator-module-coin-unlock-summary-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-coin-unlock-summary-value {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-body {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.85fr) minmax(0, 1.15fr);
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
+.indicator-module-coin-unlock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.indicator-module-coin-unlock-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(14, 165, 233, 0.12);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary, #f8fafc) 82%, white 18%);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.indicator-module-coin-unlock-row:hover {
+  border-color: rgba(14, 165, 233, 0.28);
+  transform: translateY(-1px);
+}
+
+.indicator-module-coin-unlock-row--active {
+  border-color: rgba(2, 132, 199, 0.42);
+  box-shadow: 0 10px 24px rgba(14, 165, 233, 0.1);
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(16, 185, 129, 0.06));
+}
+
+.indicator-module-coin-unlock-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.indicator-module-coin-unlock-row-symbol {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.indicator-module-coin-unlock-row-symbol strong {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-row-symbol span {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-coin-unlock-row-change {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.indicator-module-coin-unlock-row-change.is-positive,
+.indicator-module-coin-unlock-stat-item .is-positive {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.indicator-module-coin-unlock-row-change.is-negative,
+.indicator-module-coin-unlock-stat-item .is-negative {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.indicator-module-coin-unlock-row-change.is-neutral,
+.indicator-module-coin-unlock-stat-item .is-neutral {
+  color: #475569;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.indicator-module-coin-unlock-row-bar,
+.indicator-module-coin-unlock-progress-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.indicator-module-coin-unlock-row-bar-fill,
+.indicator-module-coin-unlock-progress-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9 0%, #10b981 100%);
+}
+
+.indicator-module-coin-unlock-row-meta,
+.indicator-module-coin-unlock-progress-meta,
+.indicator-module-coin-unlock-section-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-coin-unlock-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(14, 165, 233, 0.12);
+  background: color-mix(in srgb, var(--bg-secondary, #f8fafc) 80%, white 20%);
+}
+
+.indicator-module-coin-unlock-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.indicator-module-coin-unlock-detail-symbol {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-detail-name {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-coin-unlock-detail-next {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.indicator-module-coin-unlock-detail-next span,
+.indicator-module-coin-unlock-detail-next em {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+  font-style: normal;
+}
+
+.indicator-module-coin-unlock-detail-next strong {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.indicator-module-coin-unlock-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(2, 132, 199, 0.06);
+}
+
+.indicator-module-coin-unlock-stat-item span {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-coin-unlock-stat-item strong {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.indicator-module-coin-unlock-detail-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+}
+
+.indicator-module-coin-unlock-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.indicator-module-coin-unlock-section-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.indicator-module-coin-unlock-section-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.indicator-module-coin-unlock-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.indicator-module-coin-unlock-section-head strong {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-coin-unlock-section-head span {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-exchange-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.indicator-module-exchange-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.indicator-module-exchange-tab {
+  padding: 10px 12px;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary, #f8fafc) 78%, white 22%);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.indicator-module-exchange-tab:hover {
+  border-color: rgba(59, 130, 246, 0.32);
+  color: var(--text-primary, #0f172a);
+  transform: translateY(-1px);
+}
+
+.indicator-module-exchange-tab--active {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(14, 165, 233, 0.08));
+  color: var(--text-primary, #0f172a);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.08);
+}
+
+.indicator-module-exchange-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.indicator-module-exchange-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.indicator-module-exchange-summary-label {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary, #64748b);
+}
+
+.indicator-module-exchange-summary-value {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary, #0f172a);
+}
+
+.indicator-module-exchange-chart {
+  min-height: 0;
+  flex: 1;
+}
+
+.dark-theme .indicator-module-exchange-tab {
+  border-color: rgba(96, 165, 250, 0.2);
+  background: rgba(15, 23, 42, 0.72);
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.dark-theme .indicator-module-exchange-tab:hover {
+  border-color: rgba(96, 165, 250, 0.42);
+  color: #f8fafc;
+}
+
+.dark-theme .indicator-module-exchange-tab--active {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.52), rgba(8, 145, 178, 0.28));
+  color: #f8fafc;
+  box-shadow: 0 12px 24px rgba(2, 8, 23, 0.32);
+}
+
+.dark-theme .indicator-module-exchange-summary-item {
+  background: rgba(14, 165, 233, 0.14);
+}
+
+.dark-theme .indicator-module-exchange-summary-label {
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.dark-theme .indicator-module-exchange-summary-value {
+  color: #f8fafc;
 }
 
 @media (max-width: 900px) {
@@ -166,6 +809,26 @@
 
   .indicator-module-card {
     min-height: 420px;
+  }
+
+  .indicator-module-grayscale-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .indicator-module-coin-unlock-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .indicator-module-coin-unlock-body {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-coin-unlock-detail-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-exchange-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -185,5 +848,71 @@
 
   .indicator-module-chart-wrap--heatmap {
     height: 320px;
+  }
+
+  .indicator-module-chart-wrap--footprint {
+    height: 360px;
+  }
+
+  .indicator-module-chart-wrap--grayscale {
+    height: 360px;
+  }
+
+  .indicator-module-chart-wrap--coin-unlock {
+    height: 620px;
+  }
+
+  .indicator-module-chart-wrap--exchange-assets {
+    height: 380px;
+  }
+
+  .indicator-module-chart-wrap--hyperliquid {
+    height: 420px;
+  }
+
+  .indicator-module-asset-switcher {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .indicator-module-grayscale-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-coin-unlock-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-coin-unlock-detail-header {
+    flex-direction: column;
+  }
+
+  .indicator-module-coin-unlock-detail-next {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .indicator-module-coin-unlock-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-exchange-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-exchange-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-module-exchange-chart {
+    min-height: 220px;
+  }
+
+  .indicator-module-grayscale-row-head {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .indicator-module-grayscale-premium {
+    grid-column: 1 / -1;
+    justify-self: flex-start;
   }
 }

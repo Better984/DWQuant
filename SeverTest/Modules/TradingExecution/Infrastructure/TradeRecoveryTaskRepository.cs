@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS trade_recovery_task (
   task_type VARCHAR(32) NOT NULL COMMENT '任务类型：close_write/open_compensation',
   uid BIGINT NULL COMMENT '用户ID',
   us_id BIGINT NULL COMMENT '策略实例ID',
+  order_request_id BIGINT NULL COMMENT '关联订单请求ID',
   position_id BIGINT NOT NULL DEFAULT 0 COMMENT '仓位ID',
   exchange_api_key_id BIGINT NULL COMMENT '交易所API Key ID',
   exchange VARCHAR(32) NOT NULL DEFAULT '' COMMENT '交易所',
@@ -58,6 +59,11 @@ CREATE TABLE IF NOT EXISTS trade_recovery_task (
             await using var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
             await using var cmd = new MySqlCommand(sql, conn);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await EnsureColumnAsync(
+                    "order_request_id",
+                    "ALTER TABLE trade_recovery_task ADD COLUMN order_request_id BIGINT NULL COMMENT '关联订单请求ID' AFTER us_id;",
+                    ct)
+                .ConfigureAwait(false);
         }
 
         /// <summary>
@@ -67,10 +73,10 @@ CREATE TABLE IF NOT EXISTS trade_recovery_task (
         {
             const string sql = @"
 INSERT INTO trade_recovery_task (
-  task_type, uid, us_id, position_id, exchange_api_key_id, exchange, symbol, side, qty,
+  task_type, uid, us_id, order_request_id, position_id, exchange_api_key_id, exchange, symbol, side, qty,
   close_price, closed_at, attempt, max_attempts, status, next_retry_at, last_error)
 VALUES (
-  @taskType, @uid, @usId, @positionId, @exchangeApiKeyId, @exchange, @symbol, @side, @qty,
+  @taskType, @uid, @usId, @orderRequestId, @positionId, @exchangeApiKeyId, @exchange, @symbol, @side, @qty,
   @closePrice, @closedAt, @attempt, @maxAttempts, @status, @nextRetryAt, @lastError);
 SELECT LAST_INSERT_ID();";
 
@@ -79,6 +85,7 @@ SELECT LAST_INSERT_ID();";
             cmd.Parameters.AddWithValue("@taskType", task.TaskType);
             cmd.Parameters.AddWithValue("@uid", (object?)task.Uid ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@usId", (object?)task.UsId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@orderRequestId", (object?)task.OrderRequestId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@positionId", task.PositionId);
             cmd.Parameters.AddWithValue("@exchangeApiKeyId", (object?)task.ExchangeApiKeyId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@exchange", task.Exchange);
@@ -250,6 +257,7 @@ SELECT
   task_type,
   uid,
   us_id,
+  order_request_id,
   position_id,
   exchange_api_key_id,
   exchange,
@@ -315,6 +323,9 @@ WHERE task_id = @taskId
                 TaskType = reader.GetString("task_type"),
                 Uid = reader.IsDBNull(reader.GetOrdinal("uid")) ? null : reader.GetInt64("uid"),
                 UsId = reader.IsDBNull(reader.GetOrdinal("us_id")) ? null : reader.GetInt64("us_id"),
+                OrderRequestId = reader.IsDBNull(reader.GetOrdinal("order_request_id"))
+                    ? null
+                    : reader.GetInt64("order_request_id"),
                 PositionId = reader.GetInt64("position_id"),
                 ExchangeApiKeyId = reader.IsDBNull(reader.GetOrdinal("exchange_api_key_id"))
                     ? null
@@ -349,6 +360,25 @@ WHERE task_id = @taskId
                     : reader.GetDateTime("completed_at")
             };
         }
+
+        private async Task EnsureColumnAsync(string columnName, string alterSql, CancellationToken ct)
+        {
+            const string checkSql = @"
+SELECT COUNT(*) FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'trade_recovery_task' AND COLUMN_NAME = @columnName;";
+
+            await using var conn = await _db.GetConnectionAsync().ConfigureAwait(false);
+            await using var checkCmd = new MySqlCommand(checkSql, conn);
+            checkCmd.Parameters.AddWithValue("@columnName", columnName);
+            var exists = Convert.ToInt32(await checkCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+            if (exists > 0)
+            {
+                return;
+            }
+
+            await using var alterCmd = new MySqlCommand(alterSql, conn);
+            await alterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            _logger.LogInformation("trade_recovery_task 已补充字段: {ColumnName}", columnName);
+        }
     }
 }
-

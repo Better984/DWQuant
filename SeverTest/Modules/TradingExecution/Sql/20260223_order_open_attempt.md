@@ -1,7 +1,7 @@
 # 开仓尝试记录表
 
 ## 目的
-记录每次开仓尝试（成功/失败/上限阻断），并保存信号上下文，支持：
+记录每次开仓尝试（成功/失败/上限阻断/平台规则阻断），并保存信号上下文，支持：
 - 查询「连续真实下单失败次数」并触发自动暂停；
 - 追溯“信号命中但因最大持仓上限被阻断”的具体时间与价格。
 
@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS order_open_attempt (
 ## 字段语义
 - `attempt_type=order_result`：真实开仓下单结果（成功或下单失败），用于连续失败统计。
 - `attempt_type=blocked_max_position`：命中信号但被 `MaxPositionQty` 阻断，不计入连续失败暂停。
+- `attempt_type=blocked_platform_rule`：命中信号但被平台交易规则阻断（如数量精度/最小下单量），不计入连续失败暂停。
 - `signal_time/signal_price`：策略命中信号时的时间与参考价，便于定位“为何未开仓”。
 - `max_position_qty/current_open_qty/request_order_qty`：阻断时的上限与持仓快照。
 

@@ -29,6 +29,7 @@ namespace ServerTest.Modules.TradingExecution.Domain
         public string TaskType { get; set; } = string.Empty;
         public long? Uid { get; set; }
         public long? UsId { get; set; }
+        public long? OrderRequestId { get; set; }
         public long PositionId { get; set; }
         public long? ExchangeApiKeyId { get; set; }
         public string Exchange { get; set; } = string.Empty;
@@ -49,4 +50,3 @@ namespace ServerTest.Modules.TradingExecution.Domain
         public DateTime? CompletedAtUtc { get; set; }
     }
 }
-

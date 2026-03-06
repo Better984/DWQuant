@@ -25,36 +25,58 @@ namespace ServerTest.Modules.StrategyEngine.Application
         {
             if (context == null || method == null)
             {
-                return BuildResult(method?.Method ?? "Unknown", false, "Invalid execution context");
+                return BuildResult(method?.Method ?? "Unknown", false, "执行上下文无效");
+            }
+
+            var snapshots = triggerResults?
+                .Select(result => new ConditionEvaluationSnapshot(result.Key, result.Success, result.Message))
+                .ToList() ?? new List<ConditionEvaluationSnapshot>();
+
+            if (!StrategyTradeTargetHelper.TryCreate(
+                    context.Strategy.UidCode,
+                    context.Strategy.CreatorUserId,
+                    context.Strategy.Id,
+                    context.Strategy.VersionId,
+                    context.Strategy.Version,
+                    NormalizeStrategyState(context.Strategy.State),
+                    context.Strategy.ExchangeApiKeyId,
+                    context.StrategyConfig?.Trade,
+                    method,
+                    context.Task,
+                    snapshots,
+                    context.CurrentTime,
+                    out var target,
+                    out var error))
+            {
+                return BuildResult(method.Method ?? "Unknown", false, error);
             }
 
             var task = new StrategyActionTask
             {
-                StrategyUid = context.Strategy.UidCode,
-                Uid = context.Strategy.CreatorUserId,
-                UsId = context.Strategy.Id,
-                StrategyVersionId = context.Strategy.VersionId,
-                StrategyVersionNo = context.Strategy.Version,
-                StrategyState = NormalizeStrategyState(context.Strategy.State),
-                ExchangeApiKeyId = context.Strategy.ExchangeApiKeyId,
-                Exchange = context.StrategyConfig?.Trade?.Exchange ?? string.Empty,
-                Symbol = context.StrategyConfig?.Trade?.Symbol ?? string.Empty,
-                TimeframeSec = context.StrategyConfig?.Trade?.TimeframeSec ?? 0,
-                OrderQty = context.StrategyConfig?.Trade?.Sizing?.OrderQty ?? 0m,
-                MaxPositionQty = context.StrategyConfig?.Trade?.Sizing?.MaxPositionQty ?? 0m,
-                Leverage = context.StrategyConfig?.Trade?.Sizing?.Leverage ?? 1,
-                TakeProfitPct = context.StrategyConfig?.Trade?.Risk?.TakeProfitPct,
-                StopLossPct = context.StrategyConfig?.Trade?.Risk?.StopLossPct,
-                TrailingEnabled = context.StrategyConfig?.Trade?.Risk?.Trailing?.Enabled ?? false,
-                TrailingActivationPct = context.StrategyConfig?.Trade?.Risk?.Trailing?.ActivationProfitPct,
-                TrailingDrawdownPct = context.StrategyConfig?.Trade?.Risk?.Trailing?.CloseOnDrawdownPct,
-                Stage = method.Method ?? string.Empty,
+                StrategyUid = target.StrategyUid,
+                Uid = target.Uid,
+                UsId = target.UsId,
+                StrategyVersionId = target.StrategyVersionId,
+                StrategyVersionNo = target.StrategyVersionNo,
+                StrategyState = target.StrategyState,
+                ExchangeApiKeyId = target.ExchangeApiKeyId,
+                Exchange = target.Exchange,
+                Symbol = target.Symbol,
+                TimeframeSec = target.TimeframeSec,
+                OrderQty = target.RequestedQty,
+                MaxPositionQty = target.MaxPositionQty,
+                Leverage = target.Leverage,
+                TakeProfitPct = target.TakeProfitPct,
+                StopLossPct = target.StopLossPct,
+                TrailingEnabled = target.TrailingEnabled,
+                TrailingActivationPct = target.TrailingActivationPct,
+                TrailingDrawdownPct = target.TrailingDrawdownPct,
+                Stage = target.Stage,
                 MarketTask = context.Task,
-                Method = method.Method ?? string.Empty,
-                Param = method.Param ?? Array.Empty<string>(),
-                TriggerResults = triggerResults
-                    .Select(result => new ConditionEvaluationSnapshot(result.Key, result.Success, result.Message))
-                    .ToList()
+                Method = target.Method,
+                Param = target.Param,
+                Target = target,
+                TriggerResults = snapshots
             };
 
             // 使用 EnqueueAsync + WriteAsync，队列满时按 FullMode=Wait 等待，避免高压下丢单
@@ -62,10 +84,10 @@ namespace ServerTest.Modules.StrategyEngine.Application
             if (!enqueued)
             {
                 _logger.LogWarning("动作任务入队失败（已取消）: {Uid} 方法={Method}", context.Strategy.UidCode, method.Method);
-                return BuildResult(method.Method ?? "Unknown", false, "Action task enqueue cancelled");
+                return BuildResult(method.Method ?? "Unknown", false, "动作任务入队已取消");
             }
 
-            return BuildResult(method.Method ?? "Unknown", true, "Action task enqueued");
+            return BuildResult(method.Method ?? "Unknown", true, "动作目标已入队");
         }
 
         private static string NormalizeStrategyState(StrategyState state)

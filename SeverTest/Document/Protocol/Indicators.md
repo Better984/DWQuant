@@ -33,6 +33,15 @@
 - data：
   - `code` string（必填）
   - `scope` object?（可选，键值对）
+    - `coinglass.etf_flow` 支持 `scope.asset=BTC|ETH|SOL|XRP`
+    - 示例：`{ "asset": "ETH" }`
+    - `coinglass.futures_footprint` 支持 `scope.asset=BTC|ETH`
+    - `coinglass.top_long_short_account_ratio` 支持 `scope.asset=BTC|ETH`
+    - `coinglass.exchange_assets` 支持 `scope.exchangeName=Binance|OKX|Coinbase Pro...`
+    - `coinglass.exchange_balance_list` 支持 `scope.symbol=BTC|ETH|USDT...`
+    - `coinglass.exchange_balance_chart` 支持 `scope.symbol=BTC|ETH|USDT...`
+    - `coinglass.hyperliquid_position` 支持 `scope.symbol=BTC|ETH|SOL|HYPE...`
+    - `coinglass.hyperliquid_user_position` 支持 `scope.userAddress=0x...`
   - `allowStale` bool（可选，默认 `true`）
   - `forceRefresh` bool（可选，默认 `false`）
 - 响应 data：
@@ -49,6 +58,88 @@
   - `stale` bool（是否过期降级）
   - `origin` string（`cache` / `database` / `provider`）
   - `payload` object（统一指标负载）
+    - `coinglass.etf_flow` 额外返回 `asset` 字段，表示当前 ETF 资产代码
+    - `coinglass.futures_footprint` 额外返回：
+      - `asset` string
+      - `exchange` string
+      - `symbol` string
+      - `interval` string（当前默认 `15m`）
+      - `latestNetDeltaUsd` number
+      - `latestBuyUsd` number
+      - `latestSellUsd` number
+      - `latestTotalTradeCount` number
+      - `latestPriceLow` number
+      - `latestPriceHigh` number
+      - `latestBins[]`：`priceFrom / priceTo / buyVolume / sellVolume / buyUsd / sellUsd / deltaUsd / buyTradeCount / sellTradeCount`
+      - `series[]`：`ts / netDeltaUsd / buyUsd / sellUsd / buyVolume / sellVolume / totalTradeCount / priceLow / priceHigh`
+    - `coinglass.top_long_short_account_ratio` 额外返回：
+      - `asset` string
+      - `exchange` string
+      - `symbol` string
+      - `interval` string（当前默认 `15m`）
+      - `latestRatio` number
+      - `topAccountLongPercent` number
+      - `topAccountShortPercent` number
+      - `series[]`：`ts / value / latestRatio / topAccountLongPercent / topAccountShortPercent`
+    - `coinglass.exchange_assets` 额外返回：
+      - `exchangeName` string
+      - `sourceTs` number
+      - `totalBalanceUsd` number
+      - `items[]`：`walletAddress / symbol / assetsName / balance / balanceUsd / price`
+    - `coinglass.exchange_balance_list` 额外返回：
+      - `symbol` string
+      - `sourceTs` number
+      - `totalBalance` number
+      - `items[]`：`exchangeName / balance / change1d / changePercent1d / change7d / changePercent7d / change30d / changePercent30d`
+    - `coinglass.exchange_balance_chart` 额外返回：
+      - `symbol` string
+      - `sourceTs` number
+      - `timeList` number[]
+      - `priceList` number[]
+      - `series[]`：`exchangeName / values[] / latestBalance`
+    - `coinglass.hyperliquid_whale_alert` 额外返回：
+      - `sourceTs` number
+      - `totalPositionValueUsd` number
+      - `totalAlertCount` number
+      - `longAlertCount` number
+      - `shortAlertCount` number
+      - `items[]`：`user / symbol / positionSize / entryPrice / liqPrice / positionValueUsd / positionAction / createTime`
+    - `coinglass.hyperliquid_whale_position` 额外返回：
+      - `sourceTs` number
+      - `totalPositionValueUsd` number
+      - `totalMarginBalance` number
+      - `longCount` number
+      - `shortCount` number
+      - `items[]`：`user / symbol / positionSize / entryPrice / markPrice / liqPrice / leverage / marginBalance / positionValueUsd / unrealizedPnl / fundingFee / marginMode / createTime / updateTime`
+    - `coinglass.hyperliquid_position` 额外返回：
+      - `symbol` string
+      - `sourceTs` number
+      - `totalPages` number
+      - `currentPage` number
+      - `totalPositionValueUsd` number
+      - `longCount` number
+      - `shortCount` number
+      - `items[]`：同 `coinglass.hyperliquid_whale_position`
+    - `coinglass.hyperliquid_user_position` 额外返回：
+      - `userAddress` string
+      - `sourceTs` number
+      - `accountValue` number
+      - `withdrawable` number
+      - `totalNotionalPosition` number
+      - `totalMarginUsed` number
+      - `crossMaintenanceMarginUsed` number
+      - `marginSummary` / `crossMarginSummary`
+      - `assetPositions[]`：`type / coin / size / leverageType / leverageValue / entryPrice / positionValue / unrealizedPnl / returnOnEquity / liquidationPrice / maxLeverage / cumFundingAllTime / cumFundingSinceOpen / cumFundingSinceChange`
+    - `coinglass.hyperliquid_wallet_position_distribution` 额外返回：
+      - `sourceTs` number
+      - `totalPositionUsd` number
+      - `totalPositionAddressCount` number
+      - `items[]`：`groupName / allAddressCount / positionAddressCount / positionAddressPercent / biasScore / biasRemark / minimumAmount / maximumAmount / longPositionUsd / shortPositionUsd / longPositionUsdPercent / shortPositionUsdPercent / positionUsd / profitAddressCount / lossAddressCount / profitAddressPercent / lossAddressPercent`
+    - `coinglass.hyperliquid_wallet_pnl_distribution` 额外返回：
+      - `sourceTs` number
+      - `totalPositionUsd` number
+      - `totalPositionAddressCount` number
+      - `items[]`：字段同 `coinglass.hyperliquid_wallet_position_distribution`
 
 ## indicator.batch.latest
 - 路径：`POST /api/indicator/batch/latest`
@@ -65,6 +156,14 @@
 - data：
   - `code` string（必填）
   - `scope` object?（可选）
+    - `coinglass.etf_flow` 支持 `scope.asset=BTC|ETH|SOL|XRP`
+    - `coinglass.futures_footprint` 支持 `scope.asset=BTC|ETH`
+    - `coinglass.top_long_short_account_ratio` 支持 `scope.asset=BTC|ETH`
+    - `coinglass.exchange_assets` 支持 `scope.exchangeName`
+    - `coinglass.exchange_balance_list` 支持 `scope.symbol`
+    - `coinglass.exchange_balance_chart` 支持 `scope.symbol`
+    - `coinglass.hyperliquid_position` 支持 `scope.symbol`
+    - `coinglass.hyperliquid_user_position` 支持 `scope.userAddress`
   - `startTime` string?（可选，ISO8601 或 `yyyy-MM-dd HH:mm:ss`）
   - `endTime` string?（可选，ISO8601 或 `yyyy-MM-dd HH:mm:ss`）
   - `limit` int（可选，默认 `200`）

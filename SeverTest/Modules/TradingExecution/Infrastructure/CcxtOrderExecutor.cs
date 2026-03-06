@@ -123,12 +123,19 @@ namespace ServerTest.Modules.TradingExecution.Infrastructure
                 {
                     Success = true,
                     ExchangeOrderId = orderId,
-                    AveragePrice = avg
+                    AveragePrice = avg,
+                    ExecutedQty = request.Qty
                 };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "CCXT订单失败: exchange={Exchange} symbol={Symbol} side={Side}", exchangeType, request.Symbol, request.Side);
+                _logger.LogError(
+                    ex,
+                    "CCXT订单失败: requestId={RequestId} exchange={Exchange} symbol={Symbol} side={Side}",
+                    request.OrderRequestId,
+                    exchangeType,
+                    request.Symbol,
+                    request.Side);
                 return new OrderExecutionResult { Success = false, ErrorMessage = ex.Message };
             }
             finally

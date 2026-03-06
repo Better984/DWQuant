@@ -26,7 +26,7 @@ namespace ServerTest.Modules.TradingExecution.Application
         /// <summary>
         /// 入队平仓写库恢复任务。交易所已平仓成功，本地写库失败时调用。
         /// </summary>
-        public async Task EnqueueCloseWriteRecoveryAsync(
+        public Task EnqueueCloseWriteRecoveryAsync(
             long uid,
             long? usId,
             long positionId,
@@ -40,11 +40,43 @@ namespace ServerTest.Modules.TradingExecution.Application
             string lastError,
             CancellationToken ct = default)
         {
+            return EnqueueCloseWriteRecoveryAsync(
+                uid,
+                usId,
+                positionId,
+                exchangeApiKeyId,
+                exchange,
+                symbol,
+                side,
+                qty,
+                closePrice,
+                closedAtUtc,
+                lastError,
+                orderRequestId: null,
+                ct);
+        }
+
+        public async Task EnqueueCloseWriteRecoveryAsync(
+            long uid,
+            long? usId,
+            long positionId,
+            long? exchangeApiKeyId,
+            string exchange,
+            string symbol,
+            string side,
+            decimal qty,
+            decimal? closePrice,
+            DateTime closedAtUtc,
+            string lastError,
+            long? orderRequestId,
+            CancellationToken ct = default)
+        {
             var entity = new TradeRecoveryTaskEntity
             {
                 TaskType = TradeRecoveryTaskTypes.CloseWrite,
                 Uid = uid,
                 UsId = usId,
+                OrderRequestId = orderRequestId,
                 PositionId = positionId,
                 ExchangeApiKeyId = exchangeApiKeyId,
                 Exchange = exchange ?? string.Empty,

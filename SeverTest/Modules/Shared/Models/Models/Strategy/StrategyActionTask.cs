@@ -29,6 +29,7 @@ namespace ServerTest.Models.Strategy
         public MarketDataTask MarketTask { get; init; }
         public string Method { get; init; } = string.Empty;
         public string[] Param { get; init; } = Array.Empty<string>();
+        public StrategyTradeTarget? Target { get; init; }
         public IReadOnlyList<ConditionEvaluationSnapshot> TriggerResults { get; init; } =
             Array.Empty<ConditionEvaluationSnapshot>();
         public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;

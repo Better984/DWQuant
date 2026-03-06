@@ -10,6 +10,8 @@ using ServerTest.Models.Strategy;
 using ServerTest.Modules.Notifications.Application;
 using ServerTest.Modules.Notifications.Domain;
 using System.Text.Json;
+using ServerTest.Modules.MarketData.Application;
+using ServerTest.Modules.MarketData.Domain;
 using ServerTest.Modules.MarketStreaming.Application;
 using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.StrategyEngine.Infrastructure;
@@ -28,7 +30,9 @@ namespace ServerTest.Modules.TradingExecution.Application
         private readonly StrategyRuntimeRepository _runtimeRepository;
         private readonly StrategySystemLogRepository _systemLogRepository;
         private readonly MarketDataEngine _marketDataEngine;
+        private readonly ContractDetailsCacheService _contractDetailsCacheService;
         private readonly IOrderExecutor _orderExecutor;
+        private readonly StrategyTargetRiskService _targetRiskService;
         private readonly PositionRiskConfigStore _riskConfigStore;
         private readonly PositionRiskIndexManager _riskIndexManager;
         private readonly IServiceScopeFactory _serviceScopeFactory;
@@ -54,6 +58,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             public DateTime NotBeforeUtc { get; init; } = DateTime.UtcNow;
             public long? Uid { get; init; }
             public long? UsId { get; init; }
+            public long? OrderRequestId { get; init; }
             public long PositionId { get; init; }
             public long? ExchangeApiKeyId { get; init; }
             public string Exchange { get; init; } = string.Empty;
@@ -73,7 +78,9 @@ namespace ServerTest.Modules.TradingExecution.Application
             StrategyRuntimeRepository runtimeRepository,
             StrategySystemLogRepository systemLogRepository,
             MarketDataEngine marketDataEngine,
+            ContractDetailsCacheService contractDetailsCacheService,
             IOrderExecutor orderExecutor,
+            StrategyTargetRiskService targetRiskService,
             PositionRiskConfigStore riskConfigStore,
             PositionRiskIndexManager riskIndexManager,
             IServiceScopeFactory serviceScopeFactory,
@@ -87,7 +94,9 @@ namespace ServerTest.Modules.TradingExecution.Application
             _runtimeRepository = runtimeRepository ?? throw new ArgumentNullException(nameof(runtimeRepository));
             _systemLogRepository = systemLogRepository ?? throw new ArgumentNullException(nameof(systemLogRepository));
             _marketDataEngine = marketDataEngine ?? throw new ArgumentNullException(nameof(marketDataEngine));
+            _contractDetailsCacheService = contractDetailsCacheService ?? throw new ArgumentNullException(nameof(contractDetailsCacheService));
             _orderExecutor = orderExecutor ?? throw new ArgumentNullException(nameof(orderExecutor));
+            _targetRiskService = targetRiskService ?? throw new ArgumentNullException(nameof(targetRiskService));
             _riskConfigStore = riskConfigStore ?? throw new ArgumentNullException(nameof(riskConfigStore));
             _riskIndexManager = riskIndexManager ?? throw new ArgumentNullException(nameof(riskIndexManager));
             _serviceScopeFactory = serviceScopeFactory ?? throw new ArgumentNullException(nameof(serviceScopeFactory));
@@ -100,6 +109,10 @@ namespace ServerTest.Modules.TradingExecution.Application
         {
             await _marketDataEngine.WaitForInitializationAsync();
             await ExecuteWithRecoveryRepositoryAsync(
+                    (repository, ct) => repository.EnsureSchemaAsync(ct),
+                    stoppingToken)
+                .ConfigureAwait(false);
+            await ExecuteWithOrderLifecycleRepositoryAsync(
                     (repository, ct) => repository.EnsureSchemaAsync(ct),
                     stoppingToken)
                 .ConfigureAwait(false);
@@ -177,6 +190,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                                     MaxAttempts = persistedTask.MaxAttempts,
                                     Uid = persistedTask.Uid,
                                     UsId = persistedTask.UsId,
+                                    OrderRequestId = persistedTask.OrderRequestId,
                                     PositionId = persistedTask.PositionId,
                                     Exchange = persistedTask.Exchange,
                                     Symbol = persistedTask.Symbol,
@@ -224,15 +238,14 @@ namespace ServerTest.Modules.TradingExecution.Application
                 return;
             }
 
-            var action = task.Param != null && task.Param.Length > 0 ? task.Param[0] : string.Empty;
-            if (!TryMapAction(action, out var positionSide, out var orderSide, out var reduceOnly, out var isClose))
+            if (!StrategyTradeTargetHelper.TryResolveFromTask(task, out var target, out var error))
             {
-                _logger.LogWarning("不支持的动作: {Action} uid={Uid} usId={UsId}", action, task.Uid, task.UsId);
+                _logger.LogWarning("无法解析交易目标: uid={Uid} usId={UsId} method={Method} error={Error}", task.Uid, task.UsId, task.Method, error);
                 return;
             }
 
-            var exchange = MarketDataKeyNormalizer.NormalizeExchange(task.Exchange);
-            var symbol = MarketDataKeyNormalizer.NormalizeSymbol(task.Symbol);
+            var exchange = MarketDataKeyNormalizer.NormalizeExchange(target.Exchange);
+            var symbol = MarketDataKeyNormalizer.NormalizeSymbol(target.Symbol);
 
             if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(symbol))
             {
@@ -241,14 +254,15 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
 
             var isTestingTask = IsTestingTask(task);
+            var orderRequestId = await CreateOrderRequestAsync(target, isTestingTask, ct).ConfigureAwait(false);
 
-            if (isClose)
+            if (target.IsClose)
             {
-                await HandleCloseAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
+                await HandleCloseAsync(task, target, exchange, symbol, isTestingTask, orderRequestId, ct).ConfigureAwait(false);
                 return;
             }
 
-            await HandleOpenAsync(task, exchange, symbol, positionSide, orderSide, isTestingTask, ct).ConfigureAwait(false);
+            await HandleOpenAsync(task, target, exchange, symbol, isTestingTask, orderRequestId, ct).ConfigureAwait(false);
         }
 
         private bool ShouldProcessTask(StrategyActionTask task)
@@ -283,40 +297,79 @@ namespace ServerTest.Modules.TradingExecution.Application
         /// <param name="task">策略动作任务，包含策略ID、交易参数、风险参数等信息</param>
         /// <param name="exchange">交易所名称（已标准化）</param>
         /// <param name="symbol">交易对符号（已标准化）。</param>
-        /// <param name="positionSide">仓位方向（Long/Short）。</param>
-        /// <param name="orderSide">订单方向（buy/sell）。</param>
         /// <param name="ct">取消令牌</param>
         private async Task HandleOpenAsync(
             StrategyActionTask task,
+            StrategyTradeTarget target,
             string exchange,
             string symbol,
-            string positionSide,
-            string orderSide,
             bool isTestingTask,
+            long? orderRequestId,
             CancellationToken ct)
         {
             // 1. 验证用户ID和策略ID是否存在
             if (!task.Uid.HasValue || !task.UsId.HasValue)
             {
                 _logger.LogWarning("开仓动作缺少uid/usId");
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Rejected,
+                        TradingOrderEventTypes.Rejected,
+                        "开仓动作缺少uid/usId",
+                        target,
+                        normalizedQty: null,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: true,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 return;
             }
 
             // 2. 验证订单数量是否有效
-            if (task.OrderQty <= 0)
+            if (target.RequestedQty <= 0)
             {
                 _logger.LogWarning("开仓动作订单数量<=0: uid={Uid} usId={UsId}", task.Uid, task.UsId);
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Rejected,
+                        TradingOrderEventTypes.Rejected,
+                        "开仓动作订单数量<=0",
+                        target,
+                        normalizedQty: null,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: true,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 return;
             }
 
-            var effectiveMaxPositionQty = ResolveEffectiveMaxPositionQty(task);
-            var signalTimeUtc = ResolveSignalTimeUtc(task);
+            var positionSide = target.PositionSide;
+            var orderSide = target.OrderSide;
+            var effectiveMaxPositionQty = StrategyTradeTargetHelper.ResolveEffectiveMaxPositionQty(target);
+            var signalTimeUtc = StrategyTradeTargetHelper.ResolveSignalTimeUtc(target);
 
             // 3. 从市场数据引擎获取当前价格作为预估入场价格
             var entryPrice = ResolveEntryPrice(exchange, symbol);
             if (entryPrice <= 0)
             {
                 _logger.LogWarning("入场价格缺失，跳过开仓: {Exchange} {Symbol}", exchange, symbol);
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Rejected,
+                        TradingOrderEventTypes.Rejected,
+                        "入场价格缺失，跳过开仓",
+                        target,
+                        normalizedQty: null,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: true,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 return;
             }
 
@@ -330,10 +383,19 @@ namespace ServerTest.Modules.TradingExecution.Application
                     ct)
                 .ConfigureAwait(false);
             var currentOpenQty = Math.Max(0m, openExposure.OpenQty);
-            var requestedOrderQty = task.OrderQty;
-            if (currentOpenQty + requestedOrderQty > effectiveMaxPositionQty)
+            var contract = ResolveContract(exchange, symbol);
+            var riskResult = await _targetRiskService.EvaluateAsync(new StrategyTargetRiskContext
             {
-                var blockedMessage = $"开仓被最大持仓限制阻断：当前同向持仓{currentOpenQty} + 本次开仓{requestedOrderQty} > 上限{effectiveMaxPositionQty}";
+                Target = target,
+                Contract = contract,
+                CurrentOpenQty = currentOpenQty
+            }, ct).ConfigureAwait(false);
+            target.NormalizedQty = riskResult.NormalizedQty;
+            target.RiskChecks = riskResult.Snapshots;
+            var requestedOrderQty = riskResult.NormalizedQty;
+            if (!riskResult.Success)
+            {
+                var blockedMessage = riskResult.Message;
                 _logger.LogInformation(
                     "开仓被上限阻断: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} signalTime={SignalTimeUtc:O} signalPrice={SignalPrice} openCount={OpenCount} currentOpenQty={CurrentOpenQty} requestQty={RequestQty} maxQty={MaxQty}",
                     task.Uid,
@@ -350,6 +412,10 @@ namespace ServerTest.Modules.TradingExecution.Application
 
                 if (!isTestingTask)
                 {
+                    var attemptType = riskResult.Snapshots.Any(snapshot =>
+                            string.Equals(snapshot.Rule, "最大持仓", StringComparison.OrdinalIgnoreCase) && !snapshot.Success)
+                        ? OrderOpenAttemptTypes.BlockedByMaxPosition
+                        : OrderOpenAttemptTypes.BlockedByPlatformRule;
                     await _orderOpenAttemptRepository.InsertAsync(
                             task.Uid.Value,
                             task.UsId.Value,
@@ -358,7 +424,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                             positionSide,
                             success: false,
                             errorMessage: blockedMessage,
-                            attemptType: OrderOpenAttemptTypes.BlockedByMaxPosition,
+                            attemptType: attemptType,
                             signalTimeUtc: signalTimeUtc,
                             signalPrice: entryPrice,
                             maxPositionQty: effectiveMaxPositionQty,
@@ -367,21 +433,67 @@ namespace ServerTest.Modules.TradingExecution.Application
                             ct: ct)
                         .ConfigureAwait(false);
                 }
+
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Rejected,
+                        TradingOrderEventTypes.Rejected,
+                        blockedMessage,
+                        target,
+                        normalizedQty: requestedOrderQty,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: true,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 return;
             }
+
+            await MarkOrderRequestAsync(
+                    orderRequestId,
+                    TradingOrderStatuses.Validated,
+                    TradingOrderEventTypes.Validated,
+                    riskResult.Message,
+                    target,
+                    normalizedQty: requestedOrderQty,
+                    exchangeOrderId: null,
+                    averagePrice: null,
+                    recoveryTaskId: null,
+                    markCompleted: false,
+                    ct: ct)
+                .ConfigureAwait(false);
 
             OrderExecutionResult? openOrderResult = null;
             if (!isTestingTask)
             {
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Submitting,
+                        TradingOrderEventTypes.Submitting,
+                        "已提交到交易所执行市价单",
+                        target,
+                        normalizedQty: requestedOrderQty,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: false,
+                        ct: ct)
+                    .ConfigureAwait(false);
+
                 // 5. 非 testing 模式提交市价单到交易所（开仓订单，非平仓）
                 openOrderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
                 {
+                    OrderRequestId = orderRequestId,
+                    TargetId = target.TargetId,
                     Uid = task.Uid.Value,
-                    ExchangeApiKeyId = task.ExchangeApiKeyId,
+                    ExchangeApiKeyId = target.ExchangeApiKeyId,
                     Exchange = exchange,
                     Symbol = symbol,
                     Side = orderSide,
-                    Qty = task.OrderQty,
+                    PositionSide = positionSide,
+                    TargetType = target.TargetType,
+                    Qty = requestedOrderQty,
                     ReduceOnly = false  // 开仓订单，非平仓
                 }, ct).ConfigureAwait(false);
 
@@ -389,6 +501,19 @@ namespace ServerTest.Modules.TradingExecution.Application
                 if (!openOrderResult.Success)
                 {
                     _logger.LogWarning("开仓订单失败: uid={Uid} usId={UsId} 错误={Error}", task.Uid, task.UsId, openOrderResult.ErrorMessage);
+                    await MarkOrderRequestAsync(
+                            orderRequestId,
+                            TradingOrderStatuses.Failed,
+                            TradingOrderEventTypes.Failed,
+                            openOrderResult.ErrorMessage ?? "开仓订单失败",
+                            target,
+                            normalizedQty: requestedOrderQty,
+                            exchangeOrderId: null,
+                            averagePrice: null,
+                            recoveryTaskId: null,
+                            markCompleted: true,
+                            ct: ct)
+                        .ConfigureAwait(false);
                     await _orderOpenAttemptRepository.InsertAsync(
                             task.Uid.Value,
                             task.UsId.Value,
@@ -431,11 +556,25 @@ namespace ServerTest.Modules.TradingExecution.Application
                 {
                     entryPrice = openOrderResult.AveragePrice.Value;
                 }
+
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Submitted,
+                        TradingOrderEventTypes.Submitted,
+                        "交易所市价单已提交成功",
+                        target,
+                        normalizedQty: requestedOrderQty,
+                        exchangeOrderId: openOrderResult.ExchangeOrderId,
+                        averagePrice: openOrderResult.AveragePrice,
+                        recoveryTaskId: null,
+                        markCompleted: false,
+                        ct: ct)
+                    .ConfigureAwait(false);
             }
 
             // 8. 根据入场价格和风险参数计算止损价和止盈价
-            var stopLossPrice = BuildStopLossPrice(entryPrice, task.StopLossPct, task.Leverage, positionSide);
-            var takeProfitPrice = BuildTakeProfitPrice(entryPrice, task.TakeProfitPct, task.Leverage, positionSide);
+            var stopLossPrice = BuildStopLossPrice(entryPrice, target.StopLossPct, target.Leverage, positionSide);
+            var takeProfitPrice = BuildTakeProfitPrice(entryPrice, target.TakeProfitPct, target.Leverage, positionSide);
 
             // 9. 创建仓位实体对象，包含所有仓位信息
             var entity = new StrategyPosition
@@ -448,15 +587,15 @@ namespace ServerTest.Modules.TradingExecution.Application
                 Symbol = symbol,
                 Side = positionSide,
                 EntryPrice = entryPrice,
-                Qty = task.OrderQty,
+                Qty = requestedOrderQty,
                 Status = "Open",
                 StopLossPrice = stopLossPrice,
                 TakeProfitPrice = takeProfitPrice,
-                TrailingEnabled = task.TrailingEnabled,
+                TrailingEnabled = target.TrailingEnabled,
                 TrailingStopPrice = null,  // 初始时追踪止损价格为空
                 TrailingTriggered = false,  // 追踪止损尚未触发
-                TrailingActivationPct = task.TrailingEnabled ? task.TrailingActivationPct : null,
-                TrailingDrawdownPct = task.TrailingEnabled ? task.TrailingDrawdownPct : null,
+                TrailingActivationPct = target.TrailingEnabled ? target.TrailingActivationPct : null,
+                TrailingDrawdownPct = target.TrailingEnabled ? target.TrailingDrawdownPct : null,
                 OpenedAt = DateTime.UtcNow,
                 ClosedAt = null
             };
@@ -483,7 +622,31 @@ namespace ServerTest.Modules.TradingExecution.Application
 
                 if (!isTestingTask && openOrderResult?.Success == true)
                 {
-                    await TryCompensateOpenOrderAsync(task, exchange, symbol, orderSide, ct).ConfigureAwait(false);
+                    await TryCompensateOpenOrderAsync(
+                            target,
+                            exchange,
+                            symbol,
+                            orderSide,
+                            orderRequestId,
+                            requestedOrderQty,
+                            ct)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    await MarkOrderRequestAsync(
+                            orderRequestId,
+                            TradingOrderStatuses.Failed,
+                            TradingOrderEventTypes.Failed,
+                            "开仓写库失败",
+                            target,
+                            normalizedQty: requestedOrderQty,
+                            exchangeOrderId: openOrderResult?.ExchangeOrderId,
+                            averagePrice: openOrderResult?.AveragePrice,
+                            recoveryTaskId: null,
+                            markCompleted: true,
+                            ct: ct)
+                        .ConfigureAwait(false);
                 }
 
                 return;
@@ -513,13 +676,13 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             // 11. 如果启用了追踪止损，保存追踪止损配置到风险配置存储
             PositionRiskConfig? riskConfig = null;
-            if (task.TrailingEnabled)
+            if (target.TrailingEnabled)
             {
                 riskConfig = new PositionRiskConfig
                 {
                     Side = positionSide,
-                    ActivationPct = task.TrailingActivationPct,  // 追踪止损激活百分比
-                    DrawdownPct = task.TrailingDrawdownPct     // 追踪止损回撤百分比
+                    ActivationPct = target.TrailingActivationPct,  // 追踪止损激活百分比
+                    DrawdownPct = target.TrailingDrawdownPct     // 追踪止损回撤百分比
                 };
                 _riskConfigStore.Upsert(positionId, riskConfig);
             }
@@ -530,13 +693,27 @@ namespace ServerTest.Modules.TradingExecution.Application
             _logger.LogInformation("仓位已开: id={PositionId} uid={Uid} usId={UsId} versionId={VersionId} {Exchange} {Symbol} {Side} mode={Mode}",
                 positionId, task.Uid, task.UsId, task.StrategyVersionId, exchange, symbol, positionSide, isTestingTask ? "testing" : "live");
 
+            await MarkOrderRequestAsync(
+                    orderRequestId,
+                    TradingOrderStatuses.Completed,
+                    TradingOrderEventTypes.Completed,
+                    "开仓完成",
+                    target,
+                    normalizedQty: requestedOrderQty,
+                    exchangeOrderId: openOrderResult?.ExchangeOrderId,
+                    averagePrice: openOrderResult?.AveragePrice ?? entryPrice,
+                    recoveryTaskId: null,
+                    markCompleted: true,
+                    ct: ct)
+                .ConfigureAwait(false);
+
             var payload = JsonSerializer.Serialize(new
             {
                 positionId,
                 exchange,
                 symbol,
                 side = positionSide,
-                qty = task.OrderQty,
+                qty = requestedOrderQty,
                 entryPrice,
                 openedAt = DateTime.UtcNow
             });
@@ -554,19 +731,34 @@ namespace ServerTest.Modules.TradingExecution.Application
 
         private async Task HandleCloseAsync(
             StrategyActionTask task,
+            StrategyTradeTarget target,
             string exchange,
             string symbol,
-            string positionSide,
-            string orderSide,
             bool isTestingTask,
+            long? orderRequestId,
             CancellationToken ct)
         {
             if (!task.Uid.HasValue || !task.UsId.HasValue)
             {
                 _logger.LogWarning("平仓动作缺少uid/usId");
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Rejected,
+                        TradingOrderEventTypes.Rejected,
+                        "平仓动作缺少uid/usId",
+                        target,
+                        normalizedQty: null,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: true,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 return;
             }
 
+            var positionSide = target.PositionSide;
+            var orderSide = target.OrderSide;
             var closedCount = 0;
             while (!ct.IsCancellationRequested)
             {
@@ -578,21 +770,60 @@ namespace ServerTest.Modules.TradingExecution.Application
                     {
                         _logger.LogInformation("没有可平仓位: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side}",
                             task.Uid, task.UsId, exchange, symbol, positionSide);
+                        await MarkOrderRequestAsync(
+                                orderRequestId,
+                                TradingOrderStatuses.Completed,
+                                TradingOrderEventTypes.Skipped,
+                                "没有可平仓位，已跳过",
+                                target,
+                                normalizedQty: null,
+                                exchangeOrderId: null,
+                                averagePrice: null,
+                                recoveryTaskId: null,
+                                markCompleted: true,
+                                ct: ct)
+                            .ConfigureAwait(false);
                     }
                     else
                     {
                         _logger.LogInformation("平仓动作完成: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} 共处理{ClosedCount}个仓位",
                             task.Uid, task.UsId, exchange, symbol, positionSide, closedCount);
+                        await MarkOrderRequestAsync(
+                                orderRequestId,
+                                TradingOrderStatuses.Completed,
+                                TradingOrderEventTypes.Completed,
+                                $"平仓完成，共处理{closedCount}个仓位",
+                                target,
+                                normalizedQty: null,
+                                exchangeOrderId: null,
+                                averagePrice: null,
+                                recoveryTaskId: null,
+                                markCompleted: true,
+                                ct: ct)
+                            .ConfigureAwait(false);
                     }
                     return;
                 }
 
-                var closed = await TryCloseSinglePositionAsync(existing, exchange, symbol, orderSide, isTestingTask, ct)
+                var closed = await TryCloseSinglePositionAsync(existing, exchange, symbol, orderSide, isTestingTask, orderRequestId, target, ct)
                     .ConfigureAwait(false);
                 if (!closed)
                 {
                     _logger.LogWarning("平仓动作中断: uid={Uid} usId={UsId} {Exchange} {Symbol} {Side} 已处理{ClosedCount}个仓位",
                         task.Uid, task.UsId, exchange, symbol, positionSide, closedCount);
+                    await MarkOrderRequestAsync(
+                            orderRequestId,
+                            TradingOrderStatuses.Failed,
+                            TradingOrderEventTypes.Failed,
+                            $"平仓动作中断，已处理{closedCount}个仓位",
+                            target,
+                            normalizedQty: null,
+                            exchangeOrderId: null,
+                            averagePrice: null,
+                            recoveryTaskId: null,
+                            markCompleted: true,
+                            ct: ct)
+                        .ConfigureAwait(false);
                     return;
                 }
 
@@ -606,6 +837,8 @@ namespace ServerTest.Modules.TradingExecution.Application
             string symbol,
             string orderSide,
             bool isTestingTask,
+            long? orderRequestId,
+            StrategyTradeTarget target,
             CancellationToken ct)
         {
             decimal? closePrice;
@@ -616,13 +849,31 @@ namespace ServerTest.Modules.TradingExecution.Application
             }
             else
             {
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Submitting,
+                        TradingOrderEventTypes.Submitting,
+                        $"开始平仓 positionId={existing.PositionId}",
+                        target,
+                        normalizedQty: existing.Qty,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: false,
+                        ct: ct)
+                    .ConfigureAwait(false);
+
                 var orderResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
                 {
+                    OrderRequestId = orderRequestId,
+                    TargetId = target.TargetId,
                     Uid = existing.Uid,
                     ExchangeApiKeyId = existing.ExchangeApiKeyId,
                     Exchange = exchange,
                     Symbol = symbol,
                     Side = orderSide,
+                    PositionSide = existing.Side ?? string.Empty,
+                    TargetType = target.TargetType,
                     Qty = existing.Qty,
                     ReduceOnly = true
                 }, ct).ConfigureAwait(false);
@@ -630,9 +881,35 @@ namespace ServerTest.Modules.TradingExecution.Application
                 if (!orderResult.Success)
                 {
                     _logger.LogWarning("平仓订单失败: positionId={PositionId} 错误={Error}", existing.PositionId, orderResult.ErrorMessage);
+                    await MarkOrderRequestAsync(
+                            orderRequestId,
+                            TradingOrderStatuses.Failed,
+                            TradingOrderEventTypes.Failed,
+                            orderResult.ErrorMessage ?? $"平仓订单失败 positionId={existing.PositionId}",
+                            target,
+                            normalizedQty: existing.Qty,
+                            exchangeOrderId: null,
+                            averagePrice: null,
+                            recoveryTaskId: null,
+                            markCompleted: false,
+                            ct: ct)
+                        .ConfigureAwait(false);
                     return false;
                 }
 
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Submitted,
+                        TradingOrderEventTypes.Submitted,
+                        $"平仓市价单提交成功 positionId={existing.PositionId}",
+                        target,
+                        normalizedQty: existing.Qty,
+                        exchangeOrderId: orderResult.ExchangeOrderId,
+                        averagePrice: orderResult.AveragePrice,
+                        recoveryTaskId: null,
+                        markCompleted: false,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 closePrice = ResolveClosePrice(orderResult, exchange, symbol);
             }
 
@@ -659,7 +936,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                     existing.PositionId,
                     existing.Uid,
                     existing.UsId);
-                await EnqueueCloseWriteRecoveryAsync(existing, closePrice, closedAt, ex.Message, ct).ConfigureAwait(false);
+                await EnqueueCloseWriteRecoveryAsync(existing, closePrice, closedAt, ex.Message, orderRequestId, ct).ConfigureAwait(false);
                 return false;
             }
 
@@ -673,7 +950,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                         existing.PositionId,
                         existing.Uid,
                         existing.UsId);
-                    await EnqueueCloseWriteRecoveryAsync(existing, closePrice, closedAt, "平仓写库返回0且仓位仍为Open", ct)
+                    await EnqueueCloseWriteRecoveryAsync(existing, closePrice, closedAt, "平仓写库返回0且仓位仍为Open", orderRequestId, ct)
                         .ConfigureAwait(false);
                     return false;
                 }
@@ -693,36 +970,6 @@ namespace ServerTest.Modules.TradingExecution.Application
                 existing.UsId,
                 useLocalSimulation ? "testing" : "live");
             return true;
-        }
-
-        private static decimal ResolveEffectiveMaxPositionQty(StrategyActionTask task)
-        {
-            if (task.MaxPositionQty > 0)
-            {
-                return task.MaxPositionQty;
-            }
-
-            // 兼容历史配置：未配置上限时按“单次开仓量”退化，保持至少单仓可开。
-            return task.OrderQty > 0 ? task.OrderQty : 0m;
-        }
-
-        private static DateTime ResolveSignalTimeUtc(StrategyActionTask task)
-        {
-            if (task.MarketTask.CandleTimestamp > 0)
-            {
-                try
-                {
-                    return DateTimeOffset.FromUnixTimeMilliseconds(task.MarketTask.CandleTimestamp).UtcDateTime;
-                }
-                catch (ArgumentOutOfRangeException)
-                {
-                    // 回退到任务创建时间，避免异常时间戳导致执行链路中断。
-                }
-            }
-
-            return task.CreatedAt == default
-                ? DateTime.UtcNow
-                : task.CreatedAt.UtcDateTime;
         }
 
         private decimal ResolveEntryPrice(string exchange, string symbol)
@@ -765,14 +1012,397 @@ namespace ServerTest.Modules.TradingExecution.Application
             return fallbackEntryPrice > 0 ? fallbackEntryPrice : null;
         }
 
+        private ContractDetails? ResolveContract(string exchange, string symbol)
+        {
+            if (!TryParseExchangeEnum(exchange, out var exchangeEnum))
+            {
+                return null;
+            }
+
+            var contracts = _contractDetailsCacheService.GetContractsByExchange(exchangeEnum);
+            if (contracts.Count == 0)
+            {
+                return null;
+            }
+
+            var normalizedSymbol = MarketDataKeyNormalizer.NormalizeSymbol(symbol);
+            if (contracts.TryGetValue(normalizedSymbol, out var direct))
+            {
+                return direct;
+            }
+
+            foreach (var item in contracts)
+            {
+                if (string.Equals(item.Key, normalizedSymbol, StringComparison.OrdinalIgnoreCase) ||
+                    item.Key.StartsWith(normalizedSymbol + ":", StringComparison.OrdinalIgnoreCase))
+                {
+                    return item.Value;
+                }
+            }
+
+            var parts = normalizedSymbol.Split('/');
+            var baseCoin = parts.Length > 0 ? parts[0] : normalizedSymbol;
+            var quoteCoin = parts.Length > 1 ? parts[1] : string.Empty;
+            return contracts.Values.FirstOrDefault(contract =>
+                string.Equals(contract.Base, baseCoin, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(contract.Quote, quoteCoin, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool TryParseExchangeEnum(string exchange, out MarketDataConfig.ExchangeEnum exchangeEnum)
+        {
+            foreach (var candidate in Enum.GetValues<MarketDataConfig.ExchangeEnum>())
+            {
+                if (string.Equals(MarketDataConfig.ExchangeToString(candidate), exchange, StringComparison.OrdinalIgnoreCase))
+                {
+                    exchangeEnum = candidate;
+                    return true;
+                }
+            }
+
+            exchangeEnum = default;
+            return false;
+        }
+
+        private async Task<long?> CreateOrderRequestAsync(StrategyTradeTarget target, bool isTestingTask, CancellationToken ct)
+        {
+            try
+            {
+                var entity = new TradingOrderRequestEntity
+                {
+                    TargetId = target.TargetId,
+                    StrategyUid = target.StrategyUid,
+                    Uid = target.Uid,
+                    UsId = target.UsId,
+                    StrategyVersionId = target.StrategyVersionId,
+                    StrategyVersionNo = target.StrategyVersionNo,
+                    ExchangeApiKeyId = target.ExchangeApiKeyId,
+                    Exchange = target.Exchange,
+                    Symbol = target.Symbol,
+                    TargetType = target.TargetType,
+                    PositionSide = target.PositionSide,
+                    OrderSide = target.OrderSide,
+                    ReduceOnly = target.ReduceOnly,
+                    IsTesting = isTestingTask,
+                    Stage = target.Stage,
+                    Method = target.Method,
+                    RequestedQty = target.RequestedQty,
+                    NormalizedQty = target.NormalizedQty > 0 ? target.NormalizedQty : null,
+                    MaxPositionQty = target.MaxPositionQty,
+                    Leverage = target.Leverage,
+                    SignalTimeUtc = StrategyTradeTargetHelper.ResolveSignalTimeUtc(target),
+                    TriggerResultsJson = SerializeToJson(target.TriggerResults),
+                    RiskChecksJson = SerializeToJson(target.RiskChecks),
+                    LatestStatus = TradingOrderStatuses.Pending,
+                    StatusMessage = "已接收交易目标"
+                };
+
+                var requestId = await ExecuteWithOrderLifecycleRepositoryAsync(
+                        (repository, token) => repository.InsertAsync(entity, token),
+                        ct)
+                    .ConfigureAwait(false);
+
+                await AppendOrderRequestEventAsync(
+                        requestId,
+                        TradingOrderEventTypes.Created,
+                        TradingOrderStatuses.Pending,
+                        "交易目标已进入订单流水",
+                        new
+                        {
+                            target.TargetId,
+                            target.TargetType,
+                            target.RequestedQty,
+                            target.Exchange,
+                            target.Symbol
+                        },
+                        ct)
+                    .ConfigureAwait(false);
+
+                return requestId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "创建订单流水失败: targetId={TargetId} uid={Uid} usId={UsId}",
+                    target.TargetId,
+                    target.Uid,
+                    target.UsId);
+                return null;
+            }
+        }
+
+        private async Task MarkOrderRequestAsync(
+            long? orderRequestId,
+            string status,
+            string eventType,
+            string message,
+            StrategyTradeTarget target,
+            decimal? normalizedQty,
+            string? exchangeOrderId,
+            decimal? averagePrice,
+            long? recoveryTaskId,
+            bool markCompleted,
+            CancellationToken ct)
+        {
+            if (!orderRequestId.HasValue || orderRequestId.Value <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await ExecuteWithOrderLifecycleRepositoryAsync(
+                        (repository, token) => repository.UpdateStatusAsync(
+                            orderRequestId.Value,
+                            status,
+                            message,
+                            normalizedQty,
+                            exchangeOrderId,
+                            averagePrice,
+                            recoveryTaskId,
+                            SerializeToJson(target.RiskChecks),
+                            markCompleted,
+                            token),
+                        ct)
+                    .ConfigureAwait(false);
+
+                await AppendOrderRequestEventAsync(
+                        orderRequestId.Value,
+                        eventType,
+                        status,
+                        message,
+                        new
+                        {
+                            target.TargetId,
+                            target.TargetType,
+                            normalizedQty,
+                            exchangeOrderId,
+                            averagePrice,
+                            recoveryTaskId,
+                            riskChecks = target.RiskChecks
+                        },
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "更新订单流水失败: requestId={RequestId} status={Status} message={Message}",
+                    orderRequestId,
+                    status,
+                    message);
+            }
+        }
+
+        private async Task AppendOrderRequestEventAsync(
+            long requestId,
+            string eventType,
+            string status,
+            string message,
+            object detail,
+            CancellationToken ct)
+        {
+            if (requestId <= 0)
+            {
+                return;
+            }
+
+            await ExecuteWithOrderLifecycleRepositoryAsync(
+                    (repository, token) => repository.AppendEventAsync(new TradingOrderEventEntity
+                    {
+                        RequestId = requestId,
+                        EventType = eventType,
+                        Status = status,
+                        Message = message,
+                        DetailJson = SerializeToJson(detail)
+                    }, token),
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        private async Task MarkRecoveryPendingOrderRequestAsync(long? orderRequestId, long recoveryTaskId, string scene, CancellationToken ct)
+        {
+            if (!orderRequestId.HasValue || orderRequestId.Value <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await ExecuteWithOrderLifecycleRepositoryAsync(
+                        (repository, token) => repository.UpdateStatusAsync(
+                            orderRequestId.Value,
+                            TradingOrderStatuses.RecoveryPending,
+                            $"{scene}已进入恢复队列",
+                            null,
+                            null,
+                            null,
+                            recoveryTaskId,
+                            null,
+                            false,
+                            token),
+                        ct)
+                    .ConfigureAwait(false);
+
+                await AppendOrderRequestEventAsync(
+                        orderRequestId.Value,
+                        TradingOrderEventTypes.RecoveryQueued,
+                        TradingOrderStatuses.RecoveryPending,
+                        $"{scene}已进入恢复队列",
+                        new { recoveryTaskId, scene },
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "更新恢复挂起状态失败: requestId={RequestId}", orderRequestId);
+            }
+        }
+
+        private async Task MarkRecoveredOrderRequestAsync(long? orderRequestId, string message, CancellationToken ct)
+        {
+            if (!orderRequestId.HasValue || orderRequestId.Value <= 0)
+            {
+                return;
+            }
+
+            await ExecuteWithOrderLifecycleRepositoryAsync(
+                    (repository, token) => repository.UpdateStatusAsync(
+                        orderRequestId.Value,
+                        TradingOrderStatuses.Recovered,
+                        message,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        true,
+                        token),
+                    ct)
+                .ConfigureAwait(false);
+            await AppendOrderRequestEventAsync(
+                    orderRequestId.Value,
+                    TradingOrderEventTypes.Recovered,
+                    TradingOrderStatuses.Recovered,
+                    message,
+                    new { orderRequestId },
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        private async Task MarkCompletedOrderRequestAsync(long? orderRequestId, string message, CancellationToken ct)
+        {
+            if (!orderRequestId.HasValue || orderRequestId.Value <= 0)
+            {
+                return;
+            }
+
+            await ExecuteWithOrderLifecycleRepositoryAsync(
+                    (repository, token) => repository.UpdateStatusAsync(
+                        orderRequestId.Value,
+                        TradingOrderStatuses.Completed,
+                        message,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        true,
+                        token),
+                    ct)
+                .ConfigureAwait(false);
+            await AppendOrderRequestEventAsync(
+                    orderRequestId.Value,
+                    TradingOrderEventTypes.Completed,
+                    TradingOrderStatuses.Completed,
+                    message,
+                    new { orderRequestId },
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        private async Task MarkFailedOrderRequestAsync(long? orderRequestId, string message, CancellationToken ct)
+        {
+            if (!orderRequestId.HasValue || orderRequestId.Value <= 0)
+            {
+                return;
+            }
+
+            await ExecuteWithOrderLifecycleRepositoryAsync(
+                    (repository, token) => repository.UpdateStatusAsync(
+                        orderRequestId.Value,
+                        TradingOrderStatuses.Failed,
+                        message,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        true,
+                        token),
+                    ct)
+                .ConfigureAwait(false);
+            await AppendOrderRequestEventAsync(
+                    orderRequestId.Value,
+                    TradingOrderEventTypes.Failed,
+                    TradingOrderStatuses.Failed,
+                    message,
+                    new { orderRequestId },
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        private static string SerializeToJson<T>(T value)
+        {
+            return JsonSerializer.Serialize(value);
+        }
+
+        private static StrategyTradeTarget BuildRecoveryTarget(RecoveryTask task)
+        {
+            var normalizedSide = task.Side?.Trim() ?? string.Empty;
+            var positionSide = normalizedSide.Equals("buy", StringComparison.OrdinalIgnoreCase)
+                ? "Short"
+                : normalizedSide.Equals("sell", StringComparison.OrdinalIgnoreCase)
+                    ? "Long"
+                    : normalizedSide;
+            var orderSide = normalizedSide.Equals("buy", StringComparison.OrdinalIgnoreCase) ||
+                            normalizedSide.Equals("sell", StringComparison.OrdinalIgnoreCase)
+                ? normalizedSide.ToLowerInvariant()
+                : string.Equals(positionSide, "Long", StringComparison.OrdinalIgnoreCase)
+                    ? "sell"
+                    : "buy";
+            return new StrategyTradeTarget
+            {
+                TargetId = task.OrderRequestId.HasValue && task.OrderRequestId.Value > 0
+                    ? $"recovery:{task.OrderRequestId.Value}"
+                    : $"recovery-task:{task.TaskId}",
+                StrategyUid = task.UsId?.ToString() ?? string.Empty,
+                Uid = task.Uid,
+                UsId = task.UsId,
+                ExchangeApiKeyId = task.ExchangeApiKeyId,
+                Exchange = task.Exchange,
+                Symbol = task.Symbol,
+                PositionSide = positionSide,
+                OrderSide = orderSide,
+                TargetType = task.Type == RecoveryTaskType.OpenCompensation
+                    ? "open_compensation_recovery"
+                    : "close_write_recovery",
+                ReduceOnly = true,
+                RequestedQty = task.Qty,
+                NormalizedQty = task.Qty
+            };
+        }
+
         private async Task TryCompensateOpenOrderAsync(
-            StrategyActionTask task,
+            StrategyTradeTarget target,
             string exchange,
             string symbol,
             string openOrderSide,
+            long? orderRequestId,
+            decimal qty,
             CancellationToken ct)
         {
-            if (!task.Uid.HasValue || task.OrderQty <= 0)
+            if (!target.Uid.HasValue || qty <= 0)
             {
                 return;
             }
@@ -782,12 +1412,14 @@ namespace ServerTest.Modules.TradingExecution.Application
                 : "buy";
 
             var (success, error) = await TryExecuteCompensationOrderAsync(
-                    task.Uid.Value,
-                    task.ExchangeApiKeyId,
+                    target.Uid.Value,
+                    target.ExchangeApiKeyId,
                     exchange,
                     symbol,
                     compensateSide,
-                    task.OrderQty,
+                    qty,
+                    orderRequestId,
+                    target,
                     ct)
                 .ConfigureAwait(false);
 
@@ -795,22 +1427,35 @@ namespace ServerTest.Modules.TradingExecution.Application
             {
                 _logger.LogWarning(
                     "开仓写库失败后补偿平仓成功: uid={Uid} usId={UsId} {Exchange} {Symbol}",
-                    task.Uid,
-                    task.UsId,
+                    target.Uid,
+                    target.UsId,
                     exchange,
                     symbol);
+                await MarkOrderRequestAsync(
+                        orderRequestId,
+                        TradingOrderStatuses.Recovered,
+                        TradingOrderEventTypes.Recovered,
+                        "开仓写库失败后补偿平仓成功",
+                        target,
+                        normalizedQty: qty,
+                        exchangeOrderId: null,
+                        averagePrice: null,
+                        recoveryTaskId: null,
+                        markCompleted: true,
+                        ct: ct)
+                    .ConfigureAwait(false);
                 return;
             }
 
             _logger.LogError(
                 "开仓写库失败后补偿平仓失败，已转入恢复队列: uid={Uid} usId={UsId} {Exchange} {Symbol} 错误={Error}",
-                task.Uid,
-                task.UsId,
+                target.Uid,
+                target.UsId,
                 exchange,
                 symbol,
                 error);
 
-            await EnqueueOpenCompensationRecoveryAsync(task, exchange, symbol, compensateSide, error, ct).ConfigureAwait(false);
+            await EnqueueOpenCompensationRecoveryAsync(target, exchange, symbol, compensateSide, error, orderRequestId, qty, ct).ConfigureAwait(false);
         }
 
         private async Task<(bool Success, string Error)> TryExecuteCompensationOrderAsync(
@@ -820,17 +1465,23 @@ namespace ServerTest.Modules.TradingExecution.Application
             string symbol,
             string side,
             decimal qty,
+            long? orderRequestId,
+            StrategyTradeTarget target,
             CancellationToken ct)
         {
             try
             {
                 var compensateResult = await _orderExecutor.PlaceMarketOrderAsync(new OrderExecutionRequest
                 {
+                    OrderRequestId = orderRequestId,
+                    TargetId = target.TargetId,
                     Uid = uid,
                     ExchangeApiKeyId = exchangeApiKeyId,
                     Exchange = exchange,
                     Symbol = symbol,
                     Side = side,
+                    PositionSide = target.PositionSide,
+                    TargetType = target.TargetType,
                     Qty = qty,
                     ReduceOnly = true
                 }, ct).ConfigureAwait(false);
@@ -846,11 +1497,13 @@ namespace ServerTest.Modules.TradingExecution.Application
         }
 
         private async Task EnqueueOpenCompensationRecoveryAsync(
-            StrategyActionTask task,
+            StrategyTradeTarget target,
             string exchange,
             string symbol,
             string compensateSide,
             string error,
+            long? orderRequestId,
+            decimal qty,
             CancellationToken ct)
         {
             var recoveryTask = new RecoveryTask
@@ -859,13 +1512,14 @@ namespace ServerTest.Modules.TradingExecution.Application
                 Attempt = 1,
                 MaxAttempts = RecoveryMaxAttempts,
                 NotBeforeUtc = DateTime.UtcNow.AddSeconds(2),
-                Uid = task.Uid,
-                UsId = task.UsId,
-                ExchangeApiKeyId = task.ExchangeApiKeyId,
+                Uid = target.Uid,
+                UsId = target.UsId,
+                OrderRequestId = orderRequestId,
+                ExchangeApiKeyId = target.ExchangeApiKeyId,
                 Exchange = exchange,
                 Symbol = symbol,
                 Side = compensateSide,
-                Qty = task.OrderQty,
+                Qty = qty,
                 LastError = error ?? string.Empty
             };
 
@@ -877,6 +1531,7 @@ namespace ServerTest.Modules.TradingExecution.Application
             decimal? closePrice,
             DateTime closedAtUtc,
             string error,
+            long? orderRequestId,
             CancellationToken ct)
         {
             var recoveryTask = new RecoveryTask
@@ -887,6 +1542,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                 NotBeforeUtc = DateTime.UtcNow.AddSeconds(2),
                 Uid = existing.Uid,
                 UsId = existing.UsId,
+                OrderRequestId = orderRequestId,
                 PositionId = existing.PositionId,
                 ExchangeApiKeyId = existing.ExchangeApiKeyId,
                 Exchange = existing.Exchange ?? string.Empty,
@@ -908,6 +1564,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                 TaskType = MapRecoveryTaskType(task.Type),
                 Uid = task.Uid,
                 UsId = task.UsId,
+                OrderRequestId = task.OrderRequestId,
                 PositionId = task.PositionId,
                 ExchangeApiKeyId = task.ExchangeApiKeyId,
                 Exchange = task.Exchange,
@@ -930,11 +1587,13 @@ namespace ServerTest.Modules.TradingExecution.Application
                     .ConfigureAwait(false);
                 _logger.LogWarning("已持久化交易恢复任务: taskId={TaskId} scene={Scene} type={Type} uid={Uid} usId={UsId} attempt={Attempt}",
                     taskId, scene, task.Type, task.Uid, task.UsId, task.Attempt);
+                await MarkRecoveryPendingOrderRequestAsync(task.OrderRequestId, taskId, scene, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "交易恢复任务入库失败: scene={Scene} type={Type} uid={Uid} usId={UsId}",
                     scene, task.Type, task.Uid, task.UsId);
+                await MarkFailedOrderRequestAsync(task.OrderRequestId, $"{scene}入恢复队列失败: {ex.Message}", ct).ConfigureAwait(false);
                 await TryPublishRecoveryFailedAsync(
                         CopyRecoveryTask(task, lastError: ex.Message),
                         "恢复任务入库失败",
@@ -1043,6 +1702,8 @@ namespace ServerTest.Modules.TradingExecution.Application
                     task.Symbol,
                     task.Side,
                     task.Qty,
+                    task.OrderRequestId,
+                    BuildRecoveryTarget(task),
                     ct)
                 .ConfigureAwait(false);
 
@@ -1114,6 +1775,17 @@ namespace ServerTest.Modules.TradingExecution.Application
             {
                 _logger.LogWarning("标记恢复任务成功失败（任务可能已被处理）: taskId={TaskId} type={Type}", task.TaskId, task.Type);
             }
+
+            if (task.Type == RecoveryTaskType.OpenCompensation)
+            {
+                await MarkRecoveredOrderRequestAsync(task.OrderRequestId, "开仓补偿恢复成功", ct).ConfigureAwait(false);
+                return;
+            }
+
+            if (task.Type == RecoveryTaskType.CloseWrite)
+            {
+                await MarkCompletedOrderRequestAsync(task.OrderRequestId, "平仓写库恢复成功", ct).ConfigureAwait(false);
+            }
         }
 
         private async Task MarkRecoveryTaskFailedAsync(RecoveryTask task, string reason, CancellationToken ct)
@@ -1134,6 +1806,8 @@ namespace ServerTest.Modules.TradingExecution.Application
                     _logger.LogWarning("标记恢复任务失败未生效（任务可能已被处理）: taskId={TaskId} type={Type}", task.TaskId, task.Type);
                 }
             }
+
+            await MarkFailedOrderRequestAsync(task.OrderRequestId, $"{reason}; {task.LastError}".Trim(';', ' '), ct).ConfigureAwait(false);
 
             await TryPublishRecoveryFailedAsync(task, reason, ct).ConfigureAwait(false);
         }
@@ -1156,6 +1830,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                 NotBeforeUtc = persistedTask.NextRetryAtUtc,
                 Uid = persistedTask.Uid,
                 UsId = persistedTask.UsId,
+                OrderRequestId = persistedTask.OrderRequestId,
                 PositionId = persistedTask.PositionId,
                 ExchangeApiKeyId = persistedTask.ExchangeApiKeyId,
                 Exchange = persistedTask.Exchange ?? string.Empty,
@@ -1216,6 +1891,7 @@ namespace ServerTest.Modules.TradingExecution.Application
                 NotBeforeUtc = notBeforeUtc ?? source.NotBeforeUtc,
                 Uid = source.Uid,
                 UsId = source.UsId,
+                OrderRequestId = source.OrderRequestId,
                 PositionId = source.PositionId,
                 ExchangeApiKeyId = source.ExchangeApiKeyId,
                 Exchange = source.Exchange,
@@ -1365,6 +2041,34 @@ namespace ServerTest.Modules.TradingExecution.Application
 
             using var scope = _serviceScopeFactory.CreateScope();
             var repository = scope.ServiceProvider.GetRequiredService<TradeRecoveryTaskRepository>();
+            return await action(repository, ct).ConfigureAwait(false);
+        }
+
+        private async Task ExecuteWithOrderLifecycleRepositoryAsync(
+            Func<OrderLifecycleRepository, CancellationToken, Task> action,
+            CancellationToken ct)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            using var scope = _serviceScopeFactory.CreateScope();
+            var repository = scope.ServiceProvider.GetRequiredService<OrderLifecycleRepository>();
+            await action(repository, ct).ConfigureAwait(false);
+        }
+
+        private async Task<T> ExecuteWithOrderLifecycleRepositoryAsync<T>(
+            Func<OrderLifecycleRepository, CancellationToken, Task<T>> action,
+            CancellationToken ct)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            using var scope = _serviceScopeFactory.CreateScope();
+            var repository = scope.ServiceProvider.GetRequiredService<OrderLifecycleRepository>();
             return await action(repository, ct).ConfigureAwait(false);
         }
 

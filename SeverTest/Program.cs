@@ -442,9 +442,65 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     {
         services.AddSingleton<IIndicatorCollector, CoinGlassEtfFlowCollector>();
     }
+    if (coinGlassModuleSwitch.GrayscaleHoldingsEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassGrayscaleHoldingsCollector>();
+    }
+    if (coinGlassModuleSwitch.CoinUnlockListEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassCoinUnlockListCollector>();
+    }
+    if (coinGlassModuleSwitch.CoinVestingEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassCoinVestingCollector>();
+    }
+    if (coinGlassModuleSwitch.TopLongShortAccountRatioEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassTopLongShortAccountRatioCollector>();
+    }
+    if (coinGlassModuleSwitch.FuturesFootprintEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassFuturesFootprintCollector>();
+    }
     if (coinGlassModuleSwitch.LiquidationHeatmapEnabled)
     {
         services.AddSingleton<IIndicatorCollector, CoinGlassLiquidationHeatmapCollector>();
+    }
+    if (coinGlassModuleSwitch.ExchangeAssetEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassExchangeAssetsCollector>();
+    }
+    if (coinGlassModuleSwitch.ExchangeBalanceListEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassExchangeBalanceListCollector>();
+    }
+    if (coinGlassModuleSwitch.ExchangeBalanceChartEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassExchangeBalanceChartCollector>();
+    }
+    if (coinGlassModuleSwitch.HyperliquidWhaleAlertEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassHyperliquidWhaleAlertCollector>();
+    }
+    if (coinGlassModuleSwitch.HyperliquidWhalePositionEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassHyperliquidWhalePositionCollector>();
+    }
+    if (coinGlassModuleSwitch.HyperliquidPositionEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassHyperliquidPositionCollector>();
+    }
+    if (coinGlassModuleSwitch.HyperliquidUserPositionEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassHyperliquidUserPositionCollector>();
+    }
+    if (coinGlassModuleSwitch.HyperliquidWalletPositionDistributionEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassHyperliquidWalletPositionDistributionCollector>();
+    }
+    if (coinGlassModuleSwitch.HyperliquidWalletPnlDistributionEnabled)
+    {
+        services.AddSingleton<IIndicatorCollector, CoinGlassHyperliquidWalletPnlDistributionCollector>();
     }
     services.AddHostedService<IndicatorRefreshHostedService>();
     services.AddHostedService<CoinGlassStreamBridgeHostedService>();
@@ -461,6 +517,10 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<StrategyActionTaskQueue>();
     services.AddSingleton<IStrategyValueResolver, IndicatorValueResolver>();
     services.AddSingleton<IStrategyActionExecutor, QueuedStrategyActionExecutor>();
+    services.AddSingleton<IStrategyTargetRiskRule, TargetBasicValidationRule>();
+    services.AddSingleton<IStrategyTargetRiskRule, TargetMarketOrderRule>();
+    services.AddSingleton<IStrategyTargetRiskRule, TargetMaxPositionRule>();
+    services.AddSingleton<StrategyTargetRiskService>();
     services.AddSingleton<StrategyEngineRunLogQueue>();
     services.AddSingleton<StrategyEngineRunLogRepository>();
     services.AddSingleton<StrategySystemLogRepository>();
@@ -473,6 +533,7 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<PositionRiskLeaseService>();
     services.AddSingleton<TrailingRecoveryService>();
     services.AddScoped<TradeRecoveryTaskRepository>();
+    services.AddScoped<OrderLifecycleRepository>();
     services.AddSingleton<OrderOpenAttemptRepository>();
     services.AddSingleton<TradeRecoveryEnqueueService>();
     services.AddSingleton<IOrderExecutor, CcxtOrderExecutor>();

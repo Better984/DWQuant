@@ -17,6 +17,7 @@ using ServerTest.Modules.Backtest.Domain;
 using ServerTest.Modules.MarketData.Domain;
 using ServerTest.Modules.StrategyEngine.Application;
 using ServerTest.Modules.StrategyEngine.Domain;
+using ServerTest.Modules.TradingExecution.Application;
 using ServerTest.Options;
 
 namespace ServerTest.Modules.Backtest.Application
@@ -45,6 +46,7 @@ namespace ServerTest.Modules.Backtest.Application
         private readonly ServerConfigStore _configStore;
         private readonly BacktestObjectPoolManager _objectPoolManager;
         private readonly BacktestProgressPushService _progressPushService;
+        private readonly StrategyTargetRiskService _targetRiskService;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger<BacktestMainLoop> _logger;
         private readonly TalibWasmNodeInvoker? _wasmInvoker;
@@ -55,6 +57,7 @@ namespace ServerTest.Modules.Backtest.Application
             ServerConfigStore configStore,
             BacktestObjectPoolManager objectPoolManager,
             BacktestProgressPushService progressPushService,
+            StrategyTargetRiskService targetRiskService,
             TalibWasmNodeInvoker? wasmInvoker,
             ILoggerFactory loggerFactory,
             ILogger<BacktestMainLoop> logger,
@@ -64,6 +67,7 @@ namespace ServerTest.Modules.Backtest.Application
             _configStore = configStore ?? throw new ArgumentNullException(nameof(configStore));
             _objectPoolManager = objectPoolManager ?? throw new ArgumentNullException(nameof(objectPoolManager));
             _progressPushService = progressPushService ?? throw new ArgumentNullException(nameof(progressPushService));
+            _targetRiskService = targetRiskService ?? throw new ArgumentNullException(nameof(targetRiskService));
             _wasmInvoker = wasmInvoker;
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -104,7 +108,8 @@ namespace ServerTest.Modules.Backtest.Application
             var conditionEvaluator = new ConditionEvaluator(conditionCache);
 
             var actionExecutor = new BacktestActionExecutor(
-                symbolRuntimes.ToDictionary(k => k.Key, v => v.Value.State, StringComparer.OrdinalIgnoreCase));
+                symbolRuntimes.ToDictionary(k => k.Key, v => v.Value.State, StringComparer.OrdinalIgnoreCase),
+                _targetRiskService);
 
             Dictionary<string, EquityCurveAggregator>? equityCurveCollectors = null;
             if (output.IncludeEquityCurve)

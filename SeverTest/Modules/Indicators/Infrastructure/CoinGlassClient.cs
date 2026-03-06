@@ -46,11 +46,11 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             return await GetJsonAsync(path, query, ct, "贪婪恐慌").ConfigureAwait(false);
         }
 
-        public async Task<JsonDocument> GetEtfFlowHistoryAsync(int limit, CancellationToken ct)
+        public async Task<JsonDocument> GetEtfFlowHistoryAsync(string asset, int limit, CancellationToken ct)
         {
-            var path = string.IsNullOrWhiteSpace(_options.EtfFlowPath)
-                ? "/api/etf/bitcoin/flow-history"
-                : _options.EtfFlowPath;
+            var normalizedAsset = NormalizeEtfAsset(asset);
+            var assetSlug = ResolveEtfAssetSlug(normalizedAsset);
+            var path = ResolveEtfFlowPath(assetSlug);
 
             Dictionary<string, string?>? query = null;
             if (limit > 0)
@@ -61,7 +61,116 @@ namespace ServerTest.Modules.Indicators.Infrastructure
                 };
             }
 
-            return await GetJsonAsync(path, query, ct, "ETF净流入").ConfigureAwait(false);
+            return await GetJsonAsync(path, query, ct, $"ETF净流入-{normalizedAsset}").ConfigureAwait(false);
+        }
+
+        public Task<JsonDocument> GetTopLongShortAccountRatioHistoryAsync(
+            string exchange,
+            string symbol,
+            string interval,
+            int limit,
+            long? startTime,
+            long? endTime,
+            CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.TopLongShortAccountRatioPath)
+                ? "/api/futures/top-long-short-account-ratio/history"
+                : _options.TopLongShortAccountRatioPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["exchange"] = exchange,
+                ["symbol"] = symbol,
+                ["interval"] = interval
+            };
+
+            if (limit > 0)
+            {
+                query["limit"] = limit.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (startTime.HasValue && startTime.Value > 0)
+            {
+                query["start_time"] = startTime.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (endTime.HasValue && endTime.Value > 0)
+            {
+                query["end_time"] = endTime.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            return GetJsonAsync(path, query, ct, $"大户账户数多空比-{symbol}-{interval}");
+        }
+
+        public Task<JsonDocument> GetFuturesFootprintHistoryAsync(
+            string exchange,
+            string symbol,
+            string interval,
+            int limit,
+            long? startTime,
+            long? endTime,
+            CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.FuturesFootprintPath)
+                ? "/api/futures/volume/footprint-history"
+                : _options.FuturesFootprintPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["exchange"] = exchange,
+                ["symbol"] = symbol,
+                ["interval"] = interval
+            };
+
+            if (limit > 0)
+            {
+                query["limit"] = limit.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (startTime.HasValue && startTime.Value > 0)
+            {
+                query["start_time"] = startTime.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (endTime.HasValue && endTime.Value > 0)
+            {
+                query["end_time"] = endTime.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            return GetJsonAsync(path, query, ct, $"合约足迹图-{symbol}-{interval}");
+        }
+
+        public Task<JsonDocument> GetGrayscaleHoldingsAsync(CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.GrayscaleHoldingsPath)
+                ? "/api/grayscale/holdings-list"
+                : _options.GrayscaleHoldingsPath;
+
+            return GetJsonAsync(path, null, ct, "灰度持仓");
+        }
+
+        public Task<JsonDocument> GetCoinUnlockListAsync(CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.CoinUnlockListPath)
+                ? "/api/coin/unlock-list"
+                : _options.CoinUnlockListPath;
+
+            return GetJsonAsync(path, null, ct, "代币解锁列表");
+        }
+
+        public Task<JsonDocument> GetCoinVestingAsync(string symbol, CancellationToken ct)
+        {
+            var normalizedSymbol = NormalizeCoinSymbol(symbol);
+            var path = string.IsNullOrWhiteSpace(_options.CoinVestingPath)
+                ? "/api/coin/vesting"
+                : _options.CoinVestingPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["symbol"] = normalizedSymbol
+            };
+
+            return GetJsonAsync(path, query, ct, $"代币解锁详情-{normalizedSymbol}");
         }
 
         public Task<JsonDocument> GetLiquidationHeatmapModel1Async(
@@ -82,6 +191,112 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             };
 
             return GetJsonAsync(path, query, ct, "爆仓热力图");
+        }
+
+        public Task<JsonDocument> GetExchangeAssetsAsync(string exchangeName, CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.ExchangeAssetsPath)
+                ? "/api/exchange/assets"
+                : _options.ExchangeAssetsPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["exchangeName"] = exchangeName
+            };
+
+            return GetJsonAsync(path, query, ct, "交易所资产明细");
+        }
+
+        public Task<JsonDocument> GetExchangeBalanceListAsync(string symbol, CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.ExchangeBalanceListPath)
+                ? "/api/exchange/balance/list"
+                : _options.ExchangeBalanceListPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["symbol"] = symbol
+            };
+
+            return GetJsonAsync(path, query, ct, "交易所余额排行");
+        }
+
+        public Task<JsonDocument> GetExchangeBalanceChartAsync(string symbol, CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.ExchangeBalanceChartPath)
+                ? "/api/exchange/balance/chart"
+                : _options.ExchangeBalanceChartPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["symbol"] = symbol
+            };
+
+            return GetJsonAsync(path, query, ct, "交易所余额趋势");
+        }
+
+        public Task<JsonDocument> GetHyperliquidWhaleAlertAsync(CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.HyperliquidWhaleAlertPath)
+                ? "/api/hyperliquid/whale-alert"
+                : _options.HyperliquidWhaleAlertPath;
+
+            return GetJsonAsync(path, null, ct, "Hyperliquid 鲸鱼提醒");
+        }
+
+        public Task<JsonDocument> GetHyperliquidWhalePositionAsync(CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.HyperliquidWhalePositionPath)
+                ? "/api/hyperliquid/whale-position"
+                : _options.HyperliquidWhalePositionPath;
+
+            return GetJsonAsync(path, null, ct, "Hyperliquid 鲸鱼持仓");
+        }
+
+        public Task<JsonDocument> GetHyperliquidPositionAsync(string symbol, CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.HyperliquidPositionPath)
+                ? "/api/hyperliquid/position"
+                : _options.HyperliquidPositionPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["symbol"] = symbol
+            };
+
+            return GetJsonAsync(path, query, ct, $"Hyperliquid 持仓排行-{symbol}");
+        }
+
+        public Task<JsonDocument> GetHyperliquidUserPositionAsync(string userAddress, CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.HyperliquidUserPositionPath)
+                ? "/api/hyperliquid/user-position"
+                : _options.HyperliquidUserPositionPath;
+
+            var query = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["user_address"] = userAddress
+            };
+
+            return GetJsonAsync(path, query, ct, "Hyperliquid 用户持仓");
+        }
+
+        public Task<JsonDocument> GetHyperliquidWalletPositionDistributionAsync(CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.HyperliquidWalletPositionDistributionPath)
+                ? "/api/hyperliquid/wallet/position-distribution"
+                : _options.HyperliquidWalletPositionDistributionPath;
+
+            return GetJsonAsync(path, null, ct, "Hyperliquid 钱包持仓分布");
+        }
+
+        public Task<JsonDocument> GetHyperliquidWalletPnlDistributionAsync(CancellationToken ct)
+        {
+            var path = string.IsNullOrWhiteSpace(_options.HyperliquidWalletPnlDistributionPath)
+                ? "/api/hyperliquid/wallet/pnl-distribution"
+                : _options.HyperliquidWalletPnlDistributionPath;
+
+            return GetJsonAsync(path, null, ct, "Hyperliquid 钱包盈亏分布");
         }
 
         /// <summary>
@@ -214,6 +429,99 @@ namespace ServerTest.Modules.Indicators.Infrastructure
             }
 
             return path.Trim().TrimStart('/');
+        }
+
+        private string ResolveEtfFlowPath(string assetSlug)
+        {
+            if (!string.IsNullOrWhiteSpace(_options.EtfFlowPathTemplate))
+            {
+                return _options.EtfFlowPathTemplate.Replace("{asset}", assetSlug, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var basePath = string.IsNullOrWhiteSpace(_options.EtfFlowPath)
+                ? "/api/etf/bitcoin/flow-history"
+                : _options.EtfFlowPath;
+
+            if (string.Equals(assetSlug, "bitcoin", StringComparison.OrdinalIgnoreCase))
+            {
+                return basePath;
+            }
+
+            if (TryReplaceEtfAssetSegment(basePath, assetSlug, out var replacedPath))
+            {
+                return replacedPath;
+            }
+
+            return $"/api/etf/{assetSlug}/flow-history";
+        }
+
+        private static bool TryReplaceEtfAssetSegment(string path, string assetSlug, out string replacedPath)
+        {
+            replacedPath = string.Empty;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            var normalizedPath = path.Trim();
+            var hasLeadingSlash = normalizedPath.StartsWith("/", StringComparison.Ordinal);
+            var segments = normalizedPath
+                .Trim('/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (segments.Length == 0)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < segments.Length - 1; index++)
+            {
+                if (!string.Equals(segments[index], "etf", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                segments[index + 1] = assetSlug;
+                replacedPath = (hasLeadingSlash ? "/" : string.Empty) + string.Join('/', segments);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizeEtfAsset(string? asset)
+        {
+            return (asset ?? string.Empty).Trim().ToUpperInvariant() switch
+            {
+                "" => "BTC",
+                "BTC" or "BITCOIN" => "BTC",
+                "ETH" or "ETHEREUM" => "ETH",
+                "SOL" or "SOLANA" => "SOL",
+                "XRP" => "XRP",
+                var unsupported => throw new ArgumentOutOfRangeException(nameof(asset), unsupported, "暂不支持的 ETF 资产")
+            };
+        }
+
+        private static string ResolveEtfAssetSlug(string asset)
+        {
+            return asset switch
+            {
+                "BTC" => "bitcoin",
+                "ETH" => "ethereum",
+                "SOL" => "solana",
+                "XRP" => "xrp",
+                _ => throw new ArgumentOutOfRangeException(nameof(asset), asset, "暂不支持的 ETF 资产")
+            };
+        }
+
+        private static string NormalizeCoinSymbol(string? symbol)
+        {
+            var normalized = (symbol ?? string.Empty).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                throw new ArgumentException("symbol 不能为空", nameof(symbol));
+            }
+
+            return normalized;
         }
 
         private void WarnIfUsingPiratedSource()

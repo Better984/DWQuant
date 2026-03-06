@@ -3,8 +3,10 @@ using ServerTest.Models.Strategy;
 using ServerTest.Modules.Backtest.Domain;
 using ServerTest.Modules.MarketData.Domain;
 using ServerTest.Modules.StrategyEngine.Domain;
+using ServerTest.Modules.TradingExecution.Application;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace ServerTest.Modules.Backtest.Application
@@ -50,9 +52,14 @@ namespace ServerTest.Modules.Backtest.Application
 
         private readonly Dictionary<string, SymbolState> _states;
         private readonly Dictionary<string, OHLCV> _currentBars;
-        public BacktestActionExecutor(Dictionary<string, SymbolState> states)
+        private readonly StrategyTargetRiskService _targetRiskService;
+
+        public BacktestActionExecutor(
+            Dictionary<string, SymbolState> states,
+            StrategyTargetRiskService targetRiskService)
         {
             _states = states ?? throw new ArgumentNullException(nameof(states));
+            _targetRiskService = targetRiskService ?? throw new ArgumentNullException(nameof(targetRiskService));
             _currentBars = new Dictionary<string, OHLCV>(Math.Max(4, _states.Count), StringComparer.OrdinalIgnoreCase);
         }
 
@@ -150,11 +157,32 @@ namespace ServerTest.Modules.Backtest.Application
                 return BuildResult(method.Method ?? "Unknown", false, "当前K线缺失");
             }
 
-            var action = method.Param != null && method.Param.Length > 0 ? method.Param[0] : string.Empty;
-            if (!TryMapAction(action, out var positionSide, out var orderSide, out var isClose))
+            var triggerSnapshots = triggerResults?
+                .Select(result => new ConditionEvaluationSnapshot(result.Key, result.Success, result.Message))
+                .ToList() ?? new List<ConditionEvaluationSnapshot>();
+
+            if (!StrategyTradeTargetHelper.TryCreate(
+                    context.Strategy.UidCode,
+                    context.Strategy.CreatorUserId,
+                    context.Strategy.Id,
+                    context.Strategy.VersionId,
+                    context.Strategy.Version,
+                    context.Strategy.State.ToString().ToLowerInvariant(),
+                    context.Strategy.ExchangeApiKeyId,
+                    context.StrategyConfig?.Trade,
+                    method,
+                    context.Task,
+                    triggerSnapshots,
+                    context.CurrentTime,
+                    out var target,
+                    out var targetError))
             {
-                return BuildResult(method.Method ?? "Unknown", false, "不支持的动作类型");
+                return BuildResult(method.Method ?? "Unknown", false, targetError);
             }
+
+            var positionSide = target.PositionSide;
+            var orderSide = target.OrderSide;
+            var isClose = target.IsClose;
 
             var closePrice = bar.close ?? bar.open ?? 0d;
             if (closePrice <= 0)
@@ -189,7 +217,24 @@ namespace ServerTest.Modules.Backtest.Application
                 TryClosePosition(state, execPrice, context.Task.CandleTimestamp, reason: "Reverse");
             }
 
-            var qty = NormalizeOrderQty(state.OrderQty, state.Contract);
+            var currentOpenQty = state.Position != null &&
+                                 string.Equals(state.Position.Side, positionSide, StringComparison.OrdinalIgnoreCase)
+                ? state.Position.Qty
+                : 0m;
+            var riskResult = _targetRiskService.EvaluateAsync(new StrategyTargetRiskContext
+            {
+                Target = target,
+                Contract = state.Contract,
+                CurrentOpenQty = currentOpenQty
+            }, CancellationToken.None).GetAwaiter().GetResult();
+            if (!riskResult.Success)
+            {
+                return BuildResult(method.Method ?? "Unknown", false, riskResult.Message);
+            }
+
+            target.NormalizedQty = riskResult.NormalizedQty;
+            target.RiskChecks = riskResult.Snapshots;
+            var qty = riskResult.NormalizedQty;
             if (qty <= 0)
             {
                 return BuildResult(method.Method ?? "Unknown", false, "下单数量无效");
@@ -385,33 +430,6 @@ namespace ServerTest.Modules.Backtest.Application
 
             var notional = price * qty * contractSize;
             return notional * feeRate;
-        }
-
-        private static decimal NormalizeOrderQty(decimal qty, ContractDetails? contract)
-        {
-            if (qty <= 0)
-            {
-                return 0m;
-            }
-
-            if (contract?.AmountPrecision != null)
-            {
-                var digits = Math.Max(0, contract.AmountPrecision.Value);
-                var factor = (decimal)Math.Pow(10, digits);
-                qty = Math.Floor(qty * factor) / factor;
-            }
-
-            if (contract?.MinOrderAmount != null && qty < contract.MinOrderAmount.Value)
-            {
-                return 0m;
-            }
-
-            if (contract?.MaxOrderAmount != null && qty > contract.MaxOrderAmount.Value)
-            {
-                qty = contract.MaxOrderAmount.Value;
-            }
-
-            return qty;
         }
 
         private static decimal? BuildStopLossPrice(decimal entryPrice, decimal? stopLossPct, int leverage, string side)
