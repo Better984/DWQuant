@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   DndContext,
@@ -30,6 +30,7 @@ import type {
 import {
   buildEmptyBacktestSummary,
   runLocalBacktestRealtime,
+  warmLocalBacktestCaches,
   type LocalBacktestEquityPoint,
   type LocalBacktestTrade,
   type LocalBacktestSummary,
@@ -1948,6 +1949,64 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
 
   useEffect(() => {
     if (!ready) {
+      return;
+    }
+    if (!talibReady && selectedIndicators.length > 0) {
+      return;
+    }
+    if (backtestBars.length <= 0) {
+      return;
+    }
+
+    const idleScheduler = globalThis as typeof globalThis & {
+      requestIdleCallback?: (
+        callback: (deadline: { didTimeout: boolean; timeRemaining: () => number }) => void,
+        options?: { timeout?: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let idleHandle: number | null = null;
+
+    const warm = () => {
+      warmLocalBacktestCaches({
+        bars: backtestBars,
+        selectedIndicators,
+        logicContainers,
+        filterContainers,
+        methodOptions,
+      });
+    };
+
+    if (typeof idleScheduler.requestIdleCallback === 'function') {
+      idleHandle = idleScheduler.requestIdleCallback(() => {
+        idleHandle = null;
+        warm();
+      }, { timeout: 240 });
+    } else {
+      timer = window.setTimeout(warm, 60);
+    }
+
+    return () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+      if (idleHandle !== null) {
+        idleScheduler.cancelIdleCallback?.(idleHandle);
+      }
+    };
+  }, [
+    ready,
+    talibReady,
+    backtestBars,
+    selectedIndicators,
+    logicContainers,
+    filterContainers,
+    methodOptions,
+  ]);
+
+  useEffect(() => {
+    if (!ready) {
       setLocalBacktestSummary(buildEmptyBacktestSummary('waiting_data', '等待开始创建'));
       setBacktestProgress({
         processedBars: 0,
@@ -1970,7 +2029,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
       return;
     }
     let controller: ReturnType<typeof runLocalBacktestRealtime> | null = null;
-    // 高频编辑场景下做轻量防抖，避免每次按键都触发完整重算。
+    // 高频编辑场景下延后启动回测，并将进度刷新降频到 0.5 秒，避免频繁打断界面交互。
     const debounceTimer = window.setTimeout(() => {
       controller = runLocalBacktestRealtime({
         bars: backtestBars,
@@ -1991,20 +2050,25 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         executionMode: appliedBacktestParams.executionMode,
         useStrategyRuntime: appliedBacktestParams.useStrategyRuntime,
       }, {
-        chunkSize: 320,
-        tickMs: 16,
+        chunkSize: 256,
+        tickMs: 24,
+        maxChunkWorkMs: 8,
+        progressMinIntervalMs: 500,
+        scheduleMode: 'idle',
         onProgress: (progressInfo) => {
-          setLocalBacktestSummary(progressInfo.summary);
-          setBacktestProgress({
-            processedBars: progressInfo.processedBars,
-            totalBars: progressInfo.totalBars,
-            progress: progressInfo.progress,
-            elapsedMs: progressInfo.elapsedMs,
-            done: progressInfo.done,
+          startTransition(() => {
+            setLocalBacktestSummary(progressInfo.summary);
+            setBacktestProgress({
+              processedBars: progressInfo.processedBars,
+              totalBars: progressInfo.totalBars,
+              progress: progressInfo.progress,
+              elapsedMs: progressInfo.elapsedMs,
+              done: progressInfo.done,
+            });
           });
         },
       });
-    }, 80);
+    }, 120);
     return () => {
       window.clearTimeout(debounceTimer);
       controller?.cancel();
@@ -6310,7 +6374,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
         {ready && floatingOverlay}
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={null} zIndex={1950}>
         {activeDrag ? (
           <div
             className={`${activeDrag.previewClassName || ''} strategy-workbench-pointer-ghost-item`}

@@ -609,8 +609,8 @@ type BuiltSeriesResult = {
 };
 
 // 本地运行缓存：用于高频编辑场景下复用中间结果，减少重复 TALib 计算与运行时编译。
-const INDICATOR_SERIES_CACHE_LIMIT = 10;
-const RUNTIME_BUNDLE_CACHE_LIMIT = 12;
+const INDICATOR_SERIES_CACHE_LIMIT = 96;
+const RUNTIME_BUNDLE_CACHE_LIMIT = 24;
 const indicatorSeriesCache = new Map<string, BuiltSeriesResult>();
 const runtimeBundleCache = new Map<string, RuntimeBundle>();
 
@@ -637,20 +637,17 @@ const buildBarsSignature = (bars: KLineData[]) => {
   return `bars:${bars.length}:${first}:${last}`;
 };
 
-const buildIndicatorsSignature = (selectedIndicators: GeneratedIndicatorPayload[]) => {
-  const parts = selectedIndicators.map((indicator) => {
-    const config = indicator.config || {};
-    const indicatorCodeText = normalizeText(String((config as { indicator?: unknown }).indicator || indicator.code || ''));
-    const inputText = normalizeText(String((config as { input?: unknown }).input || ''));
-    const paramsText = Array.isArray((config as { params?: unknown[] }).params)
-      ? ((config as { params?: unknown[] }).params || []).map((item) => normalizeText(String(item))).join(',')
-      : '';
-    const outputsText = Array.isArray(indicator.outputs)
-      ? indicator.outputs.map((output) => normalizeText(output.key)).join(',')
-      : '';
-    return `${indicator.id}|${indicatorCodeText}|${inputText}|${paramsText}|${outputsText}`;
-  });
-  return parts.join('||');
+const buildIndicatorSignature = (indicator: GeneratedIndicatorPayload) => {
+  const config = indicator.config || {};
+  const indicatorCodeText = normalizeText(String((config as { indicator?: unknown }).indicator || indicator.code || ''));
+  const inputText = normalizeText(String((config as { input?: unknown }).input || ''));
+  const paramsText = Array.isArray((config as { params?: unknown[] }).params)
+    ? ((config as { params?: unknown[] }).params || []).map((item) => normalizeText(String(item))).join(',')
+    : '';
+  const outputsText = Array.isArray(indicator.outputs)
+    ? indicator.outputs.map((output) => normalizeText(output.key)).join(',')
+    : '';
+  return `${indicator.id}|${indicatorCodeText}|${inputText}|${paramsText}|${outputsText}`;
 };
 
 const buildRuntimeSignature = (
@@ -692,73 +689,70 @@ const buildRuntimeSignature = (
 
 const buildIndicatorSeries = (
   bars: KLineData[],
-  selectedIndicators: GeneratedIndicatorPayload[],
+  indicator: GeneratedIndicatorPayload,
 ): BuiltSeriesResult => {
   const seriesByValueId = new Map<string, Array<number | undefined>>();
   const warnings: string[] = [];
 
-  if (bars.length === 0 || selectedIndicators.length === 0) {
+  if (bars.length === 0) {
     return { seriesByValueId, warnings };
   }
 
   const metaList = getTalibIndicatorMetaList();
   const byCode = new Map(metaList.map((item) => [normalizeUpper(item.code), item]));
   const byChartName = new Map(metaList.map((item) => [normalizeUpper(item.name), item]));
+  const config = (indicator.config || {}) as {
+    indicator?: string;
+    params?: unknown[];
+    input?: string;
+    output?: string;
+  };
+  const rawCode = String(config.indicator || indicator.code || '').trim();
+  if (!rawCode) {
+    warnings.push(`指标 ${indicator.name || indicator.id} 未配置代码`);
+    return { seriesByValueId, warnings };
+  }
 
-  selectedIndicators.forEach((indicator) => {
-    const config = (indicator.config || {}) as {
-      indicator?: string;
-      params?: unknown[];
-      input?: string;
-      output?: string;
-    };
-    const rawCode = String(config.indicator || indicator.code || '').trim();
-    if (!rawCode) {
-      warnings.push(`指标 ${indicator.name || indicator.id} 未配置代码`);
-      return;
-    }
+  const matchedMeta = resolveTalibMeta(rawCode, byCode, byChartName);
+  if (!matchedMeta) {
+    warnings.push(`指标 ${rawCode} 未在 TALib 元信息中找到映射`);
+    return { seriesByValueId, warnings };
+  }
 
-    const matchedMeta = resolveTalibMeta(rawCode, byCode, byChartName);
-    if (!matchedMeta) {
-      warnings.push(`指标 ${rawCode} 未在 TALib 元信息中找到映射`);
-      return;
-    }
+  const calcSpec = getTalibRuntimeCalcSpec(matchedMeta.name);
+  if (!calcSpec) {
+    warnings.push(`指标 ${rawCode} 尚未完成前端计算规格注册`);
+    return { seriesByValueId, warnings };
+  }
 
-    const calcSpec = getTalibRuntimeCalcSpec(matchedMeta.name);
-    if (!calcSpec) {
-      warnings.push(`指标 ${rawCode} 尚未完成前端计算规格注册`);
-      return;
-    }
+  const params = Array.isArray(config.params)
+    ? config.params.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+    : [];
+  const schema = getTalibIndicatorEditorSchema(matchedMeta.name);
+  const inputMap = parseIndicatorInputMap(
+    typeof config.input === 'string' ? config.input : '',
+    (schema?.inputSlots || []).map((slot) => slot.key),
+  );
+  const rows = calcTalibIndicator(
+    calcSpec,
+    bars,
+    params,
+    inputMap && Object.keys(inputMap).length > 0 ? { taInputMap: inputMap } : undefined,
+  );
+  if (rows.length === 0) {
+    warnings.push(`指标 ${rawCode} 计算结果为空`);
+    return { seriesByValueId, warnings };
+  }
 
-    const params = Array.isArray(config.params)
-      ? config.params.map((value) => Number(value)).filter((value) => Number.isFinite(value))
-      : [];
-    const schema = getTalibIndicatorEditorSchema(matchedMeta.name);
-    const inputMap = parseIndicatorInputMap(
-      typeof config.input === 'string' ? config.input : '',
-      (schema?.inputSlots || []).map((slot) => slot.key),
-    );
-    const rows = calcTalibIndicator(
-      calcSpec,
-      bars,
-      params,
-      inputMap && Object.keys(inputMap).length > 0 ? { taInputMap: inputMap } : undefined,
-    );
-    if (rows.length === 0) {
-      warnings.push(`指标 ${rawCode} 计算结果为空`);
-      return;
-    }
+  const outputs = Array.isArray(indicator.outputs) && indicator.outputs.length > 0
+    ? indicator.outputs
+    : [{ key: typeof config.output === 'string' ? config.output : 'Value' }];
 
-    const outputs = Array.isArray(indicator.outputs) && indicator.outputs.length > 0
-      ? indicator.outputs
-      : [{ key: typeof config.output === 'string' ? config.output : 'Value' }];
-
-    outputs.forEach((output) => {
-      const outputKey = normalizeText(output.key) || 'Value';
-      const valueId = `${indicator.id}:${outputKey}`;
-      const series = rows.map((row) => resolveOutputValue(row, outputKey));
-      seriesByValueId.set(valueId, series);
-    });
+  outputs.forEach((output) => {
+    const outputKey = normalizeText(output.key) || 'Value';
+    const valueId = `${indicator.id}:${outputKey}`;
+    const series = rows.map((row) => resolveOutputValue(row, outputKey));
+    seriesByValueId.set(valueId, series);
   });
 
   return { seriesByValueId, warnings };
@@ -768,14 +762,33 @@ const getIndicatorSeriesWithCache = (
   bars: KLineData[],
   selectedIndicators: GeneratedIndicatorPayload[],
 ): BuiltSeriesResult => {
-  const cacheKey = `${buildBarsSignature(bars)}|${buildIndicatorsSignature(selectedIndicators)}`;
-  const cached = indicatorSeriesCache.get(cacheKey);
-  if (cached) {
-    return cached;
+  const mergedSeries = new Map<string, Array<number | undefined>>();
+  const warnings: string[] = [];
+  if (bars.length <= 0 || selectedIndicators.length <= 0) {
+    return {
+      seriesByValueId: mergedSeries,
+      warnings,
+    };
   }
-  const built = buildIndicatorSeries(bars, selectedIndicators);
-  setLimitedCache(indicatorSeriesCache, cacheKey, built, INDICATOR_SERIES_CACHE_LIMIT);
-  return built;
+
+  const barsSignature = buildBarsSignature(bars);
+  selectedIndicators.forEach((indicator) => {
+    const cacheKey = `${barsSignature}|${buildIndicatorSignature(indicator)}`;
+    let cached = indicatorSeriesCache.get(cacheKey);
+    if (!cached) {
+      cached = buildIndicatorSeries(bars, indicator);
+      setLimitedCache(indicatorSeriesCache, cacheKey, cached, INDICATOR_SERIES_CACHE_LIMIT);
+    }
+    cached.warnings.forEach((warning) => warnings.push(warning));
+    cached.seriesByValueId.forEach((series, valueId) => {
+      mergedSeries.set(valueId, series);
+    });
+  });
+
+  return {
+    seriesByValueId: mergedSeries,
+    warnings,
+  };
 };
 
 const buildMethodMetaMap = (methodOptions: MethodOption[]) => {
@@ -2556,11 +2569,21 @@ export type LocalBacktestRealtimeProgress = {
   elapsedMs: number;
 };
 
+type LocalBacktestScheduleMode = 'timeout' | 'idle';
+
 export type LocalBacktestRealtimeOptions = {
   chunkSize?: number;
   tickMs?: number;
+  progressMinIntervalMs?: number;
+  maxChunkWorkMs?: number;
+  scheduleMode?: LocalBacktestScheduleMode;
   onProgress?: (progress: LocalBacktestRealtimeProgress) => void;
 };
+
+export type LocalBacktestCacheWarmupInput = Pick<
+  LocalBacktestInput,
+  'bars' | 'selectedIndicators' | 'logicContainers' | 'filterContainers' | 'methodOptions'
+>;
 
 const logBacktestDiagnostics = (summary: LocalBacktestSummary, scene: string) => {
   if (typeof console === 'undefined') {
@@ -2576,6 +2599,15 @@ const logBacktestDiagnostics = (summary: LocalBacktestSummary, scene: string) =>
     console.log(`[指标警告] ${summary.warningCount} 条`);
   }
   console.groupEnd();
+};
+
+export const warmLocalBacktestCaches = (input: LocalBacktestCacheWarmupInput) => {
+  if (input.bars.length > 0 && input.selectedIndicators.length > 0) {
+    getIndicatorSeriesWithCache(input.bars, input.selectedIndicators);
+  }
+  if (input.logicContainers.length > 0 || input.filterContainers.length > 0) {
+    getRuntimeBundleWithCache(input.logicContainers, input.filterContainers, input.methodOptions);
+  }
 };
 
 export const runLocalBacktest = (input: LocalBacktestInput): LocalBacktestSummary => {
@@ -2600,6 +2632,16 @@ export const runLocalBacktestRealtime = (
   const prepared = prepareBacktestContext(input);
   const onProgress = options.onProgress;
   const startedAt = Date.now();
+  const progressMinIntervalMs = Math.max(0, Math.trunc(options.progressMinIntervalMs ?? 500));
+  const maxChunkWorkMs = Math.max(4, Math.trunc(options.maxChunkWorkMs ?? 8));
+  const scheduleMode: LocalBacktestScheduleMode = options.scheduleMode === 'timeout' ? 'timeout' : 'idle';
+  const idleScheduler = globalThis as typeof globalThis & {
+    requestIdleCallback?: (
+      callback: (deadline: { didTimeout: boolean; timeRemaining: () => number }) => void,
+      options?: { timeout?: number },
+    ) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
   const emitFinal = (summary: LocalBacktestSummary) => {
     logBacktestDiagnostics(summary, 'realtime');
     onProgress?.({
@@ -2624,9 +2666,16 @@ export const runLocalBacktestRealtime = (
   let cursor = 0;
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let idleHandle: number | null = null;
   let diagnosticsLogged = false;
+  let lastEmitAt = 0;
 
-  const emit = (done: boolean) => {
+  const emit = (done: boolean, force = false) => {
+    const now = Date.now();
+    if (!done && !force && progressMinIntervalMs > 0 && now - lastEmitAt < progressMinIntervalMs) {
+      return;
+    }
+    lastEmitAt = now;
     const summary = buildBacktestSummaryFromContext(context, cursor, done);
     if (done && !diagnosticsLogged) {
       diagnosticsLogged = true;
@@ -2647,26 +2696,59 @@ export const runLocalBacktestRealtime = (
       clearTimeout(timer);
       timer = null;
     }
+    if (idleHandle !== null) {
+      idleScheduler.cancelIdleCallback?.(idleHandle);
+      idleHandle = null;
+    }
   };
 
-  const step = () => {
+  const scheduleStep = () => {
     if (disposed) {
       return;
     }
-    const end = Math.min(totalBars, cursor + chunkSize);
-    while (cursor < end) {
+    if (scheduleMode === 'idle' && typeof idleScheduler.requestIdleCallback === 'function') {
+      idleHandle = idleScheduler.requestIdleCallback(
+        (deadline) => {
+          idleHandle = null;
+          step(deadline);
+        },
+        { timeout: Math.max(32, progressMinIntervalMs || 32) },
+      );
+      return;
+    }
+    timer = setTimeout(() => step(), tickMs);
+  };
+
+  const step = (deadline?: { didTimeout: boolean; timeRemaining: () => number }) => {
+    if (disposed) {
+      return;
+    }
+    const started = Date.now();
+    let processed = 0;
+    while (cursor < totalBars && processed < chunkSize) {
+      if (processed > 0) {
+        if (deadline) {
+          const remaining = deadline.timeRemaining();
+          if (!deadline.didTimeout && remaining <= 1) {
+            break;
+          }
+        } else if (Date.now() - started >= maxChunkWorkMs) {
+          break;
+        }
+      }
       processBacktestBar(context, cursor);
       cursor += 1;
+      processed += 1;
     }
     const done = cursor >= totalBars;
     emit(done);
     if (!done) {
-      timer = setTimeout(step, tickMs);
+      scheduleStep();
     }
   };
 
-  emit(false);
-  timer = setTimeout(step, 0);
+  emit(false, true);
+  scheduleStep();
 
   return {
     cancel: () => {
