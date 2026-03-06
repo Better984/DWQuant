@@ -21,6 +21,12 @@ import { ensureWsConnected, getWsStatus, onWsStatusChange } from '../../network/
 import { useNotification } from '../ui/index.ts';
 import { HttpClient } from '../../network/httpClient.ts';
 import { getToken } from '../../network/tokenStore.ts';
+import {
+  AI_STRATEGY_OPEN_SAVE_EVENT,
+  AI_STRATEGY_OPEN_WORKBENCH_EVENT,
+  type AiStrategyEventDetail,
+} from '../strategy/strategyAiBridge';
+import type { StrategyConfig } from '../strategy/StrategyModule.types';
 
 const HomeModule = lazy(() => import('../home/HomeModule'));
 const MarketModule = lazy(() => import('../market/MarketModule'));
@@ -102,6 +108,9 @@ const Dashboard: React.FC = () => {
   const [breadcrumbText, setBreadcrumbText] = useState(menuBreadcrumbMap[0]);
   const [strategyInitialMenuId, setStrategyInitialMenuId] = useState<string>('recommend');
   const [autoOpenStrategyImport, setAutoOpenStrategyImport] = useState(false);
+  const [strategyEditorInitialConfig, setStrategyEditorInitialConfig] = useState<StrategyConfig | null>(null);
+  const [strategyEditorRequestId, setStrategyEditorRequestId] = useState(0);
+  const [strategyEditorOpenConfigDirectly, setStrategyEditorOpenConfigDirectly] = useState(false);
   const [pendingIndicatorFocusId, setPendingIndicatorFocusId] = useState<string | null>(null);
   const [pendingNewsFocusId, setPendingNewsFocusId] = useState<string | null>(null);
   const rightSidebarMin = 220;
@@ -320,6 +329,45 @@ const Dashboard: React.FC = () => {
     };
   }, [httpClient, isSuperAdmin, userProfile?.email]);
 
+  useEffect(() => {
+    const handleOpenWorkbench = (event: Event) => {
+      const detail = (event as CustomEvent<AiStrategyEventDetail>).detail;
+      const config = detail?.source?.strategyConfig;
+      if (!config) {
+        return;
+      }
+
+      setStrategyInitialMenuId('create');
+      setStrategyEditorInitialConfig(config);
+      setStrategyEditorOpenConfigDirectly(false);
+      setStrategyEditorRequestId(Date.now());
+      setActiveMenuIndex(2);
+      setBreadcrumbText(menuBreadcrumbMap[2]);
+    };
+
+    const handleOpenSave = (event: Event) => {
+      const detail = (event as CustomEvent<AiStrategyEventDetail>).detail;
+      const config = detail?.source?.strategyConfig;
+      if (!config) {
+        return;
+      }
+
+      setStrategyInitialMenuId('create');
+      setStrategyEditorInitialConfig(config);
+      setStrategyEditorOpenConfigDirectly(true);
+      setStrategyEditorRequestId(Date.now());
+      setActiveMenuIndex(2);
+      setBreadcrumbText(menuBreadcrumbMap[2]);
+    };
+
+    window.addEventListener(AI_STRATEGY_OPEN_WORKBENCH_EVENT, handleOpenWorkbench as EventListener);
+    window.addEventListener(AI_STRATEGY_OPEN_SAVE_EVENT, handleOpenSave as EventListener);
+    return () => {
+      window.removeEventListener(AI_STRATEGY_OPEN_WORKBENCH_EVENT, handleOpenWorkbench as EventListener);
+      window.removeEventListener(AI_STRATEGY_OPEN_SAVE_EVENT, handleOpenSave as EventListener);
+    };
+  }, []);
+
   const canSeeTestSection = isSuperAdmin || isSuperAdminVerified;
 
   const renderMainContent = () => {
@@ -329,6 +377,8 @@ const Dashboard: React.FC = () => {
           <HomeModule
             onCreateStrategy={() => {
               setStrategyInitialMenuId('create');
+              setStrategyEditorInitialConfig(null);
+              setStrategyEditorOpenConfigDirectly(false);
               setActiveMenuIndex(2);
               setBreadcrumbText(menuBreadcrumbMap[2]);
             }}
@@ -360,7 +410,15 @@ const Dashboard: React.FC = () => {
       case 1:
         return <MarketModule chartSymbol={`Binance:${selectedSymbol}/USDT`} />;
       case 2:
-        return <StrategyModule initialMenuId={strategyInitialMenuId} />;
+        return (
+          <StrategyModule
+            key={`strategy-${strategyInitialMenuId}-${strategyEditorRequestId}-${strategyEditorOpenConfigDirectly ? '1' : '0'}`}
+            initialMenuId={strategyInitialMenuId}
+            initialConfig={strategyEditorInitialConfig}
+            editorRequestId={strategyEditorRequestId}
+            openConfigDirectly={strategyEditorOpenConfigDirectly}
+          />
+        );
       case 3:
         return (
           <IndicatorModule
@@ -461,6 +519,8 @@ const Dashboard: React.FC = () => {
               setActiveMenuIndex(2);
               setBreadcrumbText(menuBreadcrumbMap[2]);
               setStrategyInitialMenuId('recommend');
+              setStrategyEditorInitialConfig(null);
+              setStrategyEditorOpenConfigDirectly(false);
             }}
           >
             <div className="sidebar-menu-icon">

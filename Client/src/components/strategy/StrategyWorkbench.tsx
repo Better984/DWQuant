@@ -153,6 +153,8 @@ interface StrategyWorkbenchProps {
   onQuickUpdateIndicatorInput: (indicatorId: string, fieldValueId: string) => void;
   onQuickEditIndicatorParams: (indicatorId: string) => void;
   onQuickCreateCondition: (containerId: string, groupId: string | null, method: string) => void;
+  topbarExtraActions?: React.ReactNode;
+  floatingOverlay?: React.ReactNode;
 }
 
 type DashboardMode = 'settings' | 'preview';
@@ -1353,6 +1355,8 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     onQuickUpdateIndicatorInput,
     onQuickEditIndicatorParams,
     onQuickCreateCondition,
+    topbarExtraActions,
+    floatingOverlay,
   } = props;
 
   const [ready, setReady] = useState(false);
@@ -5042,6 +5046,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
             </div>
           </div>
           <div className="strategy-workbench-topbar-actions">
+            {topbarExtraActions}
             <button
               type="button"
               className="strategy-workbench-topbar-button"
@@ -6265,6 +6270,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           open={showOfflineCacheDialog}
           onClose={() => setShowOfflineCacheDialog(false)}
         />
+        {ready && floatingOverlay}
       </div>
 
       {activeDrag && dragCursor ? (

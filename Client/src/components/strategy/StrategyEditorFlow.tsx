@@ -12,6 +12,7 @@ import XrpIcon from '../../assets/icons/crypto/XRP.svg';
 import IndicatorGeneratorSelector, { type GeneratedIndicatorPayload } from '../indicator/IndicatorGeneratorSelector';
 import ConditionEditorDialog from './ConditionEditorDialog';
 import StrategyConfigDialog from './StrategyConfigDialog';
+import StrategyAiFloatingChat from './StrategyAiFloatingChat';
 import StrategyWorkbench from './StrategyWorkbench';
 import type {
   ActionSetConfig,
@@ -36,6 +37,7 @@ import type {
   TradeOption,
   ValueOption,
 } from './StrategyModule.types';
+import type { AiStrategySource } from './strategyAiBridge';
 import { Dialog, useNotification } from '../ui/index.ts';
 import { HttpClient, getToken } from '../../network/index.ts';
 import {
@@ -817,6 +819,7 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
   const [configStep, setConfigStep] = useState(0); // 0: 基本信息, 1: 详细配置
   const [strategyName, setStrategyName] = useState(initialName ?? '');
   const [strategyDescription, setStrategyDescription] = useState(initialDescription ?? '');
+  const [aiPanelOpenRequest, setAiPanelOpenRequest] = useState<{ requestId: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { error, success } = useNotification();
 
@@ -3295,6 +3298,46 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     usedIndicatorOutputs,
   ]);
 
+  const importAiRiskConfig = (source: AiStrategySource) => {
+    const nextRisk = mergeTradeConfig(source.strategyConfig.trade).risk;
+    setTradeConfig((prev) => ({
+      ...prev,
+      risk: deepCloneJson(nextRisk),
+    }));
+    success('已导入 AI 策略的止盈止损与移动止损配置');
+  };
+
+  const importAiLogicConfig = (source: AiStrategySource) => {
+    const importedTimeframe = timeframeLabelFromSeconds(
+      source.strategyConfig.trade?.timeframeSec || tradeConfig.timeframeSec || 60,
+    );
+    const nextIndicators = extractIndicatorsFromConfig(source.strategyConfig, importedTimeframe);
+    const nextContainers = parseConditionContainersFromConfig(source.strategyConfig, importedTimeframe);
+    markHistoryAction('导入 AI 条件判断');
+    setSelectedIndicators(nextIndicators);
+    setConditionContainers(nextContainers);
+    success('已导入 AI 策略的条件判断配置');
+  };
+
+  const buildAiWorkbenchContextMessage = () => {
+    const currentConfig = configReviewData?.configJson || configPreview;
+    const configJson = JSON.stringify(currentConfig, null, 2);
+    return {
+      rawMessage: `[WORKBENCH_CONTEXT]
+这是当前我编辑的策略状态，快速了解一下。
+下面是当前策略配置，仅用于你快速建立上下文，不代表我要你立刻修改策略，也不代表我要你重新生成 strategyConfig。
+请只用简短中文回复你已经了解当前策略状态，不要输出 strategyConfig，不要主动重写策略，除非我后续明确要求你修改。
+${configJson}`,
+      displayText: '这是当前我编辑的策略状态，快速了解一下。',
+    };
+  };
+
+  const handleOpenAiPanel = () => {
+    setAiPanelOpenRequest({
+      requestId: Date.now(),
+    });
+  };
+
   const handleConfirmGenerate = async () => {
     if (isSubmitting) {
       return;
@@ -3777,6 +3820,23 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
           onQuickUpdateIndicatorInput={quickUpdateIndicatorInput}
           onQuickEditIndicatorParams={requestQuickEditIndicatorParams}
           onQuickCreateCondition={quickCreateCondition}
+          topbarExtraActions={
+            <button
+              type="button"
+              className="strategy-workbench-topbar-button is-ai-primary"
+              onClick={handleOpenAiPanel}
+            >
+              多维AI
+            </button>
+          }
+          floatingOverlay={
+            <StrategyAiFloatingChat
+              openRequest={aiPanelOpenRequest}
+              buildCurrentContextRequest={buildAiWorkbenchContextMessage}
+              onImportRisk={importAiRiskConfig}
+              onImportLogic={importAiLogicConfig}
+            />
+          }
         />
       )}
       <Dialog

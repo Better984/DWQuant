@@ -1,15 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './ChatModule.css';
 import { HttpClient, HttpError, getToken } from '../../network/index.ts';
+import type { StrategyConfig } from '../strategy/StrategyModule.types';
+import {
+  openStrategySaveDialogFromAi,
+  openStrategyWorkbenchFromAi,
+} from '../strategy/strategyAiBridge';
 
 type MessageRole = 'user' | 'assistant' | 'system';
 
 interface ChatMessage {
   id: string;
+  messageId?: number;
   role: MessageRole;
   from: string;
   time: string;
   text: string;
+  strategyConfig?: StrategyConfig;
   strategyJson?: string;
   suggestedQuestions?: string[];
   loading?: boolean;
@@ -66,6 +73,7 @@ const ChatModule: React.FC = () => {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [expandedStrategyMap, setExpandedStrategyMap] = useState<Record<string, boolean>>({});
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
   const loadRequestRef = useRef(0);
 
@@ -265,9 +273,10 @@ const ChatModule: React.FC = () => {
       );
 
       const replyText = response?.reply?.trim() || '已生成结果。';
-      const strategyJson = isPlainObject(response?.strategyConfig)
-        ? JSON.stringify(response.strategyConfig, null, 2)
+      const strategyConfig = isPlainObject(response?.strategyConfig)
+        ? (response.strategyConfig as StrategyConfig)
         : undefined;
+      const strategyJson = strategyConfig ? JSON.stringify(strategyConfig, null, 2) : undefined;
       const suggestedQuestions = parseSuggestedQuestions(response?.suggestedQuestions);
 
       const assistantMessage: ChatMessage = {
@@ -276,6 +285,7 @@ const ChatModule: React.FC = () => {
         from: '量化助手',
         time: formatNowTime(),
         text: replyText,
+        strategyConfig,
         strategyJson,
         suggestedQuestions,
       };
@@ -384,44 +394,96 @@ const ChatModule: React.FC = () => {
               </>
             )}
 
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`chat-message is-${message.role}${message.loading ? ' is-loading' : ''}`}
-              >
-                <div className="chat-message-header">
-                  <span className="chat-message-from">{message.from}</span>
-                  <span className="chat-message-time">{message.time}</span>
-                </div>
-                <div className="chat-message-text">{message.text}</div>
-                {message.strategyJson && (
-                  <div className="chat-strategy-block">
-                    <div className="chat-strategy-block-title">可导入策略 JSON</div>
-                    <pre className="chat-strategy-json">{message.strategyJson}</pre>
+            {messages.map((message) => {
+              const currentConversation = conversations.find((item) => item.conversationId === activeConversationId);
+              const source = message.strategyConfig && message.strategyJson
+                ? {
+                    conversationId: currentConversation?.conversationId,
+                    conversationTitle: currentConversation?.title,
+                    messageId: message.messageId,
+                    messageTime: message.time,
+                    replyText: message.text,
+                    strategyConfig: message.strategyConfig,
+                    strategyJson: message.strategyJson,
+                  }
+                : null;
+
+              return (
+                <div
+                  key={message.id}
+                  className={`chat-message is-${message.role}${message.loading ? ' is-loading' : ''}`}
+                >
+                  <div className="chat-message-header">
+                    <span className="chat-message-from">{message.from}</span>
+                    <span className="chat-message-time">{message.time}</span>
                   </div>
-                )}
-                {message.role === 'assistant' && message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
-                  <div className="chat-message-quick-actions">
-                    <div className="chat-message-quick-actions-title">你可以继续问</div>
-                    <div className="chat-message-quick-actions-list">
-                      {message.suggestedQuestions.map((question) => (
+                  <div className="chat-message-text">{message.text}</div>
+                  {message.strategyJson && (
+                    <div className="chat-strategy-block">
+                      <div className="chat-strategy-block-header">
+                        <div>
+                          <div className="chat-strategy-block-title">可导入策略 JSON</div>
+                          <div className="chat-strategy-block-hint">展开后支持滚动查看详情</div>
+                        </div>
                         <button
-                          key={`${message.id}-${question}`}
                           type="button"
-                          className="chat-message-quick-action-btn"
-                          onClick={() => {
-                            void handleQuickQuestionClick(question);
-                          }}
-                          disabled={inputDisabled}
+                          className="chat-strategy-toggle-btn"
+                          onClick={() =>
+                            setExpandedStrategyMap((prev) => ({
+                              ...prev,
+                              [message.id]: !prev[message.id],
+                            }))
+                          }
                         >
-                          {question}
+                          {expandedStrategyMap[message.id] ? '收起' : '展开'}
                         </button>
-                      ))}
+                      </div>
+                      {source && (
+                        <div className="chat-strategy-actions">
+                          <button
+                            type="button"
+                            className="chat-strategy-action-btn is-primary"
+                            onClick={() => openStrategyWorkbenchFromAi(source)}
+                          >
+                            前往调试界面
+                          </button>
+                          <button
+                            type="button"
+                            className="chat-strategy-action-btn"
+                            onClick={() => openStrategySaveDialogFromAi(source)}
+                          >
+                            保存到我的策略
+                          </button>
+                        </div>
+                      )}
+                      {expandedStrategyMap[message.id] && (
+                        <pre className="chat-strategy-json">{message.strategyJson}</pre>
+                      )}
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                  {message.role === 'assistant' && message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
+                    <div className="chat-message-quick-actions">
+                      <div className="chat-message-quick-actions-title">你可以继续问</div>
+                      <div className="chat-message-quick-actions-list">
+                        {message.suggestedQuestions.map((question) => (
+                          <button
+                            key={`${message.id}-${question}`}
+                            type="button"
+                            className="chat-message-quick-action-btn"
+                            onClick={() => {
+                              void handleQuickQuestionClick(question);
+                            }}
+                            disabled={inputDisabled}
+                          >
+                            {question}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <div ref={scrollAnchorRef} />
           </div>
 
@@ -465,14 +527,17 @@ const ChatModule: React.FC = () => {
 };
 
 function mapHistoryMessage(item: ConversationMessageItem): ChatMessage {
+  const strategyConfig = parseStrategyConfig(item.strategyConfigJson);
   const role = normalizeRole(item.role);
   return {
     id: `history-${item.messageId}-${item.createdAt}`,
+    messageId: item.messageId,
     role,
     from: mapFromLabel(role),
     time: formatMessageTime(item.createdAt),
     text: item.text || '',
-    strategyJson: formatStrategyJson(item.strategyConfigJson),
+    strategyConfig,
+    strategyJson: strategyConfig ? JSON.stringify(strategyConfig, null, 2) : undefined,
     suggestedQuestions: parseSuggestedQuestions(item.suggestedQuestionsJson),
   };
 }
@@ -498,15 +563,16 @@ function mapFromLabel(role: MessageRole): string {
   return '系统';
 }
 
-function formatStrategyJson(raw?: string | null): string | undefined {
+function parseStrategyConfig(raw?: string | null): StrategyConfig | undefined {
   if (!raw || !raw.trim()) {
     return undefined;
   }
 
   try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
+    const parsed = JSON.parse(raw) as unknown;
+    return isPlainObject(parsed) ? (parsed as StrategyConfig) : undefined;
   } catch {
-    return raw;
+    return undefined;
   }
 }
 

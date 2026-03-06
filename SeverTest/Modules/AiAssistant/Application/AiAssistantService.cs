@@ -17,6 +17,7 @@ namespace ServerTest.Modules.AiAssistant.Application
     /// </summary>
     public sealed class AiAssistantService
     {
+        private const string WorkbenchContextMarker = "[WORKBENCH_CONTEXT]";
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -93,6 +94,20 @@ namespace ServerTest.Modules.AiAssistant.Application
             var modelContent = await _tencentYuanqiClient.CreateChatCompletionAsync(uid, messages, ct).ConfigureAwait(false);
             var parsed = ParseModelOutput(modelContent);
             var strategyConfig = NormalizeStrategyConfig(parsed.StrategyConfigRaw, userMessage);
+            if (strategyConfig == null && ShouldRetryForMissingStrategyConfig(userMessage, historyWindow, parsed))
+            {
+                _logger.LogWarning("AI 未返回完整策略配置，触发一次补全重试: uid={Uid}", uid);
+                var retryMessages = BuildStrategyRetryMessages(messages, parsed, userMessage);
+                var retryContent = await _tencentYuanqiClient.CreateChatCompletionAsync(uid, retryMessages, ct).ConfigureAwait(false);
+                var retryParsed = ParseModelOutput(retryContent);
+                var retryStrategyConfig = NormalizeStrategyConfig(retryParsed.StrategyConfigRaw, userMessage);
+                if (retryStrategyConfig != null || !string.IsNullOrWhiteSpace(retryParsed.AssistantReply))
+                {
+                    parsed = retryParsed;
+                    strategyConfig = retryStrategyConfig;
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(parsed.StrategyConfigRaw) && strategyConfig == null)
             {
                 _logger.LogWarning("AI 策略配置解析失败，已降级为纯文本回复: uid={Uid}", uid);
@@ -229,13 +244,14 @@ namespace ServerTest.Modules.AiAssistant.Application
                    "  \"suggestedQuestions\": [\"后续可点的快捷提问，最多3条\"]\n" +
                    "}\n\n" +
                    "规则：\n" +
-                   "1. 若用户明确要求“生成策略/配置/JSON”，strategyConfig 必须为对象。\n" +
+                   "1. 若用户明确要求“生成策略/配置/JSON”，或基于已有策略要求你继续修改/新增条件，strategyConfig 必须为对象。\n" +
                    "2. strategyConfig 需要遵循 trade / logic / runtime 三层结构，并尽量使用平台习惯值：\n" +
                    "   - exchange: binance | okx | bitget\n" +
                    "   - symbol: 例如 BTC/USDT\n" +
                    "   - timeframeSec: 秒，例如 60/300/3600/86400\n" +
                    "   - positionMode: Cross 或 Isolated\n" +
                    "   - openConflictPolicy: GiveUp\n" +
+                   "   - 若当前会话里已经有工作台策略上下文，而用户要求你继续修改/新增逻辑，必须返回完整最新 strategyConfig，不能只解释改动\n" +
                    "   - logic.entry.long 与 logic.entry.short 必须包含至少一个可执行条件：containers[].checks.groups[].conditions 不能为空\n" +
                    "   - entry 分支禁止输出 groups: [] 或 conditions: [] 的空条件结构\n" +
                    "   - 条件 method、indicator、params、output 必须严格匹配知识库白名单与参数顺序\n" +
@@ -269,10 +285,9 @@ namespace ServerTest.Modules.AiAssistant.Application
                     output.AssistantReply = replyNode.GetString();
                 }
 
-                if (root.TryGetProperty("strategyConfig", out var configNode) &&
-                    configNode.ValueKind == JsonValueKind.Object)
+                if (TryReadStrategyConfigRaw(root, out var strategyConfigRaw))
                 {
-                    output.StrategyConfigRaw = configNode.GetRawText();
+                    output.StrategyConfigRaw = strategyConfigRaw;
                 }
 
                 output.SuggestedQuestions = ReadSuggestedQuestions(root);
@@ -330,6 +345,61 @@ namespace ServerTest.Modules.AiAssistant.Application
             return new List<string>();
         }
 
+        private static bool TryReadStrategyConfigRaw(JsonElement root, out string? strategyConfigRaw)
+        {
+            strategyConfigRaw = null;
+            foreach (var propertyName in new[] { "strategyConfig", "strategy_config" })
+            {
+                if (!root.TryGetProperty(propertyName, out var node))
+                {
+                    continue;
+                }
+
+                if (node.ValueKind == JsonValueKind.Object)
+                {
+                    strategyConfigRaw = node.GetRawText();
+                    return true;
+                }
+
+                if (node.ValueKind == JsonValueKind.String)
+                {
+                    var text = StripCodeFence(node.GetString() ?? string.Empty);
+                    if (TryExtractEmbeddedJsonObject(text, out var embeddedJson))
+                    {
+                        strategyConfigRaw = embeddedJson;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryExtractEmbeddedJsonObject(string text, out string? json)
+        {
+            json = null;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(text);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return false;
+                }
+
+                json = document.RootElement.GetRawText();
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
         private static string StripCodeFence(string text)
         {
             var raw = text?.Trim() ?? string.Empty;
@@ -357,6 +427,96 @@ namespace ServerTest.Modules.AiAssistant.Application
             }
 
             return string.Join('\n', lines).Trim();
+        }
+
+        private static bool ShouldRetryForMissingStrategyConfig(
+            string userMessage,
+            IReadOnlyList<AiAssistantHistoryItem>? history,
+            AiModelOutput output)
+        {
+            if (!string.IsNullOrWhiteSpace(output.StrategyConfigRaw))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(userMessage) ||
+                userMessage.Contains(WorkbenchContextMarker, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var hasWorkbenchContext = history?.Any(item =>
+                string.Equals(item?.Role, "user", StringComparison.OrdinalIgnoreCase) &&
+                (item?.Text?.Contains(WorkbenchContextMarker, StringComparison.Ordinal) ?? false)) == true;
+
+            if (hasWorkbenchContext && ContainsAny(userMessage, "修改", "新增", "添加", "补充", "优化", "调整", "完善", "改成", "改为"))
+            {
+                return true;
+            }
+
+            if (ContainsAny(userMessage, "生成", "创建", "新增", "添加", "修改", "优化", "调整") &&
+                ContainsAny(userMessage, "策略", "逻辑", "条件", "开多", "开空", "做多", "做空", "止盈", "止损"))
+            {
+                return true;
+            }
+
+            return ContainsAny(output.AssistantReply, "已为你", "已为您", "已基于", "已经为你", "已经为您") &&
+                   ContainsAny(output.AssistantReply, "新增", "添加", "修改", "优化", "调整", "补充");
+        }
+
+        private static List<AiAssistantPromptMessage> BuildStrategyRetryMessages(
+            IReadOnlyList<AiAssistantPromptMessage> messages,
+            AiModelOutput output,
+            string userMessage)
+        {
+            var retryMessages = messages
+                .Select(item => new AiAssistantPromptMessage
+                {
+                    Role = item.Role,
+                    Text = item.Text
+                })
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(output.AssistantReply))
+            {
+                retryMessages.Add(new AiAssistantPromptMessage
+                {
+                    Role = "assistant",
+                    Text = output.AssistantReply.Trim()
+                });
+            }
+
+            retryMessages.Add(new AiAssistantPromptMessage
+            {
+                Role = "user",
+                Text = "你上一条回复只有说明文字，没有返回完整 strategyConfig。" +
+                       "这次用户明确要求你生成或修改策略，请基于当前会话中最近一次已有的策略上下文，重新输出严格 JSON 顶层对象。" +
+                       "要求：1. strategyConfig 必须是完整、最新、可执行的对象，不能只返回差异说明；" +
+                       "2. 未被用户要求修改的部分必须保持原样；" +
+                       "3. 不要使用 markdown 代码块；" +
+                       "4. assistantReply 只简短说明本次改动。用户本次要求：" + userMessage
+            });
+
+            return retryMessages;
+        }
+
+        private static bool ContainsAny(string? text, params string[] keywords)
+        {
+            if (string.IsNullOrWhiteSpace(text) || keywords == null || keywords.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var keyword in keywords)
+            {
+                if (!string.IsNullOrWhiteSpace(keyword) &&
+                    text.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static StrategyConfig? NormalizeStrategyConfig(string? rawConfigJson, string userMessage)
@@ -416,9 +576,18 @@ namespace ServerTest.Modules.AiAssistant.Application
                 return rawConfigJson;
             }
 
-            NormalizeRawTrade(root["trade"] as JsonObject);
-            NormalizeRawLogic(root["logic"] as JsonObject);
-            NormalizeRawRuntime(root["runtime"] as JsonObject);
+            try
+            {
+                NormalizeRawTrade(root["trade"] as JsonObject);
+                NormalizeRawLogic(root["logic"] as JsonObject);
+                NormalizeRawRuntime(root["runtime"] as JsonObject);
+            }
+            catch (InvalidOperationException)
+            {
+                // AI 返回了非预期的节点形态时，不让底层 JsonNode 异常直接中断整次对话。
+                return rawConfigJson;
+            }
+
             return root.ToJsonString();
         }
 
@@ -481,7 +650,7 @@ namespace ServerTest.Modules.AiAssistant.Application
 
         private static void NormalizeRawActionMethod(JsonObject method, string fallbackAction)
         {
-            var methodName = method["method"]?.GetValue<string>()?.Trim();
+            var methodName = ReadJsonNodeText(method["method"]);
             if (!string.Equals(methodName, "MakeTrade", StringComparison.OrdinalIgnoreCase))
             {
                 return;
@@ -509,15 +678,26 @@ namespace ServerTest.Modules.AiAssistant.Application
                 return;
             }
 
-            if (string.Equals(runtime["scheduleType"]?.GetValue<string>(), "Continuous", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(ReadJsonNodeText(runtime["scheduleType"]), "Continuous", StringComparison.OrdinalIgnoreCase))
             {
                 runtime["scheduleType"] = "Always";
             }
 
-            if (string.Equals(runtime["outOfSessionPolicy"]?.GetValue<string>(), "Ignore", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(ReadJsonNodeText(runtime["outOfSessionPolicy"]), "Ignore", StringComparison.OrdinalIgnoreCase))
             {
                 runtime["outOfSessionPolicy"] = "BlockEntryAllowExit";
             }
+        }
+
+        private static string? ReadJsonNodeText(JsonNode? node)
+        {
+            if (node is not JsonValue value)
+            {
+                return null;
+            }
+
+            var text = value.ToString().Trim();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
         }
 
         private static List<string> ExtractStringArray(JsonNode? node)

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import './StrategyModule.css';
 
 import StarIcon from '../../assets/icons/icon/Star.svg';
@@ -13,24 +13,37 @@ import TemplateStrategyList from './TemplateStrategyList';
 import StrategyMarketList from './StrategyMarketList';
 import StrategyRecommend from './StrategyRecommend';
 import type { MenuItem } from './StrategyModule.types';
+import type { StrategyConfig } from './StrategyModule.types';
 import { HttpClient, getToken } from '../../network/index.ts';
 import { Dialog } from '../ui/index.ts';
 
 type StrategyModuleProps = {
   initialMenuId?: string;
+  initialConfig?: StrategyConfig | null;
+  editorRequestId?: number;
+  openConfigDirectly?: boolean;
 };
 
-const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
-  const [activeMenuId, setActiveMenuId] = useState<string>(initialMenuId ?? 'recommend');
-  const [isStrategyEditorOpen, setIsStrategyEditorOpen] = useState(false);
+const StrategyModule: React.FC<StrategyModuleProps> = ({
+  initialMenuId,
+  initialConfig,
+  editorRequestId = 0,
+  openConfigDirectly = false,
+}) => {
+  const isExternalEditorRequest = editorRequestId > 0;
+  const [activeMenuId, setActiveMenuId] = useState<string>(
+    isExternalEditorRequest ? 'create' : (initialMenuId ?? 'recommend'),
+  );
+  const [isStrategyEditorOpen, setIsStrategyEditorOpen] = useState(isExternalEditorRequest);
   const [isCreateConfirmOpen, setIsCreateConfirmOpen] = useState(false);
+  const [editorInitialConfig, setEditorInitialConfig] = useState<StrategyConfig | null>(
+    isExternalEditorRequest ? (initialConfig ?? null) : null,
+  );
+  const [editorOpenConfigDirectly, setEditorOpenConfigDirectly] = useState(
+    isExternalEditorRequest && openConfigDirectly,
+  );
+  const [editorSessionKey, setEditorSessionKey] = useState(editorRequestId || 0);
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
-
-  useEffect(() => {
-    if (initialMenuId) {
-      setActiveMenuId(initialMenuId);
-    }
-  }, [initialMenuId]);
 
   const menuItems: MenuItem[] = [
     { id: 'recommend', label: '推荐', icon: StarIcon },
@@ -42,16 +55,22 @@ const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
   ];
 
   const requestOpenStrategyEditor = () => {
+    setEditorInitialConfig(null);
+    setEditorOpenConfigDirectly(false);
     setIsCreateConfirmOpen(true);
   };
 
   const openStrategyEditor = () => {
     setIsCreateConfirmOpen(false);
+    setEditorInitialConfig(null);
+    setEditorOpenConfigDirectly(false);
+    setEditorSessionKey(Date.now());
     setIsStrategyEditorOpen(true);
   };
 
   const closeStrategyEditor = () => {
     setIsStrategyEditorOpen(false);
+    setEditorOpenConfigDirectly(false);
   };
 
   const handleCreateStrategy = async (payload: StrategyEditorSubmitPayload) => {
@@ -108,11 +127,14 @@ const StrategyModule: React.FC<StrategyModuleProps> = ({ initialMenuId }) => {
           )}
           {activeMenuId === 'create' && isStrategyEditorOpen && (
             <StrategyEditorFlow
+              key={editorSessionKey || 'manual-create'}
               onClose={closeStrategyEditor}
               onSubmit={handleCreateStrategy}
               submitLabel="创建策略"
               successMessage="策略创建成功"
               errorMessage="创建失败，请稍后重试"
+              initialConfig={editorInitialConfig ?? undefined}
+              openConfigDirectly={editorOpenConfigDirectly}
             />
           )}
         </div>

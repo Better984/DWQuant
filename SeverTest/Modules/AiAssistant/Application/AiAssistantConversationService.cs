@@ -12,6 +12,7 @@ namespace ServerTest.Modules.AiAssistant.Application
     /// </summary>
     public sealed class AiAssistantConversationService
     {
+        private const string WorkbenchContextMarker = "[WORKBENCH_CONTEXT]";
         private readonly AiAssistantService _aiAssistantService;
         private readonly AiAssistantChatRepository _repository;
         private readonly AiAssistantOptions _options;
@@ -219,6 +220,11 @@ namespace ServerTest.Modules.AiAssistant.Application
             if (string.IsNullOrWhiteSpace(text))
             {
                 return "新对话";
+            }
+
+            if (text.Contains(WorkbenchContextMarker, StringComparison.Ordinal))
+            {
+                return "当前策略状态同步";
             }
 
             const int maxLength = 30;
