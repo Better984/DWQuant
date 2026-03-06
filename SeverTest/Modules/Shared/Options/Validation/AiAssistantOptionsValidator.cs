@@ -21,9 +21,19 @@ namespace ServerTest.Options
                 failures.Add("AiAssistant.BaseUrl 不能为空");
             }
 
-            if (string.IsNullOrWhiteSpace(options.Model))
+            if (string.IsNullOrWhiteSpace(options.Token))
             {
-                failures.Add("AiAssistant.Model 不能为空");
+                failures.Add("AiAssistant.Token 不能为空");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.AssistantId))
+            {
+                failures.Add("AiAssistant.AssistantId 不能为空");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.ChatType))
+            {
+                failures.Add("AiAssistant.ChatType 不能为空");
             }
 
             if (options.TimeoutSeconds <= 0)
@@ -41,9 +51,10 @@ namespace ServerTest.Options
                 failures.Add("AiAssistant.MaxHistoryMessages 建议不超过 20");
             }
 
-            if (options.Temperature < 0 || options.Temperature > 2)
+            if (!string.Equals(options.ChatType, "published", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(options.ChatType, "preview", StringComparison.OrdinalIgnoreCase))
             {
-                failures.Add("AiAssistant.Temperature 必须在 0 到 2 之间");
+                failures.Add("AiAssistant.ChatType 仅支持 published 或 preview");
             }
 
             return failures.Count > 0

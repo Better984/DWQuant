@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './ChatModule.css';
 import { HttpClient, HttpError, getToken } from '../../network/index.ts';
 
@@ -11,6 +11,7 @@ interface ChatMessage {
   time: string;
   text: string;
   strategyJson?: string;
+  suggestedQuestions?: string[];
   loading?: boolean;
 }
 
@@ -28,6 +29,7 @@ interface ConversationMessageItem {
   role: string;
   text: string;
   strategyConfigJson?: string | null;
+  suggestedQuestionsJson?: string | null;
   createdAt: string;
 }
 
@@ -45,7 +47,15 @@ interface AiAssistantChatResponse {
   conversationTitle?: string;
   reply?: string;
   strategyConfig?: Record<string, unknown> | null;
+  suggestedQuestions?: string[] | null;
 }
+
+const AI_CHAT_TIMEOUT_MS = 120000;
+const DEFAULT_QUICK_QUESTIONS = [
+  '帮我生成一个 RSI+MACD 策略',
+  '给我一个 EMA15 上穿 SMA50 的策略',
+  '当前支持哪些技术指标和条件方法',
+];
 
 const ChatModule: React.FC = () => {
   const client = useMemo(() => new HttpClient({ tokenProvider: getToken }), []);
@@ -58,6 +68,55 @@ const ChatModule: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
   const loadRequestRef = useRef(0);
+
+  const loadConversationMessages = useCallback(async (conversationId: number) => {
+    if (!conversationId || conversationId <= 0) {
+      return;
+    }
+
+    const requestId = ++loadRequestRef.current;
+    setIsLoadingMessages(true);
+
+    try {
+      const response = await client.postProtocol<AiAssistantConversationMessagesResponse>(
+        '/api/ai-assistant/conversations/messages',
+        'ai.assistant.conversation.messages',
+        {
+          conversationId,
+          limit: 200,
+        },
+      );
+
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
+
+      const rows = response?.messages ?? [];
+      setMessages(rows.map(mapHistoryMessage));
+
+      if (response?.conversation?.conversationId) {
+        setConversations((prev) => upsertConversation(prev, response.conversation as ConversationItem));
+      }
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) {
+        return;
+      }
+
+      setMessages([
+        {
+          id: createMessageId(),
+          role: 'system',
+          from: '系统',
+          time: formatNowTime(),
+          text: resolveErrorMessage(error),
+        },
+      ]);
+    } finally {
+      if (requestId === loadRequestRef.current) {
+        setIsLoadingMessages(false);
+      }
+    }
+  }, [client]);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -124,56 +183,7 @@ const ChatModule: React.FC = () => {
     return () => {
       disposed = true;
     };
-  }, [client]);
-
-  const loadConversationMessages = async (conversationId: number) => {
-    if (!conversationId || conversationId <= 0) {
-      return;
-    }
-
-    const requestId = ++loadRequestRef.current;
-    setIsLoadingMessages(true);
-
-    try {
-      const response = await client.postProtocol<AiAssistantConversationMessagesResponse>(
-        '/api/ai-assistant/conversations/messages',
-        'ai.assistant.conversation.messages',
-        {
-          conversationId,
-          limit: 200,
-        },
-      );
-
-      if (requestId !== loadRequestRef.current) {
-        return;
-      }
-
-      const rows = response?.messages ?? [];
-      setMessages(rows.map(mapHistoryMessage));
-
-      if (response?.conversation?.conversationId) {
-        setConversations((prev) => upsertConversation(prev, response.conversation as ConversationItem));
-      }
-    } catch (error) {
-      if (requestId !== loadRequestRef.current) {
-        return;
-      }
-
-      setMessages([
-        {
-          id: createMessageId(),
-          role: 'system',
-          from: '系统',
-          time: formatNowTime(),
-          text: resolveErrorMessage(error),
-        },
-      ]);
-    } finally {
-      if (requestId === loadRequestRef.current) {
-        setIsLoadingMessages(false);
-      }
-    }
-  };
+  }, [client, loadConversationMessages]);
 
   const handleSelectConversation = async (conversationId: number) => {
     if (conversationId <= 0 || conversationId === activeConversationId) {
@@ -213,8 +223,8 @@ const ChatModule: React.FC = () => {
     }
   };
 
-  const handleSend = async () => {
-    const trimmed = inputValue.trim();
+  const sendMessage = async (rawMessage: string) => {
+    const trimmed = rawMessage.trim();
     if (!trimmed || isSending || !activeConversationId) {
       return;
     }
@@ -248,12 +258,17 @@ const ChatModule: React.FC = () => {
           conversationId: activeConversationId,
           message: trimmed,
         },
+        {
+          // AI 生成耗时明显高于普通接口，单独放宽等待时间，避免 15 秒默认超时过早中断。
+          timeoutMs: AI_CHAT_TIMEOUT_MS,
+        },
       );
 
       const replyText = response?.reply?.trim() || '已生成结果。';
       const strategyJson = isPlainObject(response?.strategyConfig)
         ? JSON.stringify(response.strategyConfig, null, 2)
         : undefined;
+      const suggestedQuestions = parseSuggestedQuestions(response?.suggestedQuestions);
 
       const assistantMessage: ChatMessage = {
         id: createMessageId(),
@@ -262,6 +277,7 @@ const ChatModule: React.FC = () => {
         time: formatNowTime(),
         text: replyText,
         strategyJson,
+        suggestedQuestions,
       };
 
       setMessages((prev) => prev.map((item) => (item.id === loadingMessage.id ? assistantMessage : item)));
@@ -291,6 +307,14 @@ const ChatModule: React.FC = () => {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleSend = async () => {
+    await sendMessage(inputValue);
+  };
+
+  const handleQuickQuestionClick = async (question: string) => {
+    await sendMessage(question);
   };
 
   const inputDisabled = isInitializing || isLoadingMessages || isSending || !activeConversationId;
@@ -337,7 +361,27 @@ const ChatModule: React.FC = () => {
             {isInitializing && <div className="chat-empty-tip">正在加载会话...</div>}
             {!isInitializing && isLoadingMessages && messages.length === 0 && <div className="chat-empty-tip">正在加载消息...</div>}
             {!isInitializing && !isLoadingMessages && messages.length === 0 && (
-              <div className="chat-empty-tip">开始描述你的策略需求吧</div>
+              <>
+                <div className="chat-empty-tip">开始描述你的策略需求吧</div>
+                <div className="chat-quick-questions">
+                  <div className="chat-quick-questions-title">快捷提问</div>
+                  <div className="chat-quick-questions-list">
+                    {DEFAULT_QUICK_QUESTIONS.map((question) => (
+                      <button
+                        key={question}
+                        type="button"
+                        className="chat-quick-question-btn"
+                        onClick={() => {
+                          void handleQuickQuestionClick(question);
+                        }}
+                        disabled={inputDisabled}
+                      >
+                        {question}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
             )}
 
             {messages.map((message) => (
@@ -354,6 +398,26 @@ const ChatModule: React.FC = () => {
                   <div className="chat-strategy-block">
                     <div className="chat-strategy-block-title">可导入策略 JSON</div>
                     <pre className="chat-strategy-json">{message.strategyJson}</pre>
+                  </div>
+                )}
+                {message.role === 'assistant' && message.suggestedQuestions && message.suggestedQuestions.length > 0 && (
+                  <div className="chat-message-quick-actions">
+                    <div className="chat-message-quick-actions-title">你可以继续问</div>
+                    <div className="chat-message-quick-actions-list">
+                      {message.suggestedQuestions.map((question) => (
+                        <button
+                          key={`${message.id}-${question}`}
+                          type="button"
+                          className="chat-message-quick-action-btn"
+                          onClick={() => {
+                            void handleQuickQuestionClick(question);
+                          }}
+                          disabled={inputDisabled}
+                        >
+                          {question}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -409,6 +473,7 @@ function mapHistoryMessage(item: ConversationMessageItem): ChatMessage {
     time: formatMessageTime(item.createdAt),
     text: item.text || '',
     strategyJson: formatStrategyJson(item.strategyConfigJson),
+    suggestedQuestions: parseSuggestedQuestions(item.suggestedQuestionsJson),
   };
 }
 
@@ -442,6 +507,27 @@ function formatStrategyJson(raw?: string | null): string | undefined {
     return JSON.stringify(JSON.parse(raw), null, 2);
   } catch {
     return raw;
+  }
+}
+
+function parseSuggestedQuestions(raw?: string[] | string | null): string[] | undefined {
+  if (Array.isArray(raw)) {
+    const items = raw
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter((item, index, list) => item && list.indexOf(item) === index)
+      .slice(0, 3);
+    return items.length > 0 ? items : undefined;
+  }
+
+  if (!raw || !raw.trim()) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parseSuggestedQuestions(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return undefined;
   }
 }
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using MySqlConnector;
 using ServerTest.Infrastructure.Db;
 using ServerTest.Modules.AiAssistant.Domain;
 
@@ -47,13 +48,15 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
   role VARCHAR(16) NOT NULL COMMENT 'user/assistant/system',
   content TEXT NOT NULL COMMENT '消息内容',
   strategy_config_json LONGTEXT NULL COMMENT '助手返回的策略JSON',
+  suggested_questions_json LONGTEXT NULL COMMENT '助手返回的快捷提问JSON',
   created_at DATETIME(3) NOT NULL COMMENT '消息时间(UTC)',
   PRIMARY KEY (id),
   INDEX idx_conversation_created (conversation_id, created_at, id),
   INDEX idx_uid_created (uid, created_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI聊天消息表';
 ";
-            return _db.ExecuteAsync(sql, null, null, ct);
+
+            return EnsureSchemaInternalAsync(sql, ct);
         }
 
         /// <summary>
@@ -159,6 +162,7 @@ SELECT
   m.role AS Role,
   m.content AS Text,
   m.strategy_config_json AS StrategyConfigJson,
+  m.suggested_questions_json AS SuggestedQuestionsJson,
   m.created_at AS CreatedAt
 FROM ai_chat_message m
 JOIN ai_chat_conversation c ON c.id = m.conversation_id
@@ -231,6 +235,7 @@ LIMIT @limit;
             string userMessage,
             string assistantMessage,
             string? strategyConfigJson,
+            string? suggestedQuestionsJson,
             string? suggestedTitle,
             string? lastMessagePreview,
             CancellationToken ct = default)
@@ -238,8 +243,8 @@ LIMIT @limit;
             await using var uow = await _db.BeginUnitOfWorkAsync(ct).ConfigureAwait(false);
             try
             {
-                await InsertMessageAsync(uid, conversationId, "user", userMessage, null, uow, ct).ConfigureAwait(false);
-                await InsertMessageAsync(uid, conversationId, "assistant", assistantMessage, strategyConfigJson, uow, ct)
+                await InsertMessageAsync(uid, conversationId, "user", userMessage, null, null, uow, ct).ConfigureAwait(false);
+                await InsertMessageAsync(uid, conversationId, "assistant", assistantMessage, strategyConfigJson, suggestedQuestionsJson, uow, ct)
                     .ConfigureAwait(false);
 
                 const string updateSql = @"
@@ -295,6 +300,7 @@ WHERE id = @conversationId
             string role,
             string content,
             string? strategyConfigJson,
+            string? suggestedQuestionsJson,
             IUnitOfWork uow,
             CancellationToken ct)
         {
@@ -306,6 +312,7 @@ INSERT INTO ai_chat_message
   role,
   content,
   strategy_config_json,
+  suggested_questions_json,
   created_at
 )
 VALUES
@@ -315,6 +322,7 @@ VALUES
   @role,
   @content,
   @strategyConfigJson,
+  @suggestedQuestionsJson,
   UTC_TIMESTAMP(3)
 );
 ";
@@ -326,10 +334,46 @@ VALUES
                     conversationId,
                     role,
                     content,
-                    strategyConfigJson
+                    strategyConfigJson,
+                    suggestedQuestionsJson
                 },
                 uow,
                 ct);
+        }
+
+        private async Task EnsureSchemaInternalAsync(string createSql, CancellationToken ct)
+        {
+            await _db.ExecuteAsync(createSql, null, null, ct).ConfigureAwait(false);
+            await EnsureSuggestedQuestionsColumnAsync(ct).ConfigureAwait(false);
+        }
+
+        private async Task EnsureSuggestedQuestionsColumnAsync(CancellationToken ct)
+        {
+            const string checkColumnSql = @"
+SELECT COUNT(*)
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'ai_chat_message'
+  AND COLUMN_NAME = 'suggested_questions_json';";
+
+            var columnCount = await _db.ExecuteScalarAsync<int>(checkColumnSql, null, null, ct).ConfigureAwait(false);
+            if (columnCount > 0)
+            {
+                return;
+            }
+
+            const string alterColumnSql = @"
+ALTER TABLE ai_chat_message
+  ADD COLUMN suggested_questions_json LONGTEXT NULL COMMENT '助手返回的快捷提问JSON' AFTER strategy_config_json;";
+
+            try
+            {
+                await _db.ExecuteAsync(alterColumnSql, null, null, ct).ConfigureAwait(false);
+            }
+            catch (MySqlException ex) when (ex.Number == 1060)
+            {
+                _logger.LogWarning("AI 聊天消息表字段 suggested_questions_json 已存在，跳过重复升级");
+            }
         }
 
         private sealed class AiAssistantHistoryRow

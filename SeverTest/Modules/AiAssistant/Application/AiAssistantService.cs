@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Linq;
 using Microsoft.AspNetCore.Hosting;
@@ -22,7 +23,7 @@ namespace ServerTest.Modules.AiAssistant.Application
             PropertyNameCaseInsensitive = true
         };
 
-        private readonly DeepSeekChatClient _deepSeekClient;
+        private readonly TencentYuanqiChatClient _tencentYuanqiClient;
         private readonly AiAssistantOptions _options;
         private readonly IWebHostEnvironment _environment;
         private readonly ILogger<AiAssistantService> _logger;
@@ -31,12 +32,12 @@ namespace ServerTest.Modules.AiAssistant.Application
         private string? _knowledgeText;
 
         public AiAssistantService(
-            DeepSeekChatClient deepSeekClient,
+            TencentYuanqiChatClient tencentYuanqiClient,
             IOptions<AiAssistantOptions> options,
             IWebHostEnvironment environment,
             ILogger<AiAssistantService> logger)
         {
-            _deepSeekClient = deepSeekClient ?? throw new ArgumentNullException(nameof(deepSeekClient));
+            _tencentYuanqiClient = tencentYuanqiClient ?? throw new ArgumentNullException(nameof(tencentYuanqiClient));
             _options = options?.Value ?? new AiAssistantOptions();
             _environment = environment ?? throw new ArgumentNullException(nameof(environment));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -57,12 +58,17 @@ namespace ServerTest.Modules.AiAssistant.Application
             var knowledgeText = await GetKnowledgeTextAsync(ct).ConfigureAwait(false);
             var prompt = BuildSystemPrompt(knowledgeText);
 
-            var messages = new List<DeepSeekChatMessage>
+            var messages = new List<AiAssistantPromptMessage>
             {
                 new()
                 {
-                    Role = "system",
-                    Content = prompt
+                    Role = "user",
+                    Text = prompt
+                },
+                new()
+                {
+                    Role = "assistant",
+                    Text = "好的，我已收到平台规则与知识库，后续会始终使用中文并严格输出要求的 JSON。"
                 }
             };
 
@@ -77,22 +83,28 @@ namespace ServerTest.Modules.AiAssistant.Application
             }
             AppendHistoryMessages(messages, historyWindow);
 
-            messages.Add(new DeepSeekChatMessage
+            messages.Add(new AiAssistantPromptMessage
             {
                 Role = "user",
-                Content = userMessage
+                Text = userMessage
             });
 
             _logger.LogInformation("AI 助手请求开始: uid={Uid}, 历史条数={HistoryCount}", uid, history?.Count ?? 0);
-            var modelContent = await _deepSeekClient.CreateChatCompletionAsync(messages, ct).ConfigureAwait(false);
+            var modelContent = await _tencentYuanqiClient.CreateChatCompletionAsync(uid, messages, ct).ConfigureAwait(false);
             var parsed = ParseModelOutput(modelContent);
+            var strategyConfig = NormalizeStrategyConfig(parsed.StrategyConfigRaw, userMessage);
+            if (!string.IsNullOrWhiteSpace(parsed.StrategyConfigRaw) && strategyConfig == null)
+            {
+                _logger.LogWarning("AI 策略配置解析失败，已降级为纯文本回复: uid={Uid}", uid);
+            }
 
             var result = new AiAssistantChatResult
             {
                 Reply = string.IsNullOrWhiteSpace(parsed.AssistantReply)
                     ? "已收到你的需求。"
                     : parsed.AssistantReply.Trim(),
-                StrategyConfig = NormalizeStrategyConfig(parsed.StrategyConfigRaw, userMessage)
+                StrategyConfig = strategyConfig,
+                SuggestedQuestions = parsed.SuggestedQuestions
             };
 
             _logger.LogInformation(
@@ -104,7 +116,7 @@ namespace ServerTest.Modules.AiAssistant.Application
         }
 
         private static void AppendHistoryMessages(
-            List<DeepSeekChatMessage> messages,
+            List<AiAssistantPromptMessage> messages,
             IReadOnlyList<AiAssistantHistoryItem>? history)
         {
             if (history == null || history.Count == 0)
@@ -132,10 +144,10 @@ namespace ServerTest.Modules.AiAssistant.Application
                     text = text[..1000];
                 }
 
-                messages.Add(new DeepSeekChatMessage
+                messages.Add(new AiAssistantPromptMessage
                 {
                     Role = role,
-                    Content = text
+                    Text = text
                 });
             }
         }
@@ -205,14 +217,16 @@ namespace ServerTest.Modules.AiAssistant.Application
 
         private static string BuildSystemPrompt(string knowledgeText)
         {
-            return "你是“多维量化”平台的 AI 助手，请始终使用中文。\n\n" +
+            return "以下内容是“多维量化”平台 AI 助手的固定规则，不是最终用户问题。请先记住，并在后续用户消息到来后严格遵循。\n\n" +
+                   "你必须始终使用中文。\n\n" +
                    "以下是平台知识库，请优先遵循：\n" +
                    knowledgeText +
                    "\n\n" +
                    "你必须输出严格 JSON（禁止 markdown 代码块、禁止额外说明），结构如下：\n" +
                    "{\n" +
                    "  \"assistantReply\": \"给用户看的中文说明\",\n" +
-                   "  \"strategyConfig\": 对象或 null\n" +
+                   "  \"strategyConfig\": 对象或 null,\n" +
+                   "  \"suggestedQuestions\": [\"后续可点的快捷提问，最多3条\"]\n" +
                    "}\n\n" +
                    "规则：\n" +
                    "1. 若用户明确要求“生成策略/配置/JSON”，strategyConfig 必须为对象。\n" +
@@ -225,9 +239,10 @@ namespace ServerTest.Modules.AiAssistant.Application
                    "   - logic.entry.long 与 logic.entry.short 必须包含至少一个可执行条件：containers[].checks.groups[].conditions 不能为空\n" +
                    "   - entry 分支禁止输出 groups: [] 或 conditions: [] 的空条件结构\n" +
                    "   - 条件 method、indicator、params、output 必须严格匹配知识库白名单与参数顺序\n" +
-                   "   - MakeTrade 动作可使用 args 或 param 传递方向（Long/Short/CloseLong/CloseShort）\n" +
+                   "   - MakeTrade 动作方向必须写在 param 中，例如 [\"Long\"]；args 必须为空数组\n" +
                    "3. 若用户只是咨询，不要求生成策略，strategyConfig 必须为 null。\n" +
-                   "4. assistantReply 简洁明确，不要超过 220 个中文字符。";
+                   "4. assistantReply 简洁明确，不要超过 220 个中文字符。\n" +
+                   "5. suggestedQuestions 返回 0 到 3 条简短中文问题，便于前端渲染快捷提问按钮；若无合适建议请返回空数组。";
         }
 
         private static AiModelOutput ParseModelOutput(string modelContent)
@@ -260,6 +275,8 @@ namespace ServerTest.Modules.AiAssistant.Application
                     output.StrategyConfigRaw = configNode.GetRawText();
                 }
 
+                output.SuggestedQuestions = ReadSuggestedQuestions(root);
+
                 if (string.IsNullOrWhiteSpace(output.AssistantReply))
                 {
                     output.AssistantReply = "已生成结果。";
@@ -272,6 +289,45 @@ namespace ServerTest.Modules.AiAssistant.Application
                 // 模型偶发未按 JSON 返回时，降级为纯文本回复。
                 return new AiModelOutput { AssistantReply = cleaned };
             }
+        }
+
+        private static List<string> ReadSuggestedQuestions(JsonElement root)
+        {
+            foreach (var propertyName in new[] { "suggestedQuestions", "suggestedPrompts", "quickQuestions", "followUpQuestions" })
+            {
+                if (!root.TryGetProperty(propertyName, out var node) || node.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                var questions = new List<string>();
+                foreach (var item in node.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    var text = item.GetString()?.Trim();
+                    if (string.IsNullOrWhiteSpace(text) || questions.Contains(text, StringComparer.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    questions.Add(text);
+                    if (questions.Count >= 3)
+                    {
+                        break;
+                    }
+                }
+
+                if (questions.Count > 0)
+                {
+                    return questions;
+                }
+            }
+
+            return new List<string>();
         }
 
         private static string StripCodeFence(string text)
@@ -310,10 +366,16 @@ namespace ServerTest.Modules.AiAssistant.Application
                 return null;
             }
 
+            var normalizedRawConfigJson = CanonicalizeStrategyConfigJson(rawConfigJson);
+            if (string.IsNullOrWhiteSpace(normalizedRawConfigJson))
+            {
+                return null;
+            }
+
             StrategyConfig? parsed;
             try
             {
-                parsed = JsonSerializer.Deserialize<StrategyConfig>(rawConfigJson, JsonOptions);
+                parsed = JsonSerializer.Deserialize<StrategyConfig>(normalizedRawConfigJson, JsonOptions);
             }
             catch (JsonException)
             {
@@ -335,6 +397,185 @@ namespace ServerTest.Modules.AiAssistant.Application
             NormalizeRuntime(parsed.Runtime, defaults.Runtime);
             EnsureExecutableLogic(parsed, userMessage);
             return parsed;
+        }
+
+        private static string? CanonicalizeStrategyConfigJson(string rawConfigJson)
+        {
+            JsonNode? rootNode;
+            try
+            {
+                rootNode = JsonNode.Parse(rawConfigJson);
+            }
+            catch (JsonException)
+            {
+                return rawConfigJson;
+            }
+
+            if (rootNode is not JsonObject root)
+            {
+                return rawConfigJson;
+            }
+
+            NormalizeRawTrade(root["trade"] as JsonObject);
+            NormalizeRawLogic(root["logic"] as JsonObject);
+            NormalizeRawRuntime(root["runtime"] as JsonObject);
+            return root.ToJsonString();
+        }
+
+        private static void NormalizeRawTrade(JsonObject? trade)
+        {
+            if (trade == null)
+            {
+                return;
+            }
+
+            if (trade["sizing"] is null)
+            {
+                trade["sizing"] = new JsonObject();
+            }
+
+            if (trade["risk"] is null)
+            {
+                trade["risk"] = new JsonObject();
+            }
+        }
+
+        private static void NormalizeRawLogic(JsonObject? logic)
+        {
+            if (logic == null)
+            {
+                return;
+            }
+
+            NormalizeRawBranch(((logic["entry"] as JsonObject)?["long"] as JsonObject), "Long");
+            NormalizeRawBranch(((logic["entry"] as JsonObject)?["short"] as JsonObject), "Short");
+            NormalizeRawBranch(((logic["exit"] as JsonObject)?["long"] as JsonObject), "CloseLong");
+            NormalizeRawBranch(((logic["exit"] as JsonObject)?["short"] as JsonObject), "CloseShort");
+        }
+
+        private static void NormalizeRawBranch(JsonObject? branch, string fallbackAction)
+        {
+            if (branch == null)
+            {
+                return;
+            }
+
+            if (branch["onPass"] is not JsonObject onPass)
+            {
+                return;
+            }
+
+            if (onPass["conditions"] is not JsonArray conditions)
+            {
+                return;
+            }
+
+            foreach (var node in conditions)
+            {
+                if (node is JsonObject method)
+                {
+                    NormalizeRawActionMethod(method, fallbackAction);
+                }
+            }
+        }
+
+        private static void NormalizeRawActionMethod(JsonObject method, string fallbackAction)
+        {
+            var methodName = method["method"]?.GetValue<string>()?.Trim();
+            if (!string.Equals(methodName, "MakeTrade", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var paramValues = ExtractStringArray(method["param"]);
+            if (paramValues.Count == 0)
+            {
+                paramValues = ExtractStringArray(method["args"]);
+            }
+
+            if (paramValues.Count == 0 && !string.IsNullOrWhiteSpace(fallbackAction))
+            {
+                paramValues.Add(fallbackAction);
+            }
+
+            method["param"] = BuildJsonStringArray(paramValues);
+            method["args"] = new JsonArray();
+        }
+
+        private static void NormalizeRawRuntime(JsonObject? runtime)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            if (string.Equals(runtime["scheduleType"]?.GetValue<string>(), "Continuous", StringComparison.OrdinalIgnoreCase))
+            {
+                runtime["scheduleType"] = "Always";
+            }
+
+            if (string.Equals(runtime["outOfSessionPolicy"]?.GetValue<string>(), "Ignore", StringComparison.OrdinalIgnoreCase))
+            {
+                runtime["outOfSessionPolicy"] = "BlockEntryAllowExit";
+            }
+        }
+
+        private static List<string> ExtractStringArray(JsonNode? node)
+        {
+            if (node == null)
+            {
+                return new List<string>();
+            }
+
+            if (node is JsonValue singleValue)
+            {
+                var text = singleValue.ToString().Trim();
+                return string.IsNullOrWhiteSpace(text) ? new List<string>() : new List<string> { text };
+            }
+
+            if (node is not JsonArray array)
+            {
+                return new List<string>();
+            }
+
+            var values = new List<string>();
+            foreach (var item in array)
+            {
+                if (item == null)
+                {
+                    continue;
+                }
+
+                var text = item.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                values.Add(text);
+                if (values.Count >= 3)
+                {
+                    break;
+                }
+            }
+
+            return values;
+        }
+
+        private static JsonArray BuildJsonStringArray(IEnumerable<string> values)
+        {
+            var array = new JsonArray();
+            foreach (var value in values)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                array.Add(value.Trim());
+            }
+
+            return array;
         }
 
         private static void NormalizeTrade(TradeConfig trade, TradeConfig defaults)
@@ -681,7 +922,7 @@ namespace ServerTest.Modules.AiAssistant.Application
 
         private static void NormalizeRuntime(StrategyRuntimeConfig runtime, StrategyRuntimeConfig defaults)
         {
-            var scheduleType = runtime.ScheduleType?.Trim();
+            var scheduleType = NormalizeScheduleType(runtime.ScheduleType);
             if (!string.Equals(scheduleType, "Always", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(scheduleType, "Template", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(scheduleType, "Custom", StringComparison.OrdinalIgnoreCase))
@@ -693,7 +934,7 @@ namespace ServerTest.Modules.AiAssistant.Application
                 runtime.ScheduleType = scheduleType ?? defaults.ScheduleType;
             }
 
-            var policy = runtime.OutOfSessionPolicy?.Trim();
+            var policy = NormalizeOutOfSessionPolicy(runtime.OutOfSessionPolicy);
             if (!string.Equals(policy, "BlockEntryAllowExit", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(policy, "BlockAll", StringComparison.OrdinalIgnoreCase))
             {
@@ -720,6 +961,28 @@ namespace ServerTest.Modules.AiAssistant.Application
 
             runtime.Custom.Days ??= new List<string>();
             runtime.Custom.TimeRanges ??= new List<StrategyRuntimeTimeRange>();
+        }
+
+        private static string? NormalizeScheduleType(string? scheduleType)
+        {
+            var value = scheduleType?.Trim();
+            if (string.Equals(value, "Continuous", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Always";
+            }
+
+            return value;
+        }
+
+        private static string? NormalizeOutOfSessionPolicy(string? policy)
+        {
+            var value = policy?.Trim();
+            if (string.Equals(value, "Ignore", StringComparison.OrdinalIgnoreCase))
+            {
+                return "BlockEntryAllowExit";
+            }
+
+            return value;
         }
 
         private static StrategyConfig BuildDefaultStrategyConfig()
@@ -827,6 +1090,7 @@ namespace ServerTest.Modules.AiAssistant.Application
         {
             public string? AssistantReply { get; set; }
             public string? StrategyConfigRaw { get; set; }
+            public List<string> SuggestedQuestions { get; set; } = new();
         }
     }
 }

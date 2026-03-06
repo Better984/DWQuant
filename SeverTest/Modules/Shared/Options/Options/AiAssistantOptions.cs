@@ -16,29 +16,29 @@ namespace ServerTest.Options
         public bool AutoCreateSchema { get; set; } = true;
 
         /// <summary>
-        /// 模型服务地址（DeepSeek OpenAI 兼容地址）。
+        /// 腾讯元器开放平台地址。
         /// </summary>
-        public string BaseUrl { get; set; } = "https://api.deepseek.com";
+        public string BaseUrl { get; set; } = "https://open.hunyuan.tencent.com";
 
         /// <summary>
-        /// 模型服务密钥。
+        /// 腾讯元器调用 Token。
         /// </summary>
-        public string ApiKey { get; set; } = string.Empty;
+        public string Token { get; set; } = string.Empty;
 
         /// <summary>
-        /// 对话模型名称。
+        /// 腾讯元器智能体 ID。
         /// </summary>
-        public string Model { get; set; } = "deepseek-chat";
+        public string AssistantId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 智能体态，默认使用已发布版本。
+        /// </summary>
+        public string ChatType { get; set; } = "published";
 
         /// <summary>
         /// HTTP 超时秒数。
         /// </summary>
         public int TimeoutSeconds { get; set; } = 60;
-
-        /// <summary>
-        /// 采样温度，越低越稳定。
-        /// </summary>
-        public double Temperature { get; set; } = 0.2;
 
         /// <summary>
         /// 知识库文档路径（相对路径基于 SeverTest 根目录）。

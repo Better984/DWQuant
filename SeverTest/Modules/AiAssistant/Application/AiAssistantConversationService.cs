@@ -114,6 +114,9 @@ namespace ServerTest.Modules.AiAssistant.Application
             var strategyConfigJson = aiResult.StrategyConfig == null
                 ? null
                 : JsonSerializer.Serialize(aiResult.StrategyConfig);
+            var suggestedQuestionsJson = aiResult.SuggestedQuestions.Count == 0
+                ? null
+                : JsonSerializer.Serialize(aiResult.SuggestedQuestions);
 
             await _repository.SaveChatExchangeAsync(
                     uid,
@@ -121,6 +124,7 @@ namespace ServerTest.Modules.AiAssistant.Application
                     userMessage,
                     aiResult.Reply,
                     strategyConfigJson,
+                    suggestedQuestionsJson,
                     suggestedTitle: BuildConversationTitle(userMessage),
                     lastMessagePreview: BuildPreview(aiResult.Reply),
                     ct)
@@ -135,7 +139,8 @@ namespace ServerTest.Modules.AiAssistant.Application
                 ConversationId = currentConversation.ConversationId,
                 ConversationTitle = latestConversation?.Title ?? currentConversation.Title,
                 Reply = aiResult.Reply,
-                StrategyConfig = aiResult.StrategyConfig
+                StrategyConfig = aiResult.StrategyConfig,
+                SuggestedQuestions = aiResult.SuggestedQuestions
             };
         }
 

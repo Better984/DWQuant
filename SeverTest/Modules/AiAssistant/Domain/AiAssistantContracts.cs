@@ -12,6 +12,15 @@ namespace ServerTest.Modules.AiAssistant.Domain
     }
 
     /// <summary>
+    /// 发给 AI 供应商的上下文消息。
+    /// </summary>
+    public sealed class AiAssistantPromptMessage
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// AI 助手聊天请求。
     /// </summary>
     public sealed class AiAssistantChatRequest
@@ -38,6 +47,7 @@ namespace ServerTest.Modules.AiAssistant.Domain
         public string ConversationTitle { get; set; } = "新对话";
         public string Reply { get; set; } = string.Empty;
         public StrategyConfig? StrategyConfig { get; set; }
+        public List<string> SuggestedQuestions { get; set; } = new();
     }
 
     /// <summary>
@@ -87,6 +97,7 @@ namespace ServerTest.Modules.AiAssistant.Domain
         public string Role { get; set; } = string.Empty;
         public string Text { get; set; } = string.Empty;
         public string? StrategyConfigJson { get; set; }
+        public string? SuggestedQuestionsJson { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
   role VARCHAR(16) NOT NULL COMMENT 'user/assistant/system',
   content TEXT NOT NULL COMMENT '消息内容',
   strategy_config_json LONGTEXT NULL COMMENT '助手返回的策略JSON',
+  suggested_questions_json LONGTEXT NULL COMMENT '助手返回的快捷提问JSON',
   created_at DATETIME(3) NOT NULL COMMENT '消息时间(UTC)',
   PRIMARY KEY (id),
   INDEX idx_conversation_created (conversation_id, created_at, id),
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
 - `ai_chat_conversation.title`：会话标题，默认 `新对话`，首轮提问后可自动更新。
 - `ai_chat_conversation.last_message_preview`：列表摘要显示字段，减少前端额外拼装。
 - `ai_chat_message.strategy_config_json`：助手返回策略 JSON 的原文，便于历史回放展示。
+- `ai_chat_message.suggested_questions_json`：助手返回的快捷提问列表 JSON，前端可直接渲染按钮。
 
 ## 索引说明
 - `idx_uid_last_message`：按用户读取会话列表时使用。
@@ -48,3 +50,4 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
 
 ## 自动迁移
 - 服务启动后首次访问 AI 会话接口时，`AiAssistantConversationService` 会触发 `AiAssistantChatRepository.EnsureSchemaAsync` 自动建表（可通过配置关闭）。
+- 若旧库缺少 `suggested_questions_json` 字段，仓储会先查询 `information_schema.COLUMNS`，再执行 `ALTER TABLE` 最小化升级，兼容旧版本 MySQL。

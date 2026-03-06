@@ -397,11 +397,11 @@ static void RegisterRoleServices(IServiceCollection services, IConfiguration con
     services.AddSingleton<MarketDataEngine>();
     services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<MarketDataEngine>());
     services.AddSingleton<ExchangePriceService>();
-    services.AddHttpClient<DeepSeekChatClient>((sp, client) =>
+    services.AddHttpClient<TencentYuanqiChatClient>((sp, client) =>
     {
         var options = sp.GetRequiredService<IOptions<AiAssistantOptions>>().Value;
         var baseUrl = string.IsNullOrWhiteSpace(options.BaseUrl)
-            ? "https://api.deepseek.com"
+            ? "https://open.hunyuan.tencent.com"
             : options.BaseUrl.TrimEnd('/');
 
         client.BaseAddress = new Uri($"{baseUrl}/");

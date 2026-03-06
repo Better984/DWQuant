@@ -9,11 +9,13 @@
 ```json
 {
   "assistantReply": "给用户看的中文说明",
-  "strategyConfig": { ... }
+  "strategyConfig": { ... },
+  "suggestedQuestions": ["可选的后续快捷提问，最多3条"]
 }
 ```
 - 若用户只是咨询，不要求生成策略：`strategyConfig = null`。
 - 若用户要求生成策略：`strategyConfig` 必须为对象，且必须可执行。
+- `suggestedQuestions` 可为空数组；若返回，最多 3 条，且必须是简短中文问题。
 
 ## 3. strategyConfig 结构（必须）
 - 顶层：`trade`、`logic`、`runtime`。
@@ -32,7 +34,7 @@
 ### 4.2 动作节点（MakeTrade）
 - `method` 固定 `MakeTrade`。
 - 标准写法：`param: ["Long"|"Short"|"CloseLong"|"CloseShort"]`。
-- 兼容写法：`args: ["Long"]` 也可被后端解析为 param，但建议仍输出 `param`。
+- `args` 必须为空数组，禁止写成 `["Long"]` 这类字符串数组。
 ### 4.3 值引用（StrategyValueRef）
 - 字段：`refType`、`indicator`、`timeframe`、`input`、`params`、`output`、`offsetRange`、`calcMode`。
 - `refType`：`Field` / `Indicator` / `Const`。
@@ -286,7 +288,8 @@
             "enabled": true,
             "required": false,
             "method": "MakeTrade",
-            "args": ["Long"]
+            "args": [],
+            "param": ["Long"]
           }
         ]
       }
@@ -345,7 +348,8 @@
             "enabled": true,
             "required": false,
             "method": "MakeTrade",
-            "args": ["Short"]
+            "args": [],
+            "param": ["Short"]
           }
         ]
       }
@@ -372,7 +376,8 @@
             "enabled": true,
             "required": false,
             "method": "MakeTrade",
-            "args": ["CloseLong"]
+            "args": [],
+            "param": ["CloseLong"]
           }
         ]
       }
@@ -397,7 +402,8 @@
             "enabled": true,
             "required": false,
             "method": "MakeTrade",
-            "args": ["CloseShort"]
+            "args": [],
+            "param": ["CloseShort"]
           }
         ]
       }

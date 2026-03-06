@@ -191,7 +191,8 @@ namespace ServerTest.Controllers
                     conversationId = result.ConversationId,
                     conversationTitle = result.ConversationTitle,
                     reply = result.Reply,
-                    strategyConfig = result.StrategyConfig
+                    strategyConfig = result.StrategyConfig,
+                    suggestedQuestions = result.SuggestedQuestions
                 };
 
                 return Ok(ApiResponse<object>.Ok(response, "生成成功"));
