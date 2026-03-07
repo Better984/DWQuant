@@ -50,6 +50,7 @@ namespace ServerTest.Middleware
                 $"内部错误: {exception.Message}",
                 null,
                 context.TraceIdentifier);
+            ProtocolContext.SetResponse(context, payload.Code, false, payload.Msg);
 
             var options = new JsonSerializerOptions
             {

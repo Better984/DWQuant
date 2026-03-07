@@ -302,6 +302,12 @@ static void RegisterCommonServices(
     var enableDesktopHost = monitoringOptions.EnableDesktopHost && OperatingSystem.IsWindows();
 
     services.AddSingleton<SystemStartupManager>();
+    services.AddSingleton<ProtocolPerformanceStorageFeature>();
+    services.AddSingleton<ProtocolPerformanceRepository>();
+    services.AddSingleton<ProtocolPerformanceWriteQueue>();
+    services.AddSingleton<ProtocolPerformanceRecorder>();
+    services.AddSingleton<ProtocolPerformanceService>();
+    services.AddHostedService<ProtocolPerformanceWriteWorker>();
 
     if (enableDesktopHost)
     {
@@ -709,6 +715,7 @@ static void ConfigurePipeline(WebApplication app, bool enableHttpApi, bool enabl
 
     if (enableHttpApi)
     {
+        app.UseMiddleware<ProtocolPerformanceHttpMiddleware>();
         app.UseMiddleware<SystemReadinessMiddleware>();
         app.UseAuthentication();
         app.UseAuthorization();

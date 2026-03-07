@@ -1,9 +1,12 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ServerTest.Modules.Monitoring.Application;
+using ServerTest.Modules.Monitoring.Domain;
 using ServerTest.Options;
 using ServerTest.RateLimit;
 using ServerTest.Protocol;
 using System.Net.WebSockets;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
@@ -15,18 +18,24 @@ namespace ServerTest.WebSockets
         private readonly IRateLimiter _rateLimiter;
         private readonly IConnectionManager _connectionManager;
         private readonly WebSocketOptions _options;
+        private readonly ProtocolPerformanceStorageFeature _protocolPerformanceStorageFeature;
+        private readonly ProtocolPerformanceRecorder _protocolPerformanceRecorder;
         private readonly Dictionary<string, Func<WebSocketConnection, ProtocolEnvelope<object>, CancellationToken, Task<ProtocolEnvelope<object>>>> _routes;
 
         public WebSocketHandler(
             ILogger<WebSocketHandler> logger,
             IRateLimiter rateLimiter,
             IConnectionManager connectionManager,
+            ProtocolPerformanceStorageFeature protocolPerformanceStorageFeature,
+            ProtocolPerformanceRecorder protocolPerformanceRecorder,
             IOptions<WebSocketOptions> options,
             IEnumerable<IWsMessageHandler> handlers)
         {
             _logger = logger;
             _rateLimiter = rateLimiter;
             _connectionManager = connectionManager;
+            _protocolPerformanceStorageFeature = protocolPerformanceStorageFeature ?? throw new ArgumentNullException(nameof(protocolPerformanceStorageFeature));
+            _protocolPerformanceRecorder = protocolPerformanceRecorder ?? throw new ArgumentNullException(nameof(protocolPerformanceRecorder));
             _options = options.Value;
 
             _routes = new Dictionary<string, Func<WebSocketConnection, ProtocolEnvelope<object>, CancellationToken, Task<ProtocolEnvelope<object>>>>(StringComparer.OrdinalIgnoreCase);
@@ -121,9 +130,20 @@ namespace ServerTest.WebSockets
                     continue;
                 }
 
+                var serverStartedAt = DateTime.UtcNow;
+                var stopwatch = Stopwatch.StartNew();
+                var trackedType = ResolveTrackedType(envelope.Type);
+
                 if (string.IsNullOrWhiteSpace(envelope.Type))
                 {
-                    await SendAsync(connection, ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.MissingField, "缺少协议类型"), cancellationToken);
+                    await SendWithTelemetryAsync(
+                        connection,
+                        trackedType,
+                        envelope.ReqId,
+                        serverStartedAt,
+                        stopwatch,
+                        ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.MissingField, "缺少协议类型"),
+                        cancellationToken);
                     continue;
                 }
 
@@ -135,7 +155,14 @@ namespace ServerTest.WebSockets
 
                 if (envelope.Ts <= 0)
                 {
-                    await SendAsync(connection, ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.InvalidFormat, "缺少有效时间戳"), cancellationToken);
+                    await SendWithTelemetryAsync(
+                        connection,
+                        trackedType,
+                        envelope.ReqId,
+                        serverStartedAt,
+                        stopwatch,
+                        ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.InvalidFormat, "缺少有效时间戳"),
+                        cancellationToken);
                     continue;
                 }
 
@@ -149,13 +176,27 @@ namespace ServerTest.WebSockets
                 if (!_rateLimiter.Allow(connection.UserId, RateLimit.Protocol.Ws))
                 {
                     _logger.LogWarning("WebSocket 触发限流: 用户 {UserId}", connection.UserId);
-                    await SendAsync(connection, ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.RateLimited, "请求过于频繁"), cancellationToken);
+                    await SendWithTelemetryAsync(
+                        connection,
+                        trackedType,
+                        envelope.ReqId,
+                        serverStartedAt,
+                        stopwatch,
+                        ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.RateLimited, "请求过于频繁"),
+                        cancellationToken);
                     continue;
                 }
 
                 if (!_routes.TryGetValue(envelope.Type, out var handler))
                 {
-                    await SendAsync(connection, ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.Unsupported, "未知协议类型"), cancellationToken);
+                    await SendWithTelemetryAsync(
+                        connection,
+                        trackedType,
+                        envelope.ReqId,
+                        serverStartedAt,
+                        stopwatch,
+                        ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.Unsupported, "未知协议类型"),
+                        cancellationToken);
                     continue;
                 }
 
@@ -164,7 +205,14 @@ namespace ServerTest.WebSockets
                     var response = await handler(connection, envelope, cancellationToken);
                     if (response == null)
                     {
-                        await SendAsync(connection, ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.InternalError, "处理失败"), cancellationToken);
+                        await SendWithTelemetryAsync(
+                            connection,
+                            trackedType,
+                            envelope.ReqId,
+                            serverStartedAt,
+                            stopwatch,
+                            ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.InternalError, "处理失败"),
+                            cancellationToken);
                         continue;
                     }
 
@@ -178,12 +226,26 @@ namespace ServerTest.WebSockets
                         response.Type = ProtocolEnvelopeFactory.BuildAckType(envelope.Type);
                     }
 
-                    await SendAsync(connection, response, cancellationToken);
+                    await SendWithTelemetryAsync(
+                        connection,
+                        trackedType,
+                        envelope.ReqId,
+                        serverStartedAt,
+                        stopwatch,
+                        response,
+                        cancellationToken);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "WebSocket 处理失败: 类型 {Type}", envelope.Type);
-                    await SendAsync(connection, ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.InternalError, "处理异常"), cancellationToken);
+                    await SendWithTelemetryAsync(
+                        connection,
+                        trackedType,
+                        envelope.ReqId,
+                        serverStartedAt,
+                        stopwatch,
+                        ProtocolEnvelopeFactory.Error(envelope.ReqId, ProtocolErrorCodes.InternalError, "处理异常"),
+                        cancellationToken);
                 }
             }
 
@@ -254,6 +316,49 @@ namespace ServerTest.WebSockets
             var json = ProtocolJson.Serialize(envelope);
             var bytes = Encoding.UTF8.GetBytes(json);
             await connection.SendTextAsync(bytes, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task SendWithTelemetryAsync(
+            WebSocketConnection connection,
+            string protocolType,
+            string? reqId,
+            DateTime serverStartedAt,
+            Stopwatch stopwatch,
+            ProtocolEnvelope<object> envelope,
+            CancellationToken cancellationToken)
+        {
+            await SendAsync(connection, envelope, cancellationToken).ConfigureAwait(false);
+
+            if (!_protocolPerformanceStorageFeature.IsEnabled || string.IsNullOrWhiteSpace(reqId))
+            {
+                return;
+            }
+
+            stopwatch.Stop();
+            _protocolPerformanceRecorder.TryRecordServerMetric(new ProtocolPerformanceServerMetric
+            {
+                ReqId = reqId,
+                Transport = ProtocolPerformanceTransport.WebSocket,
+                ProtocolType = protocolType,
+                RequestPath = _options.Path,
+                UserId = connection.UserId,
+                SystemName = connection.System,
+                TraceId = envelope.TraceId,
+                RemoteIp = connection.RemoteIp,
+                ServerStartedAt = serverStartedAt,
+                ServerCompletedAt = DateTime.UtcNow,
+                ServerElapsedMs = (int)Math.Max(0, stopwatch.ElapsedMilliseconds),
+                ProtocolCode = envelope.Code,
+                HttpStatus = null,
+                IsSuccess = envelope.Code == ProtocolErrorCodes.Ok,
+                IsTimeout = envelope.Code == ProtocolErrorCodes.Timeout,
+                ErrorMessage = envelope.Code == ProtocolErrorCodes.Ok ? null : envelope.Msg
+            });
+        }
+
+        private static string ResolveTrackedType(string? type)
+        {
+            return string.IsNullOrWhiteSpace(type) ? "__unknown__" : type.Trim();
         }
 
         private sealed class ReadResult

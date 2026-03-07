@@ -33,7 +33,9 @@ export function subscribeMarket(symbols: string[], listener: MarketListener): ()
         return;
       }
       const symbols = Array.from(symbolRefCounts.keys());
-      getWsClient().send("market.subscribe", { symbols });
+      void getWsClient().request("market.subscribe", { symbols }).catch(() => {
+        // 重连后的补订阅失败交由统一连接逻辑处理
+      });
     });
   }
 
@@ -51,7 +53,7 @@ export function subscribeMarket(symbols: string[], listener: MarketListener): ()
   if (newlyAdded.length > 0) {
     ensureWsConnected()
       .then(() => {
-        getWsClient().send("market.subscribe", { symbols: newlyAdded });
+        return getWsClient().request("market.subscribe", { symbols: newlyAdded });
       })
       .catch(() => {
         // 连接处理由统一逻辑负责，此处忽略
@@ -82,7 +84,7 @@ export function subscribeMarket(symbols: string[], listener: MarketListener): ()
     if (removed.length > 0) {
       ensureWsConnected()
         .then(() => {
-          getWsClient().send("market.unsubscribe", { symbols: removed });
+          return getWsClient().request("market.unsubscribe", { symbols: removed });
         })
         .catch(() => {
           // 连接处理由统一逻辑负责，此处忽略

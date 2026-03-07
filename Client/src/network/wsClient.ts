@@ -2,6 +2,7 @@ import { buildWsUrl, getNetworkConfig } from "./config";
 import { clearToken } from "./tokenStore";
 import { notifyAuthExpired } from "./authEvents";
 import { generateReqId } from "./requestId";
+import { recordProtocolPerformance } from "./protocolPerformanceReporter";
 import type { ProtocolRequest, WsEnvelope } from "./types";
 
 export type WsClientOptions = {
@@ -22,6 +23,9 @@ export type WsClientOptions = {
 export type WsHandler<T = unknown> = (message: WsEnvelope<T>) => void;
 
 type PendingRequest = {
+  type: string;
+  requestPath: string;
+  startedAtMs: number;
   resolve: (value: WsEnvelope<unknown>) => void;
   reject: (error: Error) => void;
   timeoutId: number;
@@ -149,13 +153,26 @@ export class WsClient {
 
   request<TResponse = unknown>(type: string, payload?: unknown, reqId?: string): Promise<WsEnvelope<TResponse>> {
     const requestId = reqId ?? generateReqId();
+    const startedAtMs = Date.now();
     return new Promise((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         this.pending.delete(requestId);
+        this.recordWsMetric({
+          reqId: requestId,
+          type,
+          startedAtMs,
+          completedAtMs: Date.now(),
+          isSuccess: false,
+          isTimeout: true,
+          errorMessage: "WebSocket 请求超时",
+        });
         reject(new Error("WebSocket 请求超时"));
       }, this.requestTimeoutMs);
 
       this.pending.set(requestId, {
+        type,
+        requestPath: this.path,
+        startedAtMs,
         resolve: resolve as (value: WsEnvelope<unknown>) => void,
         reject,
         timeoutId,
@@ -166,6 +183,15 @@ export class WsClient {
       } catch (error) {
         window.clearTimeout(timeoutId);
         this.pending.delete(requestId);
+        this.recordWsMetric({
+          reqId: requestId,
+          type,
+          startedAtMs,
+          completedAtMs: Date.now(),
+          isSuccess: false,
+          isTimeout: false,
+          errorMessage: error instanceof Error ? error.message : "WebSocket 发送失败",
+        });
         reject(error instanceof Error ? error : new Error("WebSocket 发送失败"));
       }
     });
@@ -233,6 +259,17 @@ export class WsClient {
       if (pending) {
         window.clearTimeout(pending.timeoutId);
         this.pending.delete(message.reqId);
+        this.recordWsMetric({
+          reqId: message.reqId,
+          type: pending.type,
+          requestPath: pending.requestPath,
+          startedAtMs: pending.startedAtMs,
+          completedAtMs: Date.now(),
+          protocolCode: message.code,
+          isSuccess: !(message.code && message.code !== 0),
+          isTimeout: message.code === 5002,
+          errorMessage: message.code && message.code !== 0 ? (message.msg ?? "请求失败") : undefined,
+        });
         if (message.code && message.code !== 0) {
           pending.reject(new Error(message.msg ?? "请求失败"));
         } else {
@@ -334,6 +371,32 @@ export class WsClient {
       window.clearTimeout(this.pongTimer);
       this.pongTimer = null;
     }
+  }
+
+  private recordWsMetric(metric: {
+    reqId: string;
+    type: string;
+    requestPath?: string;
+    startedAtMs: number;
+    completedAtMs: number;
+    protocolCode?: number;
+    isSuccess: boolean;
+    isTimeout: boolean;
+    errorMessage?: string;
+  }): void {
+    recordProtocolPerformance({
+      reqId: metric.reqId,
+      transport: "ws",
+      protocolType: metric.type,
+      requestPath: metric.requestPath ?? this.path,
+      clientStartedAtMs: metric.startedAtMs,
+      clientCompletedAtMs: metric.completedAtMs,
+      clientElapsedMs: metric.completedAtMs - metric.startedAtMs,
+      protocolCode: metric.protocolCode,
+      isSuccess: metric.isSuccess,
+      isTimeout: metric.isTimeout,
+      errorMessage: metric.errorMessage,
+    });
   }
 }
 

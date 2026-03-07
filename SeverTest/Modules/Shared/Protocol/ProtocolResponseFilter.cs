@@ -33,8 +33,21 @@ namespace ServerTest.Protocol
 
             if (context.Result is ObjectResult objectResult)
             {
-                if (objectResult.Value is IProtocolEnvelope)
+                if (objectResult.Value is IProtocolEnvelope protocolEnvelope)
                 {
+                    var envelopeStatusCode = objectResult.StatusCode ?? context.HttpContext.Response.StatusCode;
+                    if (envelopeStatusCode <= 0)
+                    {
+                        envelopeStatusCode = protocolEnvelope.Code == ProtocolErrorCodes.Ok
+                            ? StatusCodes.Status200OK
+                            : StatusCodes.Status400BadRequest;
+                    }
+
+                    ProtocolContext.SetResponse(
+                        context.HttpContext,
+                        protocolEnvelope.Code,
+                        protocolEnvelope.Code == ProtocolErrorCodes.Ok && envelopeStatusCode < StatusCodes.Status400BadRequest,
+                        protocolEnvelope.Msg);
                     await next().ConfigureAwait(false);
                     return;
                 }
@@ -75,6 +88,11 @@ namespace ServerTest.Protocol
                         ? StatusCodes.Status400BadRequest
                         : (isError ? statusCode : StatusCodes.Status200OK)
                 };
+                ProtocolContext.SetResponse(
+                    context.HttpContext,
+                    payload.Code,
+                    payload.Code == ProtocolErrorCodes.Ok,
+                    payload.Msg);
 
                 await next().ConfigureAwait(false);
                 return;
@@ -96,6 +114,7 @@ namespace ServerTest.Protocol
                 {
                     StatusCode = statusResult.StatusCode
                 };
+                ProtocolContext.SetResponse(context.HttpContext, payload.Code, false, payload.Msg);
 
                 await next().ConfigureAwait(false);
                 return;
@@ -117,6 +136,7 @@ namespace ServerTest.Protocol
                 {
                     StatusCode = StatusCodes.Status200OK
                 };
+                ProtocolContext.SetResponse(context.HttpContext, payload.Code, true, payload.Msg);
 
                 await next().ConfigureAwait(false);
                 return;

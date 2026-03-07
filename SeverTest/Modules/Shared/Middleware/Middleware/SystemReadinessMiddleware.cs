@@ -135,6 +135,7 @@ namespace ServerTest.Middleware
             var reqId = await ProtocolRequestIdResolver.ResolveAsync(context, _requestLimits.DefaultMaxBodyBytes)
                 .ConfigureAwait(false);
             var payload = ProtocolEnvelopeFactory.Error(reqId, code, message, null, context.TraceIdentifier);
+            ProtocolContext.SetResponse(context, payload.Code, false, payload.Msg);
             var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase

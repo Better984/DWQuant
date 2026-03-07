@@ -11,6 +11,12 @@ namespace ServerTest.Options
         public bool EnableDesktopHost { get; set; }
 
         /// <summary>
+        /// 是否启用协议性能监控入库。
+        /// 关闭后不再采集 HTTP / WebSocket 协议耗时，也不会写入 MySQL。
+        /// </summary>
+        public bool EnableProtocolPerformanceStorage { get; set; }
+
+        /// <summary>
         /// 启动监控日志最大条数
         /// </summary>
         public int MaxLogItems { get; set; } = 1000;

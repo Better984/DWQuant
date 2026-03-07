@@ -2,6 +2,7 @@ import { getNetworkConfig } from "./config";
 import { generateReqId } from "./requestId";
 import { notifyAuthExpired } from "./authEvents";
 import { clearToken } from "./tokenStore";
+import { recordProtocolPerformance } from "./protocolPerformanceReporter";
 import type { ProtocolEnvelope, ProtocolRequest } from "./types";
 
 export type HttpClientOptions = {
@@ -27,6 +28,7 @@ export type ProtocolRequestOptions = {
   signal?: AbortSignal;
   reqId?: string;
   skipAuth?: boolean;
+  skipTelemetry?: boolean;
 };
 
 export class HttpError extends Error {
@@ -86,6 +88,7 @@ export class HttpClient {
     options: ProtocolRequestOptions = {}
   ): Promise<TResponse> {
     const reqId = options.reqId ?? generateReqId();
+    const startedAtMs = Date.now();
     const payload: ProtocolRequest<TData> = {
       type,
       reqId,
@@ -93,25 +96,49 @@ export class HttpClient {
       data: data ?? null,
     };
 
-    const { response, payload: responsePayload } = await this.executeRequest({
-      method: "POST",
-      path,
-      body: payload,
-      headers: {
-        "X-Req-Id": reqId,
-        ...options.headers,
-      },
-      timeoutMs: options.timeoutMs,
-      signal: options.signal,
-      skipAuth: options.skipAuth,
-    });
+    try {
+      const { response, payload: responsePayload } = await this.executeRequest({
+        method: "POST",
+        path,
+        body: payload,
+        headers: {
+          "X-Req-Id": reqId,
+          ...options.headers,
+        },
+        timeoutMs: options.timeoutMs,
+        signal: options.signal,
+        skipAuth: options.skipAuth,
+      });
 
-    const envelope = ensureProtocolEnvelope(responsePayload, response.status);
-    if (!response.ok || envelope.code !== 0) {
-      throw toProtocolError(envelope, response.status);
+      const envelope = ensureProtocolEnvelope(responsePayload, response.status);
+      if (!response.ok || envelope.code !== 0) {
+        throw toProtocolError(envelope, response.status);
+      }
+
+      recordHttpMetric(options.skipTelemetry, {
+        path,
+        type,
+        reqId,
+        startedAtMs,
+        completedAtMs: Date.now(),
+        httpStatus: response.status,
+        protocolCode: envelope.code,
+        isSuccess: true,
+        isTimeout: false,
+      });
+
+      return envelope.data as TResponse;
+    } catch (error) {
+      recordHttpMetric(options.skipTelemetry, {
+        path,
+        type,
+        reqId,
+        startedAtMs,
+        completedAtMs: Date.now(),
+        ...resolveHttpErrorMetric(error),
+      });
+      throw error;
     }
-
-    return envelope.data as TResponse;
   }
 
   async postForm<TResponse = unknown>(
@@ -122,29 +149,54 @@ export class HttpClient {
   ): Promise<TResponse> {
     const reqId = options.reqId ?? generateReqId();
     const now = Date.now();
+    const startedAtMs = now;
     formData.set("type", type);
     formData.set("reqId", reqId);
     formData.set("ts", String(now));
 
-    const { response, payload } = await this.executeRequest({
-      method: "POST",
-      path,
-      body: formData,
-      headers: {
-        "X-Req-Id": reqId,
-        ...options.headers,
-      },
-      timeoutMs: options.timeoutMs,
-      signal: options.signal,
-      skipAuth: options.skipAuth,
-    });
+    try {
+      const { response, payload } = await this.executeRequest({
+        method: "POST",
+        path,
+        body: formData,
+        headers: {
+          "X-Req-Id": reqId,
+          ...options.headers,
+        },
+        timeoutMs: options.timeoutMs,
+        signal: options.signal,
+        skipAuth: options.skipAuth,
+      });
 
-    const envelope = ensureProtocolEnvelope(payload, response.status);
-    if (!response.ok || envelope.code !== 0) {
-      throw toProtocolError(envelope, response.status);
+      const envelope = ensureProtocolEnvelope(payload, response.status);
+      if (!response.ok || envelope.code !== 0) {
+        throw toProtocolError(envelope, response.status);
+      }
+
+      recordHttpMetric(options.skipTelemetry, {
+        path,
+        type,
+        reqId,
+        startedAtMs,
+        completedAtMs: Date.now(),
+        httpStatus: response.status,
+        protocolCode: envelope.code,
+        isSuccess: true,
+        isTimeout: false,
+      });
+
+      return envelope.data as TResponse;
+    } catch (error) {
+      recordHttpMetric(options.skipTelemetry, {
+        path,
+        type,
+        reqId,
+        startedAtMs,
+        completedAtMs: Date.now(),
+        ...resolveHttpErrorMetric(error),
+      });
+      throw error;
     }
-
-    return envelope.data as TResponse;
   }
 
   private async executeRequest(options: RequestOptions): Promise<{ response: Response; payload: unknown }> {
@@ -346,4 +398,72 @@ function mergeSignals(primary: AbortSignal, secondary?: AbortSignal): AbortSigna
   secondary.addEventListener("abort", onAbort);
 
   return controller.signal;
+}
+
+function recordHttpMetric(
+  skipTelemetry: boolean | undefined,
+  metric: {
+    path: string;
+    type: string;
+    reqId: string;
+    startedAtMs: number;
+    completedAtMs: number;
+    httpStatus?: number;
+    protocolCode?: number;
+    isSuccess: boolean;
+    isTimeout: boolean;
+    errorMessage?: string;
+  },
+): void {
+  if (skipTelemetry) {
+    return;
+  }
+
+  recordProtocolPerformance({
+    reqId: metric.reqId,
+    transport: "http",
+    protocolType: metric.type,
+    requestPath: metric.path,
+    httpMethod: "POST",
+    clientStartedAtMs: metric.startedAtMs,
+    clientCompletedAtMs: metric.completedAtMs,
+    clientElapsedMs: metric.completedAtMs - metric.startedAtMs,
+    httpStatus: metric.httpStatus,
+    protocolCode: metric.protocolCode,
+    isSuccess: metric.isSuccess,
+    isTimeout: metric.isTimeout,
+    errorMessage: metric.errorMessage,
+  });
+}
+
+function resolveHttpErrorMetric(error: unknown): {
+  httpStatus?: number;
+  protocolCode?: number;
+  isSuccess: false;
+  isTimeout: boolean;
+  errorMessage?: string;
+} {
+  if (error instanceof HttpError) {
+    return {
+      httpStatus: error.status > 0 ? error.status : undefined,
+      protocolCode: error.code,
+      isSuccess: false,
+      isTimeout: error.status === 408,
+      errorMessage: error.message,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      isSuccess: false,
+      isTimeout: false,
+      errorMessage: error.message,
+    };
+  }
+
+  return {
+    isSuccess: false,
+    isTimeout: false,
+    errorMessage: "网络错误",
+  };
 }
