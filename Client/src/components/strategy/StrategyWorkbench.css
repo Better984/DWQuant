@@ -3506,6 +3506,12 @@
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.1fr);
 }
 
+.strategy-workbench--refactor .strategy-workbench-right.strategy-workbench-right--tuning {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .strategy-workbench--refactor .strategy-workbench-right-left {
   gap: 12px;
   border-right: 0;
@@ -3524,6 +3530,12 @@
   background: var(--wb-surface);
   box-shadow: var(--wb-shadow-soft);
   overflow: hidden;
+}
+
+.strategy-workbench--refactor .strategy-workbench-card.strategy-workbench-card--tuning {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .strategy-workbench--refactor .strategy-workbench-card.strategy-workbench-card--panel,

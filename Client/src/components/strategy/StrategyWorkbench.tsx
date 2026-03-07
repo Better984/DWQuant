@@ -29,6 +29,7 @@ import type {
 } from './StrategyModule.types';
 import {
   buildEmptyBacktestSummary,
+  clearLocalBacktestCaches,
   runLocalBacktestRealtime,
   warmLocalBacktestCaches,
   type LocalBacktestEquityPoint,
@@ -41,6 +42,7 @@ import StrategyWorkbenchKline, {
   type StrategyWorkbenchVisibleRange,
 } from './StrategyWorkbenchKline';
 import KlineOfflineCacheDialog from '../dialogs/KlineOfflineCacheDialog';
+import StrategyTuningPanel from './tuning/StrategyTuningPanel';
 import { formatStrategyValueLabel } from './strategyValueLabel';
 import './StrategyWorkbench.css';
 
@@ -155,6 +157,7 @@ interface StrategyWorkbenchProps {
   onQuickUpdateIndicatorInput: (indicatorId: string, fieldValueId: string) => void;
   onQuickEditIndicatorParams: (indicatorId: string) => void;
   onQuickCreateCondition: (containerId: string, groupId: string | null, method: string) => void;
+  onApplyTuningOptimization: (targetIndicatorId: string, input: string, params: number[]) => boolean;
   topbarExtraActions?: React.ReactNode;
   floatingOverlay?: React.ReactNode;
 }
@@ -162,7 +165,7 @@ interface StrategyWorkbenchProps {
 type DashboardMode = 'settings' | 'preview';
 type BacktestRangeMode = 'latest_30d' | 'custom';
 type PreviewTradeMode = 'normal' | 'full';
-type WorkbenchLayoutMode = 'edit' | 'backtest';
+type WorkbenchLayoutMode = 'edit' | 'backtest' | 'tuning';
 type CalendarViewMode = 'month' | 'week' | 'day';
 type LiveSummaryTab = 'overview' | 'stats' | 'professional' | 'calendar' | 'log';
 
@@ -1349,6 +1352,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     onQuickUpdateIndicatorInput,
     onQuickEditIndicatorParams,
     onQuickCreateCondition,
+    onApplyTuningOptimization,
     topbarExtraActions,
     floatingOverlay,
   } = props;
@@ -2101,6 +2105,14 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
     return () => {
       disposed = true;
     };
+  }, []);
+
+  useEffect(() => {
+    clearLocalBacktestCaches();
+  }, [selectedExchange, selectedSymbol, selectedTimeframeSec]);
+
+  useEffect(() => () => {
+    clearLocalBacktestCaches();
   }, []);
 
   const resolveArgMode = (method: MethodOption | undefined, argIndex: number): ArgValueMode => {
@@ -5124,6 +5136,16 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               >
                 回测模式
               </button>
+              <button
+                type="button"
+                className={`strategy-workbench-layout-toggle-button ${workbenchLayoutMode === 'tuning' ? 'is-active' : ''}`}
+                onClick={() => {
+                  setDashboardMode('preview');
+                  setWorkbenchLayoutMode('tuning');
+                }}
+              >
+                调优模式
+              </button>
             </div>
           </div>
           <div className="strategy-workbench-title-wrap">
@@ -5229,7 +5251,15 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
           </div>
         ) : (
           <div
-            className={`strategy-workbench-main strategy-workbench-main--resizable ${workbenchLayoutMode === 'backtest' ? 'is-backtest-mode' : 'is-edit-mode'}`}
+            className={[
+              'strategy-workbench-main',
+              'strategy-workbench-main--resizable',
+              workbenchLayoutMode === 'backtest'
+                ? 'is-backtest-mode'
+                : workbenchLayoutMode === 'tuning'
+                  ? 'is-tuning-mode'
+                  : 'is-edit-mode',
+            ].join(' ')}
             ref={mainLayoutRef}
             style={
               {
@@ -6141,228 +6171,265 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
               onResizeEnd={commitMainResize}
             />
 
-            <div className="strategy-workbench-right" ref={rightPanelRef}>
-              <div
-                className={`strategy-workbench-right-left strategy-workbench-right-left--resizable ${rightPanelHeightCustomized ? '' : 'is-auto-height'}`}
-                ref={rightLeftRef}
-              >
-                <div className="strategy-workbench-card strategy-workbench-card--panel">
-                  <div className="strategy-workbench-card-header">
-                    <span className="strategy-workbench-card-title">已选指标</span>
-                    <button
-                      type="button"
-                      className="strategy-indicator-add"
-                      onClick={onOpenIndicatorGenerator}
-                    >
-                      新建指标
-                    </button>
-                  </div>
-
-                  {selectedIndicators.length === 0 ? (
-                    <div className="strategy-indicator-empty">暂无指标，点击“新建指标”开始配置。</div>
-                  ) : (
-                    <div className="strategy-indicator-list strategy-indicator-list--workbench">
-                      {selectedIndicators.map((indicator) => {
-                        const group = indicatorGroupMap.get(indicator.id);
-                        const options = group?.options || [];
-                        const config = indicator.config as { input?: unknown };
-                        const inputSource =
-                          typeof config.input === 'string' && config.input.trim()
-                            ? config.input.trim()
-                            : '-';
-                        const color = indicatorColorMap.get(indicator.id) || '#93C5FD';
-                        return (
-                          <DroppableSlot
-                            key={indicator.id}
-                            id={toIndicatorInputDropId(indicator.id)}
-                            className="strategy-indicator-item strategy-indicator-item--colorful"
-                            style={{
-                              background: rgba(color, 0.14),
-                              borderColor: rgba(color, 0.45),
-                            }}
-                          >
-                            <div className="strategy-indicator-layout">
-                              <div className="strategy-indicator-head-row">
-                                <div className="strategy-indicator-title-inline">
-                                  <div className="strategy-indicator-name">{formatIndicatorName(indicator)}</div>
-                                  <span className="strategy-indicator-input-value">{inputSource}</span>
-                                </div>
-                                <div className="strategy-indicator-actions strategy-indicator-actions--compact">
-                                  <button
-                                    type="button"
-                                    className="strategy-indicator-action"
-                                    onClick={() => onEditIndicator(indicator.id)}
-                                  >
-                                    编辑
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="strategy-indicator-action strategy-indicator-remove"
-                                    onClick={() => onRemoveIndicator(indicator.id)}
-                                  >
-                                    删除
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="strategy-indicator-output-row">
-                                <span className="strategy-indicator-row-label">输出</span>
-                                <div className="strategy-indicator-output-list">
-                                  {options.length === 0 ? (
-                                    <span className="strategy-indicator-empty-output">-</span>
-                                  ) : (
-                                    options.map((option, outputIndex) => (
-                                      <DraggableToken
-                                        key={option.id}
-                                        id={`drag-output|${option.id}`}
-                                        payload={{
-                                          kind: 'output',
-                                          valueId: option.id,
-                                          label:
-                                            stripParenthetical(option.label) ||
-                                            stripParenthetical(option.fullLabel) ||
-                                            option.label,
-                                        }}
-                                        className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
-                                        style={outputBadgeStyleMap.get(option.id) || {
-                                          background: rgba(color, 0.24 + outputIndex * 0.08),
-                                          borderColor: rgba(color, 0.62),
-                                          color: '#0f172a',
-                                        }}
-                                        onMouseEnter={() => setActiveHoverValueId(option.id)}
-                                        onMouseLeave={() => setActiveHoverValueId('')}
-                                      >
-                                        {stripParenthetical(option.label) || option.label}
-                                      </DraggableToken>
-                                    ))
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </DroppableSlot>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {fieldOutputGroup && fieldOutputGroup.options.length > 0 ? (
-                    <div className="strategy-indicator-field-zone">
-                      <div className="strategy-indicator-field-title">K线字段（可拖拽）</div>
-                      <div className="strategy-indicator-output-list">
-                        <DraggableToken
-                          id="drag-number|constant"
-                          payload={{
-                            kind: 'number',
-                            label: '数值',
-                          }}
-                          className="strategy-indicator-output-chip strategy-indicator-output-chip--number"
+            <div
+              className={`strategy-workbench-right ${workbenchLayoutMode === 'tuning' ? 'strategy-workbench-right--tuning' : ''}`}
+              ref={rightPanelRef}
+            >
+              {workbenchLayoutMode === 'tuning' ? (
+                <div className="strategy-workbench-card strategy-workbench-card--tuning">
+                  <StrategyTuningPanel
+                    talibReady={talibReady}
+                    bars={backtestBars}
+                    selectedIndicators={selectedIndicators}
+                    indicatorOutputGroups={indicatorOutputGroups}
+                    logicContainers={logicContainers}
+                    filterContainers={filterContainers}
+                    methodOptions={methodOptions}
+                    formatIndicatorName={formatIndicatorName}
+                    backtestSummary={localBacktestSummary}
+                    backtestStats={localBacktestSummary.stats}
+                    previewTrades={previewTrades}
+                    backtestParams={{
+                      takeProfitPct: appliedBacktestParams.takeProfitPct,
+                      stopLossPct: appliedBacktestParams.stopLossPct,
+                      leverage: appliedBacktestParams.leverage,
+                      orderQty: appliedBacktestParams.orderQty,
+                      initialCapital: appliedBacktestParams.initialCapital,
+                      feeRate: appliedBacktestParams.feeRate,
+                      fundingRate: appliedBacktestParams.fundingRate,
+                      slippageBps: appliedBacktestParams.slippageBps,
+                      autoReverse: appliedBacktestParams.autoReverse,
+                      useStrategyRuntime: appliedBacktestParams.useStrategyRuntime,
+                      executionMode: appliedBacktestParams.executionMode,
+                    }}
+                    onApplyOptimization={onApplyTuningOptimization}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div
+                    className={`strategy-workbench-right-left strategy-workbench-right-left--resizable ${rightPanelHeightCustomized ? '' : 'is-auto-height'}`}
+                    ref={rightLeftRef}
+                  >
+                    <div className="strategy-workbench-card strategy-workbench-card--panel">
+                      <div className="strategy-workbench-card-header">
+                        <span className="strategy-workbench-card-title">已选指标</span>
+                        <button
+                          type="button"
+                          className="strategy-indicator-add"
+                          onClick={onOpenIndicatorGenerator}
                         >
-                          数值
-                        </DraggableToken>
-                        {fieldOutputGroup.options.map((option) => (
-                          <DraggableToken
-                            key={option.id}
-                            id={`drag-output|${option.id}`}
-                            payload={{
-                              kind: 'output',
-                              valueId: option.id,
-                              label: option.fullLabel || option.label,
-                            }}
-                            className={`strategy-indicator-output-chip strategy-indicator-output-chip--field ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
-                            onMouseEnter={() => setActiveHoverValueId(option.id)}
-                            onMouseLeave={() => setActiveHoverValueId('')}
-                          >
-                            {option.label}
-                          </DraggableToken>
+                          新建指标
+                        </button>
+                      </div>
+
+                      {selectedIndicators.length === 0 ? (
+                        <div className="strategy-indicator-empty">暂无指标，点击“新建指标”开始配置。</div>
+                      ) : (
+                        <div className="strategy-indicator-list strategy-indicator-list--workbench">
+                          {selectedIndicators.map((indicator) => {
+                            const group = indicatorGroupMap.get(indicator.id);
+                            const options = group?.options || [];
+                            const config = indicator.config as { input?: unknown };
+                            const inputSource =
+                              typeof config.input === 'string' && config.input.trim()
+                                ? config.input.trim()
+                                : '-';
+                            const color = indicatorColorMap.get(indicator.id) || '#93C5FD';
+                            return (
+                              <DroppableSlot
+                                key={indicator.id}
+                                id={toIndicatorInputDropId(indicator.id)}
+                                className="strategy-indicator-item strategy-indicator-item--colorful"
+                                style={{
+                                  background: rgba(color, 0.14),
+                                  borderColor: rgba(color, 0.45),
+                                }}
+                              >
+                                <div className="strategy-indicator-layout">
+                                  <div className="strategy-indicator-head-row">
+                                    <div className="strategy-indicator-title-inline">
+                                      <div className="strategy-indicator-name">{formatIndicatorName(indicator)}</div>
+                                      <span className="strategy-indicator-input-value">{inputSource}</span>
+                                    </div>
+                                    <div className="strategy-indicator-actions strategy-indicator-actions--compact">
+                                      <button
+                                        type="button"
+                                        className="strategy-indicator-action"
+                                        onClick={() => onEditIndicator(indicator.id)}
+                                      >
+                                        编辑
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="strategy-indicator-action strategy-indicator-remove"
+                                        onClick={() => onRemoveIndicator(indicator.id)}
+                                      >
+                                        删除
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="strategy-indicator-output-row">
+                                    <span className="strategy-indicator-row-label">输出</span>
+                                    <div className="strategy-indicator-output-list">
+                                      {options.length === 0 ? (
+                                        <span className="strategy-indicator-empty-output">-</span>
+                                      ) : (
+                                        options.map((option, outputIndex) => (
+                                          <DraggableToken
+                                            key={option.id}
+                                            id={`drag-output|${option.id}`}
+                                            payload={{
+                                              kind: 'output',
+                                              valueId: option.id,
+                                              label:
+                                                stripParenthetical(option.label)
+                                                || stripParenthetical(option.fullLabel)
+                                                || option.label,
+                                            }}
+                                            className={`strategy-indicator-output-chip ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                                            style={outputBadgeStyleMap.get(option.id) || {
+                                              background: rgba(color, 0.24 + outputIndex * 0.08),
+                                              borderColor: rgba(color, 0.62),
+                                              color: '#0f172a',
+                                            }}
+                                            onMouseEnter={() => setActiveHoverValueId(option.id)}
+                                            onMouseLeave={() => setActiveHoverValueId('')}
+                                          >
+                                            {stripParenthetical(option.label) || option.label}
+                                          </DraggableToken>
+                                        ))
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </DroppableSlot>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {fieldOutputGroup && fieldOutputGroup.options.length > 0 ? (
+                        <div className="strategy-indicator-field-zone">
+                          <div className="strategy-indicator-field-title">K线字段（可拖拽）</div>
+                          <div className="strategy-indicator-output-list">
+                            <DraggableToken
+                              id="drag-number|constant"
+                              payload={{
+                                kind: 'number',
+                                label: '数值',
+                              }}
+                              className="strategy-indicator-output-chip strategy-indicator-output-chip--number"
+                            >
+                              数值
+                            </DraggableToken>
+                            {fieldOutputGroup.options.map((option) => (
+                              <DraggableToken
+                                key={option.id}
+                                id={`drag-output|${option.id}`}
+                                payload={{
+                                  kind: 'output',
+                                  valueId: option.id,
+                                  label: option.fullLabel || option.label,
+                                }}
+                                className={`strategy-indicator-output-chip strategy-indicator-output-chip--field ${isLinkedActive(option.id) ? 'is-linked-active' : ''}`}
+                                onMouseEnter={() => setActiveHoverValueId(option.id)}
+                                onMouseLeave={() => setActiveHoverValueId('')}
+                              >
+                                {option.label}
+                              </DraggableToken>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <ResizeHandleVertical
+                      className="strategy-workbench-resize-handle strategy-workbench-resize-handle--vertical strategy-workbench-resize-handle--right-left"
+                      onResize={handleRightLeftVerticalResize}
+                      onResizeEnd={commitRightLeftVerticalResize}
+                    />
+
+                    <div className="strategy-workbench-card strategy-workbench-card--operator">
+                      <div className="strategy-workbench-card-header">
+                        <span className="strategy-workbench-card-title">快捷操作符</span>
+                      </div>
+
+                      <div className="strategy-workbench-operator-list">
+                        {operatorGroups.map((group) => (
+                          <div className="strategy-workbench-operator-group" key={group.key}>
+                            <div className="strategy-workbench-operator-group-title-wrap">
+                              <DraggableToken
+                                id={`drag-category|${group.key}`}
+                                payload={{
+                                  kind: 'category',
+                                  category: group.key,
+                                  label: group.label,
+                                }}
+                                className="strategy-workbench-operator-group-title strategy-workbench-operator-group-title--drag"
+                              >
+                                {group.label}
+                              </DraggableToken>
+                            </div>
+                            <div className="strategy-workbench-operator-chips">
+                              {group.methods.map((method) => (
+                                <DraggableToken
+                                  key={method.value}
+                                  id={`drag-method|${method.value}`}
+                                  payload={{
+                                    kind: 'method',
+                                    method: method.value,
+                                    label: method.label,
+                                    category: method.category || group.key,
+                                  }}
+                                  className="strategy-workbench-operator-chip strategy-workbench-operator-chip--drag"
+                                >
+                                  {methodShortLabel(method.label, method.value)}
+                                </DraggableToken>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
-                  ) : null}
-                </div>
-
-                <ResizeHandleVertical
-                  className="strategy-workbench-resize-handle strategy-workbench-resize-handle--vertical strategy-workbench-resize-handle--right-left"
-                  onResize={handleRightLeftVerticalResize}
-                  onResizeEnd={commitRightLeftVerticalResize}
-                />
-
-                <div className="strategy-workbench-card strategy-workbench-card--operator">
-                  <div className="strategy-workbench-card-header">
-                    <span className="strategy-workbench-card-title">快捷操作符</span>
                   </div>
 
-                  <div className="strategy-workbench-operator-list">
-                    {operatorGroups.map((group) => (
-                      <div className="strategy-workbench-operator-group" key={group.key}>
-                        <div className="strategy-workbench-operator-group-title-wrap">
-                          <DraggableToken
-                            id={`drag-category|${group.key}`}
-                            payload={{
-                              kind: 'category',
-                              category: group.key,
-                              label: group.label,
-                            }}
-                            className="strategy-workbench-operator-group-title strategy-workbench-operator-group-title--drag"
-                          >
-                            {group.label}
-                          </DraggableToken>
-                        </div>
-                        <div className="strategy-workbench-operator-chips">
-                          {group.methods.map((method) => (
-                            <DraggableToken
-                              key={method.value}
-                              id={`drag-method|${method.value}`}
-                              payload={{
-                                kind: 'method',
-                                method: method.value,
-                                label: method.label,
-                                category: method.category || group.key,
-                              }}
-                              className="strategy-workbench-operator-chip strategy-workbench-operator-chip--drag"
-                            >
-                              {methodShortLabel(method.label, method.value)}
-                            </DraggableToken>
-                          ))}
+                  <ResizeHandle
+                    className="strategy-workbench-resize-handle strategy-workbench-resize-handle--right"
+                    onResize={handleRightResize}
+                    onResizeEnd={commitRightResize}
+                  />
+
+                  <div className="strategy-workbench-right-right">
+                    <div className="strategy-workbench-card">
+                      <div className="strategy-workbench-card-header">
+                        <span className="strategy-workbench-card-title">策略条件编辑器</span>
+                      </div>
+                      <div className="strategy-condition-side-tabs">
+                        <button
+                          type="button"
+                          className={`strategy-condition-side-tab strategy-condition-side-tab--long ${conditionSide === 'long' ? 'is-active' : ''}`}
+                          onClick={() => setConditionSide('long')}
+                        >
+                          多头操作
+                        </button>
+                        <button
+                          type="button"
+                          className={`strategy-condition-side-tab strategy-condition-side-tab--short ${conditionSide === 'short' ? 'is-active' : ''}`}
+                          onClick={() => setConditionSide('short')}
+                        >
+                          空头操作
+                        </button>
+                      </div>
+                      <div className="strategy-condition-section">
+                        <div className="strategy-condition-grid">
+                          {containers.map((container) => renderContainer(container))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <ResizeHandle
-                className="strategy-workbench-resize-handle strategy-workbench-resize-handle--right"
-                onResize={handleRightResize}
-                onResizeEnd={commitRightResize}
-              />
-
-              <div className="strategy-workbench-right-right">
-                <div className="strategy-workbench-card">
-                  <div className="strategy-workbench-card-header">
-                    <span className="strategy-workbench-card-title">策略条件编辑器</span>
-                  </div>
-                  <div className="strategy-condition-side-tabs">
-                    <button
-                      type="button"
-                      className={`strategy-condition-side-tab strategy-condition-side-tab--long ${conditionSide === 'long' ? 'is-active' : ''}`}
-                      onClick={() => setConditionSide('long')}
-                    >
-                      多头操作
-                    </button>
-                    <button
-                      type="button"
-                      className={`strategy-condition-side-tab strategy-condition-side-tab--short ${conditionSide === 'short' ? 'is-active' : ''}`}
-                      onClick={() => setConditionSide('short')}
-                    >
-                      空头操作
-                    </button>
-                  </div>
-                  <div className="strategy-condition-section">
-                    <div className="strategy-condition-grid">
-                      {containers.map((container) => renderContainer(container))}
                     </div>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           </div>
         )}

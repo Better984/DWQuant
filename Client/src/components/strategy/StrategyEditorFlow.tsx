@@ -1536,6 +1536,44 @@ const StrategyEditorFlow: React.FC<StrategyEditorFlowProps> = ({
     commitIndicatorUpdate(nextIndicator);
   };
 
+  const applyTuningOptimization = (indicatorId: string, input: string, params: number[]) => {
+    const indicator = selectedIndicators.find((item) => item.id === indicatorId);
+    if (!indicator) {
+      error('目标指标不存在，请刷新后重试');
+      return false;
+    }
+
+    const currentConfig = (indicator.config || {}) as Record<string, unknown>;
+    const nextConfig = {
+      ...currentConfig,
+      input,
+      params: [...params],
+    };
+    const nextIndicator: GeneratedIndicatorPayload = {
+      ...indicator,
+      config: nextConfig,
+      configText: JSON.stringify(nextConfig),
+    };
+
+    const duplicate = selectedIndicators.some((item) => {
+      if (item.id === nextIndicator.id) {
+        return false;
+      }
+      return buildIndicatorSignature(item) === buildIndicatorSignature(nextIndicator);
+    });
+    if (duplicate) {
+      error('调优后的指标会与现有指标重复，请缩小范围后重新扫描');
+      return false;
+    }
+
+    markHistoryAction(
+      `应用调优结果 ${describeIndicatorForHistory(indicator)}: ${input} / ${params.join(', ')}`,
+    );
+    commitIndicatorUpdate(nextIndicator);
+    success('已将调优结果应用到当前指标');
+    return true;
+  };
+
   const closeIndicatorActionDialog = () => {
     setIndicatorAction(null);
   };
@@ -3865,6 +3903,7 @@ ${configJson}`,
           onQuickUpdateIndicatorInput={quickUpdateIndicatorInput}
           onQuickEditIndicatorParams={requestQuickEditIndicatorParams}
           onQuickCreateCondition={quickCreateCondition}
+          onApplyTuningOptimization={applyTuningOptimization}
           topbarExtraActions={
             <button
               type="button"

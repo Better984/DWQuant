@@ -326,6 +326,13 @@ const FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const MIN_EQUITY_PREVIEW_POINTS = 720;
 const MAX_EQUITY_PREVIEW_POINTS = 100_000;
+const MAX_SUMMARY_EQUITY_POINTS = 4096;
+const RUNNING_SUMMARY_EQUITY_POINTS = 1024;
+const MAX_SUMMARY_EVENT_COUNT = 256;
+const RUNNING_SUMMARY_EVENT_COUNT = 64;
+const MAX_SUMMARY_DIAGNOSTIC_COUNT = 20;
+const MAX_SUMMARY_WARNING_COUNT = 24;
+const RUNNING_SUMMARY_TRADE_COUNT = 160;
 const EQUITY_PREVIEW_BUFFER_POINTS = 256;
 
 const resolveEquityPreviewLimit = (barsTotal: number) => {
@@ -335,6 +342,32 @@ const resolveEquityPreviewLimit = (barsTotal: number) => {
   }
   // 与回测样本量同级扩容，默认覆盖完整区间；超大样本时用上限保护内存与渲染性能。
   return Math.min(MAX_EQUITY_PREVIEW_POINTS, Math.max(MIN_EQUITY_PREVIEW_POINTS, safeBars + 64));
+};
+
+const takeTail = <T,>(items: T[], limit: number) => {
+  if (limit <= 0 || items.length <= limit) {
+    return [...items];
+  }
+  return items.slice(items.length - limit);
+};
+
+const compressEquityPreview = (
+  points: LocalBacktestEquityPoint[],
+  limit: number,
+) => {
+  if (limit <= 0 || points.length <= limit) {
+    return [...points];
+  }
+  const sampled: LocalBacktestEquityPoint[] = [];
+  const lastIndex = points.length - 1;
+  for (let index = 0; index < limit; index += 1) {
+    const sourceIndex = Math.min(
+      lastIndex,
+      Math.round((index * lastIndex) / Math.max(1, limit - 1)),
+    );
+    sampled.push(points[sourceIndex]);
+  }
+  return sampled;
 };
 
 const createStageCounters = (barsTotal: number): BacktestStageCounters => ({
@@ -609,8 +642,8 @@ type BuiltSeriesResult = {
 };
 
 // 本地运行缓存：用于高频编辑场景下复用中间结果，减少重复 TALib 计算与运行时编译。
-const INDICATOR_SERIES_CACHE_LIMIT = 96;
-const RUNTIME_BUNDLE_CACHE_LIMIT = 24;
+const INDICATOR_SERIES_CACHE_LIMIT = 48;
+const RUNTIME_BUNDLE_CACHE_LIMIT = 16;
 const indicatorSeriesCache = new Map<string, BuiltSeriesResult>();
 const runtimeBundleCache = new Map<string, RuntimeBundle>();
 
@@ -789,6 +822,16 @@ const getIndicatorSeriesWithCache = (
     seriesByValueId: mergedSeries,
     warnings,
   };
+};
+
+export const buildLocalIndicatorSeriesMap = (
+  bars: KLineData[],
+  selectedIndicators: GeneratedIndicatorPayload[],
+) => getIndicatorSeriesWithCache(bars, selectedIndicators);
+
+export const clearLocalBacktestCaches = () => {
+  indicatorSeriesCache.clear();
+  runtimeBundleCache.clear();
 };
 
 const buildMethodMetaMap = (methodOptions: MethodOption[]) => {
@@ -2524,6 +2567,14 @@ const buildBacktestSummaryFromContext = (
       ? `本地回测已执行（${context.warnings.length} 条指标警告）`
       : '本地回测已执行（与后端一致：执行多空分支）')
     : `本地回测进行中：已处理 ${safeProcessedBars}/${context.bars.length} 根K线，累计仓位 ${trades.length}。`;
+  const visibleTrades = done ? trades : takeTail(trades, RUNNING_SUMMARY_TRADE_COUNT);
+  const visibleWarnings = takeTail(context.warnings, MAX_SUMMARY_WARNING_COUNT);
+  const visibleDiagnostics = takeTail(diagnostics, MAX_SUMMARY_DIAGNOSTIC_COUNT);
+  const visibleEvents = takeTail(events, done ? MAX_SUMMARY_EVENT_COUNT : RUNNING_SUMMARY_EVENT_COUNT);
+  const visibleEquityPreview = compressEquityPreview(
+    context.metrics.equityPreview,
+    done ? MAX_SUMMARY_EQUITY_POINTS : RUNNING_SUMMARY_EQUITY_POINTS,
+  );
 
   return {
     status: 'running',
@@ -2545,11 +2596,11 @@ const buildBacktestSummaryFromContext = (
     openPositionSide: context.state.position?.side || '',
     openPositionEntryPrice: context.state.position?.entryPrice || 0,
     warningCount: context.warnings.length,
-    warnings: context.warnings,
-    diagnostics,
-    trades,
-    events,
-    equityPreview: [...context.metrics.equityPreview],
+    warnings: visibleWarnings,
+    diagnostics: visibleDiagnostics,
+    trades: visibleTrades,
+    events: visibleEvents,
+    equityPreview: visibleEquityPreview,
     stats,
     tradeSummary,
     equitySummary,
