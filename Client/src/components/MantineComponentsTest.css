@@ -1,0 +1,27 @@
+.mantine-test-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.1), transparent 28%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 32%),
+    linear-gradient(180deg, #f3f7fb 0%, #eef2f7 100%);
+}
+
+.mantine-test-shell {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 28px 20px 72px;
+}
+
+.mantine-test-hero {
+  margin-bottom: 24px;
+}
+
+.mantine-demo-section {
+  margin-top: 24px;
+}
+
+@media (max-width: 768px) {
+  .mantine-test-shell {
+    padding: 20px 14px 48px;
+  }
+}

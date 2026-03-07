@@ -10,7 +10,7 @@
 
 .test-container {
   width: 100%;
-  max-width: 400px;
+  max-width: 960px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -20,8 +20,51 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
   margin-top: 40px;
+}
+
+.quick-actions-primary {
+  width: min(100%, 420px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.quick-actions-divider {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quick-actions-divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(209, 213, 219, 0), rgba(209, 213, 219, 1), rgba(209, 213, 219, 0));
+}
+
+.quick-actions-divider-text {
+  white-space: nowrap;
+}
+
+.quick-actions-note {
+  margin: 0;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.quick-actions-sections {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
 }
 
 .quick-action-button {
@@ -52,9 +95,43 @@
   box-shadow: none;
 }
 
+.quick-action-button--section {
+  min-height: 88px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.quick-action-button-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.quick-action-button-subtitle {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #6b7280;
+}
+
 /* 响应式设计 */
 @media (max-width: 480px) {
   .test-page {
     padding: 20px 16px;
+  }
+
+  .quick-actions {
+    gap: 16px;
+  }
+
+  .quick-actions-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-actions-divider {
+    gap: 8px;
+    font-size: 12px;
   }
 }

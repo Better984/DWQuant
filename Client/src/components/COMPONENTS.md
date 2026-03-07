@@ -1,4 +1,4 @@
-# 组件说明
+﻿# 组件说明
 
 ## 命名与资源约定
 - 基础 UI 组件（`ui/` 下）使用 CSS 类前缀 `ui-`（如 `ui-dialog`、`ui-button`）。
@@ -43,10 +43,11 @@
 - **StrategyWorkbench / StrategyWorkbenchKline**：策略工作台与图表组件，新增“本地缓存”入口；K线加载链路为“本地 IndexedDB → 云端离线分片（自动落库）→ 后端历史行情接口”三级回退，仪表盘回测统一消费同一份本地 K 线数据。工作台K线已关闭定时自动刷新，支持左滑触发历史懒加载（优先本地缓存，缺失时回退后端）。仪表盘改为“参数设置/回测预览”双态切换：参数页支持止盈止损、杠杆、开仓量、初始资金、手续费率、资金费率、滑点、自动反向、运行时间门禁、执行模式；预览页改为“左侧实时统计（仓位/胜率/平均盈亏+进度）+右侧实时仓位列表”。回测采用分片执行并持续刷新反馈，参数变更/条件变更/指标变更均会触发重算；列表默认展示最近若干条仓位以保证单屏可视化。
 - **StrategyRecommend / OfficialStrategyList / StrategyMarketList**：统一透传并展示 `pnlSeries30d`、`curveSource`、`isBacktestCurve`，确保官方/市场/推荐三处表现一致。
 - **StrategyTemplateOptions**：策略创建入口选项（自定义/模板/导入）。
-- **TestPage**：测试页容器。
+- **TestPage**：测试页容器；首页 `<div class="quick-actions">` 现已保留库级入口（SnowUI 总览、Mantine 组件库等），下方直达区仍只保留 SnowUI 风格组件，可直接跳转到 `/ui-test?section=<分区 id>`。
 - **TradeConfigForm**：交易规则表单（交易所/币对/风控等）。
 - **TradingViewDatafeed**：TradingView 数据源适配器。
-- **UIComponentsTest**：UI 组件测试/演示页面（路由 `/ui-test`）。
+- **UIComponentsTest**：UI 组件测试/演示页面（路由 `/ui-test`）；当前页面已收缩为仅展示 SnowUI 风格组件，并支持通过 `section` 查询参数滚动定位到具体组件分区。
+- **MantineComponentsTest**：Mantine 组件库测试/演示页面（路由 `/mantine-test`）；独立展示 Mantine 的按钮、表单、数据展示、浮层和导航组件，用于和 SnowUI 页面做横向对比。
 - **UserSettings**：用户设置模块。
 - **WhatsOnRoadPanel**：资讯/路况面板模块。
 - **WsNotificationBridge**：WebSocket 通知桥接层。
@@ -59,3 +60,5 @@
 - 可滚动容器统一添加 `ui-scrollable` 类，使用 `index.css` 中定义的全局滚动条样式（4px 宽度、透明轨道、统一拇指颜色与 hover 效果）。
 - 所有带 `overflow-y: auto` 或 `overflow: auto` 的列表、面板、弹窗内容区等，均应添加 `ui-scrollable`，保证全站滚动条视觉一致。
 - 已适配：Dashboard（主内容、左右侧栏）、PlanetModule、StrategyModule/StrategyConfigDialog/StrategyDetailDialog/StrategyHistoryDialog、MarketChart、UserSettings、WhatsOnRoadPanel、HomeModule、ChatModule、CryptoMarketPanel、IndicatorGeneratorSelector、HistoricalDataCacheDialog、KlineOfflineCacheDialog、Select、Dialog 等。
+
+

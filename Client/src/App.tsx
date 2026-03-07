@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+﻿import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import TestPage from './components/TestPage';
 import Dashboard from './components/layout/Dashboard';
 import UIComponentsTest from './components/UIComponentsTest';
 import AuthPage from './components/auth/AuthPage';
 import KlineChartsDemo from './components/KlineChartsDemo';
+import MantineComponentsTest from './components/MantineComponentsTest';
 import { clearToken, disconnectWs, getToken, onAuthExpired } from './network/index.ts';
 import { clearAuthProfile, getAuthProfile } from './auth/profileStore.ts';
 import { NotificationProvider } from './components/ui/index.ts';
@@ -67,6 +68,7 @@ function App() {
           <Route path="/test" element={<TestPage />} />
           <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
           <Route path="/ui-test" element={<UIComponentsTest />} />
+          <Route path="/mantine-test" element={<MantineComponentsTest />} />
           <Route path="/klinecharts-demo" element={<KlineChartsDemo />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -76,4 +78,5 @@ function App() {
 }
 
 export default App;
+
 

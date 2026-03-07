@@ -1,22 +1,46 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import './UIComponentsTest.css';
 import { Button, Slider, Notification, StatusBadge, SearchInput, TextInput, SelectCard, Dialog, Avatar, AvatarGroup, PeopleList, Select, SelectItem, useNotification } from './ui/index.ts';
+import { FEATURED_UI_DEMO_SECTIONS, buildUiTestPath, getUiDemoSectionDomId } from './uiDemoSections';
 
 const UIComponentsTest: React.FC = () => {
   const navigate = useNavigate();
-  const [inputValue, setInputValue] = useState('');
-  const [textareaValue, setTextareaValue] = useState('');
-  const [checkboxChecked, setCheckboxChecked] = useState(false);
-  const [radioValue, setRadioValue] = useState('option1');
-  const [switchChecked, setSwitchChecked] = useState(false);
-  const [selectValue, setSelectValue] = useState('');
+  const location = useLocation();
   const [snowSelectValue, setSnowSelectValue] = useState<string>('');
   const [snowSelectValue2, setSnowSelectValue2] = useState<string>('');
   const [progress, setProgress] = useState(45);
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertType, setAlertType] = useState<'default' | 'danger' | 'custom'>('default');
   const { success, error } = useNotification();
+  const currentSectionId = new URLSearchParams(location.search).get('section')?.trim() ?? '';
+
+  useEffect(() => {
+    if (!currentSectionId) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      document
+        .getElementById(getUiDemoSectionDomId(currentSectionId))
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [currentSectionId]);
+
+  const handleSectionClick = (sectionId: string) => {
+    if (currentSectionId === sectionId) {
+      document
+        .getElementById(getUiDemoSectionDomId(sectionId))
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    navigate(buildUiTestPath(sectionId));
+  };
 
   return (
     <div className="ui-test-page">
@@ -26,11 +50,43 @@ const UIComponentsTest: React.FC = () => {
             ← 返回登录页
           </button>
           <h1>UI 组件测试</h1>
-          <p className="subtitle">展示各种交互式 UI 组件</p>
+          <p className="subtitle">仅展示 SnowUI 风格组件</p>
         </div>
 
+        <section className="ui-test-overview">
+          <div className="ui-test-overview-card">
+            <div className="ui-test-overview-eyebrow">SnowUI</div>
+            <h2>仅保留 SnowUI 组件</h2>
+            <p className="ui-test-overview-text">
+              这个页面现在只保留 SnowUI 风格组件示范，所有明显不是 SnowUI 视觉语言的原生控件和资源展示区都已移除。
+            </p>
+            <p className="ui-test-overview-text">
+              下面只提供 SnowUI 组件分区导航，点击后会滚动到对应示范区。
+            </p>
+            <div className="ui-test-nav-group">
+              <div className="ui-test-nav-group-title">组件导航</div>
+              <div className="ui-test-nav-grid">
+                {FEATURED_UI_DEMO_SECTIONS.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={`ui-test-nav-button${currentSectionId === section.id ? ' is-active' : ''}`}
+                    onClick={() => {
+                      handleSectionClick(section.id);
+                    }}
+                    title={section.summary}
+                  >
+                    <span className="ui-test-nav-button-title">{section.navLabel}</span>
+                    <span className="ui-test-nav-button-summary">{section.summary}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* 按钮组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('buttons')}>
           <h2>🔘 按钮组件 (SnowUI Buttons)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的按钮组件，完全符合 Figma 设计稿规范</p>
           
@@ -172,7 +228,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* Slider 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('slider')}>
           <h2>🎚️ 滑块组件 (SnowUI Slider)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的滑块组件，完全符合 Figma 设计稿规范</p>
           
@@ -243,7 +299,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* Notification 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('notification')}>
           <h2>🔔 通知组件 (SnowUI Notification)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的通知组件，完全符合 Figma 设计稿规范</p>
           
@@ -326,7 +382,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* StatusBadge 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('status-badge')}>
           <h2>🏷️ 状态标签组件 (SnowUI StatusBadge)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的状态标签组件，完全符合 Figma 设计稿规范</p>
           
@@ -466,7 +522,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* SearchInput 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('search-input')}>
           <h2>🔍 搜索输入框组件 (SnowUI SearchInput)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的搜索输入框组件，完全符合 Figma 设计稿规范</p>
           
@@ -598,7 +654,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* TextInput 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('text-input')}>
           <h2>📝 文本输入框组件 (SnowUI TextInput)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的文本输入框组件，完全符合 Figma 设计稿规范</p>
           
@@ -735,7 +791,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* SelectCard 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('select-card')}>
           <h2>🎯 选择卡片组件 (SnowUI SelectCard)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的选择卡片组件，完全符合 Figma 设计稿规范</p>
           
@@ -921,328 +977,8 @@ const UIComponentsTest: React.FC = () => {
           </div>
         </section>
 
-        {/* 输入框组件 */}
-        <section className="component-section">
-          <h2>📝 输入框组件 (Inputs)</h2>
-          <div className="input-group">
-            <div className="input-row">
-              <label>文本输入框</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="请输入文本"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-              />
-            </div>
-            <div className="input-row">
-              <label>密码输入框</label>
-              <input
-                type="password"
-                className="input"
-                placeholder="请输入密码"
-              />
-            </div>
-            <div className="input-row">
-              <label>搜索框</label>
-              <div className="input-with-icon">
-                <span className="input-icon">🔍</span>
-                <input
-                  type="search"
-                  className="input"
-                  placeholder="搜索..."
-                />
-              </div>
-            </div>
-            <div className="input-row">
-              <label>禁用状态</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="禁用输入框"
-                disabled
-              />
-            </div>
-            <div className="input-row">
-              <label>错误状态</label>
-              <input
-                type="text"
-                className="input input-error"
-                placeholder="错误输入框"
-                value="错误内容"
-              />
-              <span className="error-message">请输入正确的格式</span>
-            </div>
-            <div className="input-row">
-              <label>成功状态</label>
-              <input
-                type="text"
-                className="input input-success"
-                placeholder="成功输入框"
-                value="验证通过"
-              />
-            </div>
-            <div className="input-row">
-              <label>文本域</label>
-              <textarea
-                className="textarea"
-                placeholder="请输入多行文本..."
-                rows={4}
-                value={textareaValue}
-                onChange={(e) => setTextareaValue(e.target.value)}
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* 选择组件 */}
-        <section className="component-section">
-          <h2>☑️ 选择组件 (Selectors)</h2>
-          <div className="selector-group">
-            <div className="selector-row">
-              <h3>复选框</h3>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={checkboxChecked}
-                  onChange={(e) => setCheckboxChecked(e.target.checked)}
-                />
-                <span>同意用户协议</span>
-              </label>
-              <label className="checkbox-label">
-                <input type="checkbox" className="checkbox" defaultChecked />
-                <span>接收邮件通知</span>
-              </label>
-              <label className="checkbox-label">
-                <input type="checkbox" className="checkbox" disabled />
-                <span>禁用选项</span>
-              </label>
-            </div>
-            <div className="selector-row">
-              <h3>单选框</h3>
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="radio-group"
-                  className="radio"
-                  value="option1"
-                  checked={radioValue === 'option1'}
-                  onChange={(e) => setRadioValue(e.target.value)}
-                />
-                <span>选项 1</span>
-              </label>
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="radio-group"
-                  className="radio"
-                  value="option2"
-                  checked={radioValue === 'option2'}
-                  onChange={(e) => setRadioValue(e.target.value)}
-                />
-                <span>选项 2</span>
-              </label>
-              <label className="radio-label">
-                <input
-                  type="radio"
-                  name="radio-group"
-                  className="radio"
-                  value="option3"
-                  checked={radioValue === 'option3'}
-                  onChange={(e) => setRadioValue(e.target.value)}
-                />
-                <span>选项 3</span>
-              </label>
-            </div>
-            <div className="selector-row">
-              <h3>开关</h3>
-              <label className="switch-label">
-                <input
-                  type="checkbox"
-                  className="switch"
-                  checked={switchChecked}
-                  onChange={(e) => setSwitchChecked(e.target.checked)}
-                />
-                <span className="switch-slider"></span>
-                <span className="switch-text">启用通知</span>
-              </label>
-              <label className="switch-label">
-                <input type="checkbox" className="switch" defaultChecked />
-                <span className="switch-slider"></span>
-                <span className="switch-text">已启用</span>
-              </label>
-              <label className="switch-label">
-                <input type="checkbox" className="switch" disabled />
-                <span className="switch-slider"></span>
-                <span className="switch-text">禁用状态</span>
-              </label>
-            </div>
-            <div className="selector-row">
-              <h3>下拉选择框</h3>
-              <select
-                className="select"
-                value={selectValue}
-                onChange={(e) => setSelectValue(e.target.value)}
-              >
-                <option value="">请选择...</option>
-                <option value="option1">选项 1</option>
-                <option value="option2">选项 2</option>
-                <option value="option3">选项 3</option>
-                <option value="option4">选项 4</option>
-              </select>
-              <select className="select" disabled>
-                <option>禁用选择框</option>
-              </select>
-            </div>
-          </div>
-        </section>
-
-        {/* 进度条组件 */}
-        <section className="component-section">
-          <h2>📊 进度条组件 (Progress)</h2>
-          <div className="progress-group">
-            <div className="progress-item">
-              <label>进度条 ({progress}%)</label>
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${progress}%` }}></div>
-              </div>
-              <div className="progress-controls">
-                <button className="btn btn-sm" onClick={() => setProgress(Math.max(0, progress - 10))}>-10%</button>
-                <button className="btn btn-sm" onClick={() => setProgress(Math.min(100, progress + 10))}>+10%</button>
-              </div>
-            </div>
-            <div className="progress-item">
-              <label>成功进度条</label>
-              <div className="progress-bar progress-success">
-                <div className="progress-fill" style={{ width: '75%' }}></div>
-              </div>
-            </div>
-            <div className="progress-item">
-              <label>警告进度条</label>
-              <div className="progress-bar progress-warning">
-                <div className="progress-fill" style={{ width: '50%' }}></div>
-              </div>
-            </div>
-            <div className="progress-item">
-              <label>错误进度条</label>
-              <div className="progress-bar progress-error">
-                <div className="progress-fill" style={{ width: '25%' }}></div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* 标签和徽章 */}
-        <section className="component-section">
-          <h2>🏷️ 标签和徽章 (Tags & Badges)</h2>
-          <div className="tag-group">
-            <span className="tag">默认标签</span>
-            <span className="tag tag-primary">主要标签</span>
-            <span className="tag tag-success">成功标签</span>
-            <span className="tag tag-warning">警告标签</span>
-            <span className="tag tag-danger">危险标签</span>
-            <span className="tag tag-info">信息标签</span>
-            <span className="badge">5</span>
-            <span className="badge badge-primary">12</span>
-            <span className="badge badge-success">99+</span>
-            <span className="badge badge-warning">新</span>
-          </div>
-        </section>
-
-        {/* 卡片组件 */}
-        <section className="component-section">
-          <h2>🃏 卡片组件 (Cards)</h2>
-          <div className="card-group">
-            <div className="card">
-              <div className="card-header">
-                <h3>卡片标题</h3>
-              </div>
-              <div className="card-body">
-                <p>这是卡片的内容区域。可以放置任何内容，包括文本、图片、按钮等。</p>
-              </div>
-              <div className="card-footer">
-                <button className="btn btn-sm btn-primary">操作</button>
-                <button className="btn btn-sm btn-text">取消</button>
-              </div>
-            </div>
-            <div className="card card-hover">
-              <div className="card-header">
-                <h3>可悬停卡片</h3>
-              </div>
-              <div className="card-body">
-                <p>鼠标悬停时会有阴影效果。</p>
-              </div>
-            </div>
-            <div className="card card-bordered">
-              <div className="card-header">
-                <h3>带边框卡片</h3>
-              </div>
-              <div className="card-body">
-                <p>带有明显边框的卡片样式。</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* 滚动条组件 */}
-        <section className="component-section">
-          <h2>📜 滚动条组件 (Scrollbars)</h2>
-          <div className="scrollbar-group">
-            <div className="scrollbar-demo">
-              <h3>默认滚动条</h3>
-              <div className="scroll-container scroll-default">
-                <div className="scroll-content">
-                  {Array.from({ length: 20 }, (_, i) => (
-                    <div key={i} className="scroll-item">项目 {i + 1}</div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="scrollbar-demo">
-              <h3>自定义样式滚动条</h3>
-              <div className="scroll-container scroll-custom">
-                <div className="scroll-content">
-                  {Array.from({ length: 20 }, (_, i) => (
-                    <div key={i} className="scroll-item">项目 {i + 1}</div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="scrollbar-demo">
-              <h3>隐藏滚动条（内容可滚动）</h3>
-              <div className="scroll-container scroll-hidden">
-                <div className="scroll-content">
-                  {Array.from({ length: 20 }, (_, i) => (
-                    <div key={i} className="scroll-item">项目 {i + 1}</div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* 提示框 */}
-        <section className="component-section">
-          <h2>💬 提示框组件 (Alerts)</h2>
-          <div className="alert-group">
-            <div className="alert alert-info">
-              <strong>信息提示：</strong> 这是一条信息提示内容。
-            </div>
-            <div className="alert alert-success">
-              <strong>成功提示：</strong> 操作已成功完成！
-            </div>
-            <div className="alert alert-warning">
-              <strong>警告提示：</strong> 请注意检查输入内容。
-            </div>
-            <div className="alert alert-danger">
-              <strong>错误提示：</strong> 操作失败，请重试。
-            </div>
-          </div>
-        </section>
-
         {/* Avatar 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('avatar')}>
           <h2>👤 头像组件 (SnowUI Avatar)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的头像组件，完全符合 Figma 设计稿规范</p>
           
@@ -1386,7 +1122,7 @@ const UIComponentsTest: React.FC = () => {
 
         {/* 弹窗组件 */}
         {/* Dialog 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('dialog')}>
           <h2>🔔 弹窗组件 (SnowUI Dialog)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的弹窗组件，完全符合 Figma 设计稿规范</p>
           <div className="dialog-group">
@@ -1430,7 +1166,7 @@ const UIComponentsTest: React.FC = () => {
         </section>
 
         {/* Select 组件 - SnowUI Design System */}
-        <section className="component-section">
+        <section className="component-section" id={getUiDemoSectionDomId('select')}>
           <h2>📋 下拉选择框组件 (SnowUI Select)</h2>
           <p className="section-desc">基于 SnowUI 设计系统的下拉选择框组件，完全符合 Figma 设计稿规范</p>
           
