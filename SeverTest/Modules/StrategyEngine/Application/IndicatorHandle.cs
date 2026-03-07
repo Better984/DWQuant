@@ -104,9 +104,9 @@ namespace ServerTest.Modules.StrategyEngine.Application
                     endTimestamp,
                     requiredBars);
 
-                // 输出周期 和最新的5根K线
-                logger.LogInformation($"指标计算 ：[{Key.Exchange}] {Key.Symbol} {Key.Timeframe} 最新的5根K线: \n" +
-                    $"{string.Join("\n", candles.TakeLast(5).Select(c => $"time={MarketDataEngine.FormatTimestamp(c.timestamp ?? 0)}, close={c.close}"))}\n");
+                // 回测链路逐 K 输出量过大，默认关闭“最新5根K线”信息日志，必要时可临时打开排查。
+                // logger.LogInformation($"指标计算 ：[{Key.Exchange}] {Key.Symbol} {Key.Timeframe} 最新的5根K线: \n" +
+                //     $"{string.Join("\n", candles.TakeLast(5).Select(c => $"time={MarketDataEngine.FormatTimestamp(c.timestamp ?? 0)}, close={c.close}"))}\n");
                 if (candles.Count == 0)
                 {
                     return false;

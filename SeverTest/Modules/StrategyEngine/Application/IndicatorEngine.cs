@@ -227,14 +227,15 @@ namespace ServerTest.Modules.StrategyEngine.Application
 
             if (log)
             {
-                _logger.LogInformation(
-                    "指标任务完成: {Exchange} {Symbol} {Timeframe} time={Time} 成功={Success}/{Total}",
-                    normalizedTask.Exchange,
-                    normalizedTask.Symbol,
-                    normalizedTask.Timeframe,
-                    FormatTimestamp(normalizedTask.CandleTimestamp),
-                    successCount,
-                    task.Requests.Count);
+                // 回测链路逐 K 输出量过大，默认关闭“指标任务完成”信息日志，避免刷屏影响排查。
+                // _logger.LogInformation(
+                //     "指标任务完成: {Exchange} {Symbol} {Timeframe} time={Time} 成功={Success}/{Total}",
+                //     normalizedTask.Exchange,
+                //     normalizedTask.Symbol,
+                //     normalizedTask.Timeframe,
+                //     FormatTimestamp(normalizedTask.CandleTimestamp),
+                //     successCount,
+                //     task.Requests.Count);
             }
 
             return (successCount, task.Requests.Count);

@@ -1087,6 +1087,27 @@ const buildPreviewTradeFocusRange = (
   };
 };
 
+const toIndicatorTimeframeCode = (timeframeSec: number) => {
+  const map = new Map<number, string>([
+    [60, 'm1'],
+    [180, 'm3'],
+    [300, 'm5'],
+    [900, 'm15'],
+    [1800, 'm30'],
+    [3600, 'h1'],
+    [7200, 'h2'],
+    [14400, 'h4'],
+    [21600, 'h6'],
+    [28800, 'h8'],
+    [43200, 'h12'],
+    [86400, 'd1'],
+    [259200, 'd3'],
+    [604800, 'w1'],
+    [2592000, 'mo1'],
+  ]);
+  return map.get(timeframeSec);
+};
+
 const estimateTradeSpanBarsByTimeframe = (startTime: number, endTime: number, timeframeSec: number) => {
   const rangeMs = Math.max(1_000, Math.abs(endTime - startTime));
   const intervalMs = Math.max(1_000, Math.trunc(timeframeSec) * 1_000);
@@ -6179,6 +6200,7 @@ const StrategyWorkbench: React.FC<StrategyWorkbenchProps> = (props) => {
                 <div className="strategy-workbench-card strategy-workbench-card--tuning">
                   <StrategyTuningPanel
                     talibReady={talibReady}
+                    analysisTimeframe={toIndicatorTimeframeCode(selectedTimeframeSec)}
                     bars={backtestBars}
                     selectedIndicators={selectedIndicators}
                     indicatorOutputGroups={indicatorOutputGroups}

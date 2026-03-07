@@ -1,0 +1,587 @@
+.strategy-tuning-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  height: 100%;
+  padding: 18px;
+  box-sizing: border-box;
+  overflow: auto;
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.1), transparent 32%),
+    radial-gradient(circle at top right, rgba(16, 185, 129, 0.1), transparent 28%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.98) 100%);
+}
+
+.strategy-tuning-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.strategy-tuning-panel-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.strategy-tuning-panel-subtitle {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: #64748b;
+}
+
+.strategy-tuning-metric-grid,
+.strategy-tuning-suggestion-grid,
+.strategy-tuning-robust-grid,
+.strategy-tuning-rule-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.strategy-tuning-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: min(52vw, 760px);
+}
+
+.strategy-tuning-metric-card,
+.strategy-tuning-suggestion-card,
+.strategy-tuning-card,
+.strategy-tuning-robust-card,
+.strategy-tuning-rule-card,
+.strategy-tuning-highlight-card,
+.strategy-tuning-param-card,
+.strategy-tuning-insight-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+}
+
+.strategy-tuning-metric-card {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-tuning-metric-card span,
+.strategy-tuning-robust-card span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.strategy-tuning-metric-card strong,
+.strategy-tuning-robust-card strong {
+  font-size: 22px;
+  color: #0f172a;
+}
+
+.strategy-tuning-suggestion-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.strategy-tuning-suggestion-card {
+  padding: 14px 16px;
+}
+
+.strategy-tuning-suggestion-card.is-positive {
+  border-color: rgba(14, 165, 233, 0.26);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.96) 0%, rgba(255, 255, 255, 0.96) 100%);
+}
+
+.strategy-tuning-suggestion-card.is-warning {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96) 0%, rgba(255, 255, 255, 0.96) 100%);
+}
+
+.strategy-tuning-suggestion-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.strategy-tuning-suggestion-head span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #0f766e;
+}
+
+.strategy-tuning-suggestion-head strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.strategy-tuning-suggestion-body,
+.strategy-tuning-card-description,
+.strategy-tuning-rule-body,
+.strategy-tuning-insight-summary,
+.strategy-tuning-robust-copy p,
+.strategy-tuning-step span {
+  font-size: 12px;
+  line-height: 19px;
+  color: #475569;
+}
+
+.strategy-tuning-tablist {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.strategy-tuning-tab,
+.strategy-tuning-chip,
+.strategy-tuning-inline-button,
+.strategy-tuning-primary-button,
+.strategy-tuning-secondary-button {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+
+.strategy-tuning-tab,
+.strategy-tuning-chip,
+.strategy-tuning-inline-button,
+.strategy-tuning-secondary-button {
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+}
+
+.strategy-tuning-tab {
+  padding: 10px 16px;
+}
+
+.strategy-tuning-tab.is-active,
+.strategy-tuning-chip.is-active,
+.strategy-tuning-primary-button {
+  background: linear-gradient(135deg, #0f766e 0%, #0ea5e9 100%);
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.strategy-tuning-primary-button,
+.strategy-tuning-secondary-button {
+  padding: 10px 18px;
+}
+
+.strategy-tuning-primary-button:disabled,
+.strategy-tuning-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.strategy-tuning-content-grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.strategy-tuning-content-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.strategy-tuning-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.strategy-tuning-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.strategy-tuning-card-title,
+.strategy-tuning-section-title,
+.strategy-tuning-highlight-title,
+.strategy-tuning-insight-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.strategy-tuning-form-grid,
+.strategy-tuning-param-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.strategy-tuning-form-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.strategy-tuning-param-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.strategy-tuning-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-tuning-field span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.strategy-tuning-field input,
+.strategy-tuning-field select {
+  min-height: 38px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  padding: 0 12px;
+  font-size: 13px;
+  background: #ffffff;
+  color: #0f172a;
+  outline: none;
+}
+
+.strategy-tuning-field input:focus,
+.strategy-tuning-field select:focus {
+  border-color: rgba(14, 165, 233, 0.4);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+.strategy-tuning-section,
+.strategy-tuning-warning-list,
+.strategy-tuning-result-list,
+.strategy-tuning-analysis-indicator-list,
+.strategy-tuning-insight-list,
+.strategy-tuning-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.strategy-tuning-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.strategy-tuning-chip {
+  padding: 9px 14px;
+}
+
+.strategy-tuning-param-card,
+.strategy-tuning-highlight-card,
+.strategy-tuning-rule-card,
+.strategy-tuning-insight-card {
+  padding: 14px;
+}
+
+.strategy-tuning-param-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.strategy-tuning-hint-row,
+.strategy-tuning-progress-meta,
+.strategy-tuning-highlight-meta,
+.strategy-tuning-result-meta,
+.strategy-tuning-insight-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.strategy-tuning-action-row {
+  display: flex;
+  gap: 10px;
+}
+
+.strategy-tuning-error,
+.strategy-tuning-warning-item {
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.strategy-tuning-error {
+  background: rgba(254, 242, 242, 0.98);
+  color: #b91c1c;
+  border: 1px solid rgba(220, 38, 38, 0.16);
+}
+
+.strategy-tuning-warning-item {
+  background: rgba(255, 251, 235, 0.96);
+  color: #92400e;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+}
+
+.strategy-tuning-progress-card {
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(241, 245, 249, 0.86);
+}
+
+.strategy-tuning-progress-head,
+.strategy-tuning-highlight-main,
+.strategy-tuning-result-body,
+.strategy-tuning-insight-head,
+.strategy-tuning-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.strategy-tuning-progress-head {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.strategy-tuning-progress-bar {
+  margin-top: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+  overflow: hidden;
+}
+
+.strategy-tuning-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0f766e 0%, #0ea5e9 100%);
+}
+
+.strategy-tuning-highlight-card {
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.94) 0%, rgba(255, 255, 255, 0.96) 100%);
+  border-color: rgba(16, 185, 129, 0.22);
+}
+
+.strategy-tuning-highlight-main strong {
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.strategy-tuning-result-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.strategy-tuning-analysis-indicator-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.strategy-tuning-analysis-indicator-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strategy-tuning-analysis-indicator-main strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.strategy-tuning-analysis-indicator-main span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.strategy-tuning-result-rank {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.strategy-tuning-result-title,
+.strategy-tuning-rule-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.strategy-tuning-rule-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.strategy-tuning-rule-card.is-positive {
+  background: rgba(239, 246, 255, 0.96);
+  border-color: rgba(14, 165, 233, 0.22);
+}
+
+.strategy-tuning-rule-card.is-risk {
+  background: rgba(255, 247, 237, 0.96);
+  border-color: rgba(249, 115, 22, 0.22);
+}
+
+.strategy-tuning-rule-card.is-neutral {
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.strategy-tuning-empty {
+  border-radius: 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  padding: 18px;
+  font-size: 12px;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.strategy-tuning-insight-head {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.strategy-tuning-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.strategy-tuning-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.strategy-tuning-table th,
+.strategy-tuning-table td {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.strategy-tuning-table thead th {
+  color: #475569;
+  font-weight: 800;
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.strategy-tuning-robust-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.strategy-tuning-robust-card {
+  padding: 14px 16px;
+}
+
+.strategy-tuning-robust-card.is-high {
+  background: rgba(254, 242, 242, 0.96);
+}
+
+.strategy-tuning-robust-card.is-medium {
+  background: rgba(255, 251, 235, 0.96);
+}
+
+.strategy-tuning-robust-card.is-low {
+  background: rgba(240, 253, 250, 0.96);
+}
+
+.strategy-tuning-steps {
+  gap: 14px;
+}
+
+.strategy-tuning-step strong {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.strategy-tuning-inline-button {
+  padding: 8px 14px;
+}
+
+.strategy-tuning-inline-button:hover,
+.strategy-tuning-secondary-button:hover,
+.strategy-tuning-tab:hover,
+.strategy-tuning-chip:hover {
+  border-color: rgba(14, 165, 233, 0.32);
+  transform: translateY(-1px);
+}
+
+.strategy-tuning-primary-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(14, 165, 233, 0.18);
+}
+
+.strategy-tuning-panel .is-positive {
+  color: #0f766e;
+}
+
+.strategy-tuning-panel .is-negative,
+.strategy-tuning-panel .is-warning {
+  color: #b45309;
+}
+
+@media (max-width: 1280px) {
+  .strategy-tuning-panel-header,
+  .strategy-tuning-content-grid {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .strategy-tuning-metric-grid,
+  .strategy-tuning-form-grid,
+  .strategy-tuning-param-grid,
+  .strategy-tuning-robust-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .strategy-tuning-panel {
+    padding: 12px;
+  }
+
+  .strategy-tuning-metric-grid,
+  .strategy-tuning-form-grid,
+  .strategy-tuning-param-grid,
+  .strategy-tuning-robust-grid,
+  .strategy-tuning-rule-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .strategy-tuning-result-row,
+  .strategy-tuning-insight-head {
+    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -26,11 +26,26 @@ interface IndicatorCardData {
   sample: string;
   description: string;
   note: string;
+  defaultLayout?: IndicatorCardLayout;
   chartOption?: EChartsOption;
   customView?: IndicatorCardCustomView;
   chartWrapClassName?: string;
   controls?: IndicatorCardControl;
 }
+
+interface IndicatorCardLayout {
+  cols: number;
+  rows: number;
+}
+
+interface IndicatorGridMetrics {
+  columnCount: number;
+  columnWidth: number;
+  rowHeight: number;
+  gap: number;
+}
+
+type IndicatorCardLayoutMap = Record<string, IndicatorCardLayout>;
 
 type EtfAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP';
 type FootprintAsset = 'BTC' | 'ETH';
@@ -536,6 +551,22 @@ const LONG_SHORT_ASSET_OPTIONS: Array<{
 const LONG_SHORT_VISIBLE_POINT_LIMIT = 192;
 const FOOTPRINT_VISIBLE_CANDLE_LIMIT = 96;
 const DEFAULT_COIN_UNLOCK_SYMBOL = 'HYPE';
+const INDICATOR_LAYOUT_STORAGE_KEY = 'dwquant.indicator-module.layout.v1';
+const INDICATOR_GRID_MIN_COLUMN_WIDTH = 320;
+const INDICATOR_GRID_MAX_COLUMNS = 4;
+const INDICATOR_GRID_GAP = 16;
+const INDICATOR_GRID_BASE_ROW_HEIGHT = 480;
+const INDICATOR_CARD_MAX_ROW_SPAN = 3;
+const INDICATOR_GRID_FALLBACK_METRICS: IndicatorGridMetrics = {
+  columnCount: 1,
+  columnWidth: INDICATOR_GRID_MIN_COLUMN_WIDTH,
+  rowHeight: INDICATOR_GRID_BASE_ROW_HEIGHT,
+  gap: INDICATOR_GRID_GAP,
+};
+const INDICATOR_CARD_FALLBACK_LAYOUT: IndicatorCardLayout = {
+  cols: 1,
+  rows: 1,
+};
 
 const GRAYSCALE_HOLDINGS_FALLBACK_ITEMS: GrayscaleHoldingItem[] = [
   {
@@ -1023,6 +1054,87 @@ const formatPriceAxisValue = (value: number): string => {
   return value.toFixed(2);
 };
 
+const normalizeIndicatorCardLayout = (
+  input: Partial<IndicatorCardLayout> | null | undefined,
+): IndicatorCardLayout | null => {
+  if (!input) {
+    return null;
+  }
+
+  const cols = Number(input.cols);
+  const rows = Number(input.rows);
+  if (!Number.isFinite(cols) || !Number.isFinite(rows)) {
+    return null;
+  }
+
+  return {
+    cols: clampNumber(Math.round(cols), 1, INDICATOR_GRID_MAX_COLUMNS),
+    rows: clampNumber(Math.round(rows), 1, INDICATOR_CARD_MAX_ROW_SPAN),
+  };
+};
+
+const readStoredIndicatorCardLayouts = (): IndicatorCardLayoutMap => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(INDICATOR_LAYOUT_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return {};
+    }
+
+    const nextLayouts: IndicatorCardLayoutMap = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([indicatorId, value]) => {
+      if (!value || typeof value !== 'object') {
+        return;
+      }
+
+      const normalized = normalizeIndicatorCardLayout(value as Partial<IndicatorCardLayout>);
+      if (normalized) {
+        nextLayouts[indicatorId] = normalized;
+      }
+    });
+
+    return nextLayouts;
+  } catch {
+    return {};
+  }
+};
+
+const buildIndicatorGridMetrics = (containerWidth: number): IndicatorGridMetrics => {
+  const safeWidth = Math.max(containerWidth, 1);
+  const rawColumnCount = Math.floor((safeWidth + INDICATOR_GRID_GAP) / (INDICATOR_GRID_MIN_COLUMN_WIDTH + INDICATOR_GRID_GAP));
+  const columnCount = clampNumber(rawColumnCount, 1, INDICATOR_GRID_MAX_COLUMNS);
+  const columnWidth = Math.max(0, (safeWidth - INDICATOR_GRID_GAP * (columnCount - 1)) / columnCount);
+
+  return {
+    columnCount,
+    columnWidth,
+    rowHeight: INDICATOR_GRID_BASE_ROW_HEIGHT,
+    gap: INDICATOR_GRID_GAP,
+  };
+};
+
+const resolveIndicatorCardLayout = (
+  indicator: IndicatorCardData,
+  storedLayout: IndicatorCardLayout | undefined,
+  availableColumnCount: number,
+): IndicatorCardLayout => {
+  const preferred = storedLayout ?? indicator.defaultLayout ?? INDICATOR_CARD_FALLBACK_LAYOUT;
+  const normalized = normalizeIndicatorCardLayout(preferred) ?? INDICATOR_CARD_FALLBACK_LAYOUT;
+
+  return {
+    cols: clampNumber(normalized.cols, 1, Math.max(1, availableColumnCount)),
+    rows: clampNumber(normalized.rows, 1, INDICATOR_CARD_MAX_ROW_SPAN),
+  };
+};
+
 const buildIndicators = (
   palette: ChartPalette,
   fearGreedRuntime?: FearGreedRuntime | null,
@@ -1478,6 +1590,7 @@ const buildIndicators = (
       id: 'fear-greed',
       name: '贪婪恐慌指数 (Fear & Greed Index)',
       category: '情绪',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: fearGreedSample,
       description:
         '0–100 的情绪刻度，综合波动率、成交量、社交媒体情绪等维度，数值越高代表市场越贪婪。',
@@ -1555,6 +1668,7 @@ const buildIndicators = (
       id: 'etf-flow',
       name: `${etfAssetMeta.displayName}现货 ETF 净流入`,
       category: '资金流向',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: etfSample,
       description:
         `统计主流 ${etfAssetMeta.label} 现货 ETF 的申赎资金，正值表示资金净流入，负值表示资金净流出。`,
@@ -1597,6 +1711,7 @@ const buildIndicators = (
       id: 'grayscale-holdings',
       name: '灰度持仓',
       category: '机构持仓',
+      defaultLayout: { cols: 1, rows: 2 },
       sample: grayscaleSample,
       description:
         '按资产展示 Grayscale Investments 当前持仓、市值、溢价率与近 1 / 7 / 30 天持仓变化，便于观察其产品篮子调整。',
@@ -1619,6 +1734,7 @@ const buildIndicators = (
       id: 'coin-unlock',
       name: '代币解锁',
       category: '代币供给',
+      defaultLayout: { cols: 2, rows: 2 },
       sample: coinUnlockSample,
       description:
         '整合 CoinGlass 代币解锁列表与单币详情，便于跟踪大额解锁窗口、流通比例和锁仓分配结构。',
@@ -1638,6 +1754,7 @@ const buildIndicators = (
       id: 'exchange-assets',
       name: '交易所资产',
       category: '储备观察',
+      defaultLayout: { cols: 2, rows: 2 },
       sample: exchangeAssetSample,
       description:
         '整合交易所资产明细、币种余额排行与余额趋势，用于观察交易所储备结构、集中度和阶段性变化。',
@@ -1653,6 +1770,7 @@ const buildIndicators = (
       id: 'hyperliquid',
       name: 'Hyperliquid',
       category: '链上衍生品',
+      defaultLayout: { cols: 2, rows: 2 },
       sample: hyperliquidSample,
       description:
         '整合 Hyperliquid 鲸鱼提醒、鲸鱼持仓、市场持仓排行、指定地址持仓与钱包多空/盈亏分布，用于观察资金层级与仓位结构。',
@@ -1668,6 +1786,7 @@ const buildIndicators = (
       id: 'liquidation-heatmap',
       name: '交易对爆仓热力图（模型1）',
       category: '风险事件',
+      defaultLayout: { cols: 2, rows: 2 },
       sample: heatmapSample,
       description:
         'X 轴为时间、Y 轴为价格，网格方块亮度（黄色透明度）表示该时间与价格附近的清算强度。',
@@ -1915,6 +2034,7 @@ const buildIndicators = (
       id: 'futures-footprint',
       name: `${footprintAssetMeta.displayName}合约足迹图`,
       category: '合约杠杆',
+      defaultLayout: { cols: 2, rows: 2 },
       sample: footprintSample,
       description:
         `统计 ${footprintAssetMeta.label} 在 Binance 合约市场最近若干根 15 分钟 K 线内的主动买卖分布，并拆解最新一根 K 线的价格桶明细。`,
@@ -2096,6 +2216,7 @@ const buildIndicators = (
       id: 'long-short',
       name: `${longShortAssetMeta.displayName}大户账户数多空比`,
       category: '合约杠杆',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: longShortSample,
       description:
         `统计 ${longShortAssetMeta.label} 在 Binance 合约市场的大户账户多单占比、空单占比与多空比，目前固定展示 15 分钟级别。`,
@@ -2179,6 +2300,7 @@ const buildIndicators = (
       id: 'funding-rate',
       name: '永续合约资金费率 (Funding Rate)',
       category: '合约杠杆',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: '样例：+0.032% / 8h',
       description:
         '反映永续合约价格相对现货的溢价或贴水程度，正值代表多头付费给空头，负值则相反。',
@@ -2214,6 +2336,7 @@ const buildIndicators = (
       id: 'open-interest',
       name: '未平仓合约总量 (Open Interest)',
       category: '合约杠杆',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: '样例：15.3B USD',
       description:
         '统计所有尚未平仓的合约名义价值，用来观察杠杆资金整体规模的变化。',
@@ -2249,6 +2372,7 @@ const buildIndicators = (
       id: 'liquidations',
       name: '24 小时强平金额 (Liquidations)',
       category: '风险事件',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: '样例：多头强平 3.1B / 空头 0.8B',
       description:
         '展示最近 24 小时内多头与空头被动平仓的金额，反映市场是否刚经历过一轮清算。',
@@ -2293,6 +2417,7 @@ const buildIndicators = (
       id: 'stablecoin',
       name: '稳定币净流入与流通市值',
       category: '资金流向',
+      defaultLayout: { cols: 1, rows: 1 },
       sample: '样例：稳定币净流入 +650M USD / 流通市值 140B',
       description:
         '观察 USDT、USDC 等主流稳定币的发行与流通变化，衡量场内「干火药」的多少。',
@@ -3430,12 +3555,100 @@ const HyperliquidPanel: React.FC<{
 
 const IndicatorCard: React.FC<{
   indicator: IndicatorCardData;
+  layout: IndicatorCardLayout;
+  gridMetrics: IndicatorGridMetrics;
+  onLayoutChange?: (indicatorId: string, nextLayout: IndicatorCardLayout) => void;
   onSelectAsset?: (indicatorId: 'etf-flow' | 'futures-footprint' | 'long-short', asset: string) => void;
-}> = ({ indicator, onSelectAsset }) => {
+}> = ({ indicator, layout, gridMetrics, onLayoutChange, onSelectAsset }) => {
   const control = indicator.controls;
+  const [isResizing, setIsResizing] = useState(false);
+
+  const handleResizePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!onLayoutChange || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const maxCols = Math.max(1, gridMetrics.columnCount);
+    const columnUnit = gridMetrics.columnWidth + gridMetrics.gap;
+    const rowUnit = gridMetrics.rowHeight + gridMetrics.gap;
+    const startWidth = layout.cols * gridMetrics.columnWidth + Math.max(layout.cols - 1, 0) * gridMetrics.gap;
+    const startHeight = layout.rows * gridMetrics.rowHeight + Math.max(layout.rows - 1, 0) * gridMetrics.gap;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let pendingLayout = layout;
+    let frameId: number | null = null;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+
+    const flushLayout = () => {
+      frameId = null;
+      onLayoutChange(indicator.id, pendingLayout);
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.max(gridMetrics.columnWidth, startWidth + (moveEvent.clientX - startX));
+      const nextHeight = Math.max(gridMetrics.rowHeight, startHeight + (moveEvent.clientY - startY));
+      const nextCols = clampNumber(
+        Math.round((nextWidth + gridMetrics.gap) / columnUnit),
+        1,
+        maxCols,
+      );
+      const nextRows = clampNumber(
+        Math.round((nextHeight + gridMetrics.gap) / rowUnit),
+        1,
+        INDICATOR_CARD_MAX_ROW_SPAN,
+      );
+
+      if (pendingLayout.cols === nextCols && pendingLayout.rows === nextRows) {
+        return;
+      }
+
+      pendingLayout = {
+        cols: nextCols,
+        rows: nextRows,
+      };
+
+      if (frameId === null) {
+        // 拖拽时按帧提交，避免 pointermove 高频触发导致整页重排抖动。
+        frameId = window.requestAnimationFrame(flushLayout);
+      }
+    };
+
+    const cleanup = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+        frameId = null;
+      }
+
+      onLayoutChange(indicator.id, pendingLayout);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      setIsResizing(false);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('pointercancel', cleanup);
+    };
+
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'nwse-resize';
+    setIsResizing(true);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', cleanup);
+    window.addEventListener('pointercancel', cleanup);
+  };
 
   return (
-    <article id={`indicator-card-${indicator.id}`} className="indicator-module-card">
+    <article
+      id={`indicator-card-${indicator.id}`}
+      className={`indicator-module-card ${isResizing ? 'indicator-module-card--resizing' : ''}`}
+      style={{
+        gridColumn: `span ${layout.cols}`,
+        gridRow: `span ${layout.rows}`,
+      }}
+    >
       <header className="indicator-module-card-header">
         <div className="indicator-module-card-headline">
           <h2 className="indicator-module-card-title">{indicator.name}</h2>
@@ -3481,6 +3694,13 @@ const IndicatorCard: React.FC<{
           <IndicatorChart option={indicator.chartOption} />
         ) : null}
       </div>
+      <button
+        type="button"
+        className="indicator-module-card-resize-handle"
+        onPointerDown={handleResizePointerDown}
+        aria-label={`调整${indicator.name}卡片大小`}
+        title="拖动调整卡片宽高"
+      />
     </article>
   );
 };
@@ -4877,6 +5097,7 @@ type IndicatorModuleProps = {
 };
 
 const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onFocusHandled }) => {
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains('dark-theme'),
   );
@@ -4901,6 +5122,8 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
   const [hyperliquidWalletPositionDistributionRuntime, setHyperliquidWalletPositionDistributionRuntime] = useState<HyperliquidWalletDistributionRuntime | null>(null);
   const [hyperliquidWalletPnlDistributionRuntime, setHyperliquidWalletPnlDistributionRuntime] = useState<HyperliquidWalletDistributionRuntime | null>(null);
   const [liquidationHeatmapRuntime, setLiquidationHeatmapRuntime] = useState<LiquidationHeatmapRuntime | null>(null);
+  const [gridMetrics, setGridMetrics] = useState<IndicatorGridMetrics>(INDICATOR_GRID_FALLBACK_METRICS);
+  const [indicatorLayouts, setIndicatorLayouts] = useState<IndicatorCardLayoutMap>(() => readStoredIndicatorCardLayouts());
 
   useEffect(() => {
     const root = document.documentElement;
@@ -4916,6 +5139,44 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
       observer.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    const gridElement = gridRef.current;
+    if (!gridElement) {
+      return;
+    }
+
+    const updateGridMetrics = () => {
+      // 栅格列数随容器宽度自动变化，拖拽尺寸按当前列宽与行高吸附。
+      setGridMetrics(buildIndicatorGridMetrics(gridElement.clientWidth));
+    };
+
+    updateGridMetrics();
+    const observer = new ResizeObserver(updateGridMetrics);
+    observer.observe(gridElement);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const persistTimer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(INDICATOR_LAYOUT_STORAGE_KEY, JSON.stringify(indicatorLayouts));
+      } catch {
+        // 本地存储失败时不影响页面交互，直接忽略即可。
+      }
+    }, 120);
+
+    return () => {
+      window.clearTimeout(persistTimer);
+    };
+  }, [indicatorLayouts]);
 
   const palette = useMemo(() => createPalette(isDarkMode), [isDarkMode]);
   const activeEtfFlowRuntime = etfFlowRuntimeMap[selectedEtfAsset] ?? null;
@@ -4950,6 +5211,24 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
     if (normalized) {
       setSelectedCoinUnlockSymbol(normalized);
     }
+  };
+  const handleIndicatorLayoutChange = (indicatorId: string, nextLayout: IndicatorCardLayout) => {
+    const normalized = normalizeIndicatorCardLayout(nextLayout);
+    if (!normalized) {
+      return;
+    }
+
+    setIndicatorLayouts((previous) => {
+      const current = previous[indicatorId];
+      if (current?.cols === normalized.cols && current?.rows === normalized.rows) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [indicatorId]: normalized,
+      };
+    });
   };
   const indicators = useMemo(
     () => buildIndicators(
@@ -5291,14 +5570,33 @@ const IndicatorModule: React.FC<IndicatorModuleProps> = ({ focusIndicatorId, onF
       <div className="indicator-module-header">
         <h1 className="indicator-module-title">指标中心</h1>
       </div>
-      <div className="indicator-module-grid">
-        {indicators.map((indicator) => (
-          <IndicatorCard
-            key={indicator.id}
-            indicator={indicator}
-            onSelectAsset={handleIndicatorAssetChange}
-          />
-        ))}
+      <div
+        ref={gridRef}
+        className="indicator-module-grid"
+        style={{
+          ['--indicator-grid-columns' as string]: String(gridMetrics.columnCount),
+          ['--indicator-grid-row-height' as string]: `${gridMetrics.rowHeight}px`,
+          ['--indicator-grid-gap' as string]: `${gridMetrics.gap}px`,
+        }}
+      >
+        {indicators.map((indicator) => {
+          const layout = resolveIndicatorCardLayout(
+            indicator,
+            indicatorLayouts[indicator.id],
+            gridMetrics.columnCount,
+          );
+
+          return (
+            <IndicatorCard
+              key={indicator.id}
+              indicator={indicator}
+              layout={layout}
+              gridMetrics={gridMetrics}
+              onLayoutChange={handleIndicatorLayoutChange}
+              onSelectAsset={handleIndicatorAssetChange}
+            />
+          );
+        })}
       </div>
     </div>
   );
